@@ -25,7 +25,7 @@ AMOLED V1 and the Round build use the same PWM pinout:
 | --- | ---: | --- |
 | Receiver steering / servo in | 15 | Input |
 | Receiver throttle / throttle in | 16 | Input |
-| Steering servo / servo out | 17 | Output at 250 Hz |
+| Steering servo / servo out | 17 | Output at selectable 250/333 Hz |
 | Gain input or throttle passthrough | 18 | Selectable |
 
 GPIO 18 can be a receiver gain input or an ESC throttle output, but not both.
@@ -43,7 +43,7 @@ AMOLED V1 and Round CRSF share this routing:
 | --- | ---: | --- |
 | CRSF RX from receiver TX | 17 | Input |
 | CRSF TX to receiver RX | 18 | Output |
-| Steering servo / servo port | 15 | Output at 250 Hz |
+| Steering servo / servo port | 15 | Output at selectable 250/333 Hz |
 | ESC throttle / throttle port | 16 | Output at 50 Hz |
 
 Both `waveshare_128_crsf` and `waveshare_amoled_164_crsf` enable the complete
@@ -91,3 +91,5 @@ does not need to add a separate 5 V regulator. ESP32-S3 GPIOs remain 3.3 V logic
 and are not 5 V tolerant; every external GPIO is a 3.3 V signal only.
 
 Fast drift servos can draw large transient current and can oscillate from their own internal settings. Verify servo stability directly from the receiver before diagnosing the gyro.
+
+OpenDrift defaults to 250 Hz for broad digital-servo compatibility. The optional 333 Hz control and servo rate is only for servos whose manufacturer explicitly supports 333 Hz. Restart the board after changing the rate.

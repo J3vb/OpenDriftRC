@@ -80,6 +80,9 @@ public:
     int getServoQuiet();
     void setServoQuiet(int value);
 
+    uint16_t getControlLoopHz();
+    void setControlLoopHz(uint16_t value);
+
     // WiFi
     bool getWifiEnabled();
     void setWifiEnabled(bool value);
@@ -167,6 +170,8 @@ private:
     int servoTravel = 100;
 
     int servoQuiet = 0;
+
+    uint16_t controlLoopHz = 250;
 
     bool wifiEnabled = true;
 

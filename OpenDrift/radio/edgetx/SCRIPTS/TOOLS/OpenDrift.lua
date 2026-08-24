@@ -27,7 +27,8 @@ local fields = {
   {21, "GPIO 5 Output",    0,   16,   1, 0, true, true},
   {22, "GPIO 6 Output",    0,   16,   1, 0, true, true},
   {23, "GPIO 7 Output",    0,   16,   1, 0, true, true},
-  {24, "GPIO 8 Output",    0,   16,   1, 0, true, true}
+  {24, "GPIO 8 Output",    0,   16,   1, 0, true, true},
+  {25, "Servo Rate*",      0,    1,   1, 0, true, false, true}
 }
 
 local selected = 1
@@ -129,6 +130,7 @@ local function valueText(field)
     if field[4] == 0 then return "RES" end
     return field.value == 0 and "OFF" or "CH" .. tostring(field.value)
   end
+  if field[9] then return field.value == 0 and "250 Hz" or "333 Hz" end
   if field[7] then return field.value == 0 and "OFF" or "ON" end
   local decimals = field[6]
   if decimals == 0 then return tostring(field.value) end
@@ -193,7 +195,7 @@ local function run(event)
   lcd.clear()
   lcd.drawText(1, 0, "OpenDrift CRSF", INVERS)
   lcd.drawText(127, 0, connected and "LINK" or "WAIT", RIGHT + INVERS)
-  lcd.drawText(1, 10, "CH3 OVERRIDES GAIN", 0)
+  lcd.drawText(1, 10, "CH3 GAIN | * REBOOT", 0)
 
   for row = 0, 3 do
     local index = scroll + row

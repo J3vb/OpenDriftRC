@@ -69,9 +69,8 @@ bool lastBlackboxEnabled = false;
 
 bool blackboxStartAttempted = false;
 
-static constexpr uint32_t CONTROL_LOOP_HZ = 250;
-static constexpr uint32_t CONTROL_LOOP_PERIOD_MS =
-    1000 / CONTROL_LOOP_HZ;
+static uint32_t controlLoopHz = 250;
+static uint32_t controlLoopPeriodMs = 4;
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
 static constexpr uint8_t STARTUP_RETRY_COUNT = 3;
@@ -104,7 +103,12 @@ TaskHandle_t crsfTaskHandle = nullptr;
 #endif
 
 #if defined(OPENDRIFT_INPUT_CRSF)
-#if defined(OPENDRIFT_AMOLED_V2)
+#if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+#define SERVO_OUTPUT_PIN 16
+#define CRSF_RX_PIN 17
+#define CRSF_TX_PIN 18
+#define CRSF_THROTTLE_OUTPUT_PIN 15
+#elif defined(OPENDRIFT_AMOLED_V2)
 // V2 connects the IMU and touch interrupt outputs to GPIO17/18. Keep the
 // receiver UART off those lines to prevent electrical contention.
 #define SERVO_OUTPUT_PIN 15
@@ -275,7 +279,11 @@ public:
         canvas.setTextSize(2);
         canvas.drawString(
             #if defined(OPENDRIFT_INPUT_CRSF)
+            #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+            "OpenDrift PERSONAL OOPS boot",
+            #else
             "OpenDrift CRSF verbose boot",
+            #endif
             #else
             "OpenDrift verbose boot",
             #endif
@@ -287,9 +295,13 @@ public:
         canvas.setTextColor(0x7BEF);
         canvas.drawString(
             #if defined(OPENDRIFT_INPUT_CRSF)
-            "control kernel 1.0.5 crsf  ttyOD0",
+            #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+            "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.5 pwm  ttyOD0",
+            "control kernel 1.0.6 crsf  ttyOD0",
+            #endif
+            #else
+            "control kernel 1.0.6 pwm  ttyOD0",
             #endif
             8,
             27
@@ -1047,7 +1059,7 @@ void controlTask(void* parameter)
 
     const TickType_t period =
         pdMS_TO_TICKS(
-            CONTROL_LOOP_PERIOD_MS
+            controlLoopPeriodMs
         );
 
     while(true)
@@ -1223,6 +1235,9 @@ void setup()
     bool settingsOk =
         settings.begin();
 
+    controlLoopHz = settings.getControlLoopHz();
+    controlLoopPeriodMs = 1000 / controlLoopHz;
+
     bootConsole.log(
         "nvs: mounted OpenDrift settings store",
         settingsOk ? "[ OK ]" : "[WARN]",
@@ -1349,7 +1364,7 @@ void setup()
 
     if(!steeringServo.begin(
         SERVO_OUTPUT_PIN,
-        CONTROL_LOOP_HZ
+        controlLoopHz
     ))
     {
         bootConsole.log(
@@ -1376,7 +1391,9 @@ void setup()
 
     bootConsole.log(
         #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+        "ledc: steering servo output attached on gpio16"
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "ledc: steering servo output attached on gpio15"
         #else
         "ledc: steering servo output attached on gpio15"
@@ -1750,13 +1767,17 @@ void setup()
             1
         );
 
-    Serial.println(
-        taskStarted == pdPASS
-        ?
-        "Controller: 250 Hz task online"
-        :
-        "Controller: task start failed"
-    );
+    if(taskStarted == pdPASS)
+    {
+        Serial.printf(
+            "Controller: %lu Hz task online\n",
+            (unsigned long)controlLoopHz
+        );
+    }
+    else
+    {
+        Serial.println("Controller: task start failed");
+    }
 }
 
 void loop()
@@ -2006,7 +2027,11 @@ void loop()
             gainRadio.hasSignal(),
             pin18ThrottleOutputMode,
             settings.getGyroTailSlideSpeed(),
-            gyro.getTailSlideBlend()
+            gyro.getTailSlideBlend(),
+            gyro.getHuntSuppression(),
+            gyro.getHuntFrequency(),
+            gyro.getTransitionAuthorityBlend(),
+            gyro.getThrottleLiftBlend()
         );
     }
 

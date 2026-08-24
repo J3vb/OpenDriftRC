@@ -59,7 +59,11 @@ public:
         bool gainSignal,
         bool throttleOutputMode,
         int tailSlideSpeed,
-        float tailSlideBlend
+        float tailSlideBlend,
+        float huntSuppression,
+        float huntFrequency,
+        float transitionAuthorityBlend,
+        float throttleLiftBlend
     );
 
     void clear();
@@ -137,6 +141,10 @@ private:
         uint32_t signalFlags;
         int32_t tailSlideSpeed;
         float tailSlideBlend;
+        float huntSuppression;
+        float huntFrequency;
+        float transitionAuthorityBlend;
+        float throttleLiftBlend;
     };
 
     static const size_t preferredBufferBytes =

@@ -4,7 +4,7 @@
 
 OpenDrift is an open source drift gyro for RC drift cars, built around the Waveshare ESP32-S3 Touch AMOLED 1.64 board. It reads steering, throttle, and optional gain channels from a receiver, mixes driver steering with gyro correction, outputs steering and optional throttle signals, and exposes tuning through both the onboard touch UI and a WiFi web configurator.
 
-OpenDrift v1.0 uses a dedicated 250 Hz control task, a single gyro filter, continuous yaw prediction, throttle-informed load-change prediction, and non-accumulating quiet-drift reference feedback. The goal is to make gyro setup less of a black box while keeping the active control path small enough to reason about.
+OpenDrift v1.0 uses a dedicated selectable-rate control task, a single gyro filter, continuous yaw prediction, throttle-informed load-change prediction, and non-accumulating quiet-drift reference feedback. The goal is to make gyro setup less of a black box while keeping the active control path small enough to reason about.
 
 See the current [Technical Tuning Reference](OpenDrift/docs/Tuning.md) for the setup order, symptom table, surface-profile workflow, and findings from real track testing. The public [tuning guide](https://opendriftrc.com/tuning/) provides the shorter trackside workflow.
 
@@ -16,7 +16,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 
 - ESP32-S3 firmware using PlatformIO and Arduino.
 - 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages.
-- Dedicated 250 Hz IMU/control/steering task isolated from UI, WiFi, and logging work.
+- Dedicated 250 Hz or 333 Hz IMU/control/steering task isolated from UI, WiFi, and logging work.
 - Continuous yaw-acceleration prediction with throttle-informed look-ahead.
 - Quiet-drift reference feedback that yields to driver steering and throttle changes.
 - Receiver steering input.
@@ -47,7 +47,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Tail Slide Speed adjustment centered at the Open Beta baseline of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
-  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.3/OpenDrift.lua).
+  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
 
@@ -84,7 +84,7 @@ CRSF targets repurpose the receiver pins:
 | --- | ---: | --- | --- |
 | CRSF receiver TX | 17 | Input | Native CRSF channel and link frames |
 | CRSF receiver RX | 18 | Output | Full-duplex parameter telemetry |
-| Steering servo / servo port | 15 | Output | Standard 250 Hz servo PWM |
+| Steering servo / servo port | 15 | Output | Selectable 250/333 Hz servo PWM |
 | ESC throttle / throttle port | 16 | Output | Standard 50 Hz ESC PWM with active-neutral failsafe |
 
 AMOLED V2 instead uses GPIO 1 for CRSF RX and GPIO 2 for CRSF TX while retaining GPIO 15 steering-servo output and GPIO 16 ESC output. All CRSF targets use the same full-duplex implementation and the
@@ -314,6 +314,12 @@ Profiles save gain, deadband, max correction, smoothing, Prediction, Counterstee
 
 Hardware and installation settings remain global, including gyro/servo direction, servo center and travel, receiver calibration, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
+### Control and servo rate
+
+OpenDrift defaults to **250 Hz** for broad digital-servo compatibility. **333 Hz** reduces the output interval from 4 ms to about 3 ms and can sharpen a fast supported servo, but it must only be used when the servo manufacturer explicitly rates the servo for 333 Hz operation. An unsupported update rate can cause heat, buzzing, erratic steering, or servo damage.
+
+The setting is global and appears on the AMOLED System page, in the web configurator, and in the CRSF/EdgeTX parameter list. Restart OpenDrift after changing it so both the control task and steering PWM start at the selected rate.
+
 ## Web Configurator
 
 When WiFi is enabled, OpenDrift starts a web configurator at:
@@ -387,6 +393,7 @@ Log rows include:
 - Predicted yaw, quiet-drift reference, reference error, steady countersteer contribution, and memory correction
 - Driver steering activity and throttle-prediction blend
 - Controller phase (`0` idle, `1` entry, `2` settled, `3` transition) and reference-lock blend
+- Automatic sustained-drift hunt suppression, detected hunt frequency, transition-authority blend, and throttle-lift blend
 - Steering/throttle/gain signal state and GPIO 18 mode
 
 Suggested test workflow:
@@ -394,10 +401,9 @@ Suggested test workflow:
 1. Connect to the `OpenDrift` WiFi network.
 2. Open `http://192.168.4.1/`.
 3. Enable onboard logging if it is off, then save settings.
-4. Tap `Clear Log`.
+4. Tap `Clear RAM Log`.
 5. Drive the car.
-6. Reconnect to WiFi and tap `Flush Log`, or use `Download CSV` which flushes first.
-7. Download `opendrift-blackbox.csv`.
+6. Reconnect to WiFi and tap `Download CSV` before resetting or removing power.
 
 The CSV can be pasted into a spreadsheet or plotted to see whether the car spun because of delayed correction, overcorrection, max correction saturation, noisy yaw, or steering/radio behavior.
 
@@ -405,20 +411,22 @@ The CSV can be pasted into a spreadsheet or plotted to see whether the car spun 
 
 ## Gyro Algorithm Overview
 
-OpenDrift v1.0 runs this path at 250 Hz:
+OpenDrift v1.0 runs this path at the selected 250 Hz or 333 Hz rate:
 
 1. Read receiver steering, throttle, and IMU yaw.
 2. Subtract calibrated gyro offset and apply soft deadband.
 3. Apply one time-based yaw low-pass.
 4. Estimate short-horizon yaw from filtered yaw acceleration.
-5. Extend that horizon briefly when throttle predicts a chassis-load change.
-6. Convert predicted yaw directly into correction with Gain.
-7. Learn a slow yaw reference while driver steering and throttle are quiet.
-8. Add optional Countersteer Assist from the slow learned reference only.
-9. Apply Drift Memory only to error from that reference.
-10. Prevent memory from pushing farther into correction saturation.
-11. Clamp to Max Correction, optionally reverse, mix with calibrated steering,
-    and output to the steering servo at 250 Hz.
+5. Extend that horizon when throttle predicts application or a longer off-throttle load change.
+6. Reduce transition authority briefly during deliberate direction changes to prevent overshoot.
+7. Detect repeated settled-drift hunting and apply bounded automatic suppression only while the pattern persists.
+8. Convert predicted yaw directly into correction with Gain.
+9. Learn a slow yaw reference while driver steering and throttle are quiet.
+10. Add optional Countersteer Assist from the slow learned reference only.
+11. Apply Drift Memory only to error from that reference.
+12. Prevent memory from pushing farther into correction saturation.
+13. Clamp to Max Correction, optionally reverse, mix with calibrated steering,
+    and output to the steering servo at the selected rate.
 
 Driver steering activity and throttle changes make the slow reference yield
 immediately. Neither disables the fast direct damping path.
@@ -473,7 +481,7 @@ Important folders:
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
-- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.3/OpenDrift.lua).
+- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua).
 - `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 

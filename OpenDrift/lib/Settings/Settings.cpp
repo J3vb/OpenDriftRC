@@ -203,6 +203,11 @@ bool Settings::begin()
         0
     );
 
+    controlLoopHz =
+        prefs.getUShort("loopHz", 250) == 333
+        ? 333
+        : 250;
+
     wifiEnabled = prefs.getBool(
         "wifi",
         true
@@ -362,6 +367,11 @@ void Settings::save()
     prefs.putInt(
         "quiet",
         servoQuiet
+    );
+
+    prefs.putUShort(
+        "loopHz",
+        controlLoopHz
     );
 
     prefs.putBool(
@@ -672,6 +682,17 @@ void Settings::setServoQuiet(int value)
             50
         );
 
+    dirty = true;
+}
+
+uint16_t Settings::getControlLoopHz()
+{
+    return controlLoopHz;
+}
+
+void Settings::setControlLoopHz(uint16_t value)
+{
+    controlLoopHz = value == 333 ? 333 : 250;
     dirty = true;
 }
 

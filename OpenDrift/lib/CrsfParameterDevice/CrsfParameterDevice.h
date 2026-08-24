@@ -26,7 +26,7 @@ private:
 
     static constexpr uint8_t DEVICE_ADDRESS = 0xC8;
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    static constexpr uint8_t PARAMETER_COUNT = 25;
+    static constexpr uint8_t PARAMETER_COUNT = 26;
     #else
     static constexpr uint8_t PARAMETER_COUNT = 17;
     #endif

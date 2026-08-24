@@ -11,8 +11,15 @@ namespace
     static constexpr uint8_t PHASE_TRANSITION = 3;
 
     static constexpr float TRANSITION_SECONDS = 0.18f;
-    static constexpr float THROTTLE_TRANSIENT_SECONDS = 0.22f;
+    static constexpr float THROTTLE_APPLY_SECONDS = 0.22f;
+    static constexpr float THROTTLE_LIFT_SECONDS = 0.48f;
     static constexpr float MEMORY_GAIN_SCALE = 6.0f;
+
+    static constexpr float HUNT_BASELINE_SECONDS = 0.45f;
+    static constexpr float HUNT_MIN_HALF_PERIOD = 0.20f;
+    static constexpr float HUNT_MAX_HALF_PERIOD = 0.75f;
+    static constexpr float HUNT_RESIDUAL_THRESHOLD = 3.5f;
+    static constexpr float HUNT_MIN_PEAK = 5.0f;
 }
 
 
@@ -38,11 +45,27 @@ void GyroController::resetDynamicState()
 
     throttleRate = 0.0f;
     throttleTransientTime = 0.0f;
+    throttleApplyTime = 0.0f;
+    throttleLiftTime = 0.0f;
+    previousThrottleLevel = 0.0f;
+    filteredThrottleLoadRate = 0.0f;
+    throttleLiftBlend = 0.0f;
     lastThrottlePulse = 1500;
     throttleReady = false;
 
     controlPhase = PHASE_IDLE;
     settledBlend = 0.0f;
+    transitionAuthorityBlend = 0.0f;
+
+    huntBaselineYaw = 0.0f;
+    huntHalfCyclePeak = 0.0f;
+    huntAmplitude = 0.0f;
+    huntCrossingAge = 0.0f;
+    huntConfidence = 0.0f;
+    huntSuppression = 0.0f;
+    huntFrequency = 0.0f;
+    huntResidualSign = 0;
+    huntBaselineReady = false;
 
     predictedYawTelemetry = 0.0f;
     driftReferenceTelemetry = 0.0f;
@@ -53,6 +76,10 @@ void GyroController::resetDynamicState()
     memoryFeedbackTelemetry = 0.0f;
     driverActivityTelemetry = 0.0f;
     throttlePredictionBlendTelemetry = 0.0f;
+    throttleLiftBlendTelemetry = 0.0f;
+    huntSuppressionTelemetry = 0.0f;
+    huntFrequencyTelemetry = 0.0f;
+    transitionAuthorityTelemetry = 0.0f;
 
     servoOutput = 1500;
     correctionOutput = 0;
@@ -176,6 +203,8 @@ int GyroController::update(
         if(!throttleReady)
         {
             lastThrottlePulse = throttlePulse;
+            previousThrottleLevel = throttleLevel;
+            filteredThrottleLoadRate = 0.0f;
             throttleReady = true;
         }
         else
@@ -188,6 +217,11 @@ int GyroController::update(
                 /
                 dt;
 
+            float rawThrottleLoadRate =
+                (throttleLevel - previousThrottleLevel)
+                /
+                dt;
+
             float throttleAmount =
                 1.0f - expf(-dt / 0.04f);
 
@@ -196,25 +230,69 @@ int GyroController::update(
                 *
                 throttleAmount;
 
-            if(abs(throttleDelta) >= 8)
+            filteredThrottleLoadRate +=
+                (
+                    rawThrottleLoadRate
+                    -
+                    filteredThrottleLoadRate
+                )
+                *
+                throttleAmount;
+
+            float throttleLoadDelta =
+                throttleLevel - previousThrottleLevel;
+
+            bool applyingThrottle =
+                throttleLoadDelta >= 0.012f ||
+                filteredThrottleLoadRate >= 0.30f;
+
+            bool liftingThrottle =
+                previousThrottleLevel >= 0.06f &&
+                (
+                    throttleLoadDelta <= -0.012f ||
+                    filteredThrottleLoadRate <= -0.22f
+                );
+
+            if(applyingThrottle)
             {
-                throttleTransientTime =
-                    THROTTLE_TRANSIENT_SECONDS;
+                throttleApplyTime =
+                    THROTTLE_APPLY_SECONDS;
+            }
+
+            if(liftingThrottle)
+            {
+                throttleLiftTime =
+                    THROTTLE_LIFT_SECONDS;
             }
 
             lastThrottlePulse = throttlePulse;
+            previousThrottleLevel = throttleLevel;
         }
     }
     else
     {
         throttleReady = false;
         throttleRate = 0.0f;
+        filteredThrottleLoadRate = 0.0f;
+        previousThrottleLevel = 0.0f;
+        throttleApplyTime = 0.0f;
+        throttleLiftTime = 0.0f;
         throttleTransientTime = 0.0f;
     }
 
-    throttleTransientTime = max(
+    throttleApplyTime = max(
         0.0f,
-        throttleTransientTime - dt
+        throttleApplyTime - dt
+    );
+
+    throttleLiftTime = max(
+        0.0f,
+        throttleLiftTime - dt
+    );
+
+    throttleTransientTime = max(
+        throttleApplyTime,
+        throttleLiftTime
     );
 
     float throttleRateBlend = constrain(
@@ -223,17 +301,28 @@ int GyroController::update(
         1.0f
     );
 
-    float throttleLatchBlend = constrain(
-        throttleTransientTime
+    float throttleApplyBlend = constrain(
+        throttleApplyTime
         /
-        THROTTLE_TRANSIENT_SECONDS,
+        THROTTLE_APPLY_SECONDS,
+        0.0f,
+        1.0f
+    );
+
+    throttleLiftBlend = constrain(
+        throttleLiftTime
+        /
+        THROTTLE_LIFT_SECONDS,
         0.0f,
         1.0f
     );
 
     float throttlePredictionBlend = max(
         throttleRateBlend,
-        throttleLatchBlend * 0.55f
+        max(
+            throttleApplyBlend * 0.55f,
+            throttleLiftBlend * 0.80f
+        )
     );
 
     float correctedYaw =
@@ -305,6 +394,8 @@ int GyroController::update(
     // Throttle does not pretend to be vehicle speed or prescribe a turn
     // direction. It announces an upcoming chassis-load change, extending the
     // short yaw-acceleration look-ahead before the resulting motion arrives.
+    // Moving toward neutral gets a longer envelope because track data shows
+    // lift response developing over several hundred milliseconds.
     float predictionSeconds =
         0.003f
         +
@@ -319,6 +410,10 @@ int GyroController::update(
         throttlePredictionBlend
         *
         0.012f
+        +
+        throttleLiftBlend
+        *
+        0.010f
         +
         throttleLevel
         *
@@ -383,6 +478,54 @@ int GyroController::update(
     bool idle =
         yawAbs < 7.0f;
 
+    float deliberateTransitionBlend =
+        !idle
+        ?
+        constrain(
+            (driverActivityBlend - 0.25f) / 0.75f,
+            0.0f,
+            1.0f
+        )
+        :
+        0.0f;
+
+    float directionTransitionBlend =
+        constrain(
+            transitionTime / TRANSITION_SECONDS,
+            0.0f,
+            1.0f
+        );
+
+    float transitionAuthorityTarget = max(
+        deliberateTransitionBlend,
+        directionTransitionBlend
+    );
+
+    float transitionAuthoritySeconds =
+        transitionAuthorityTarget > transitionAuthorityBlend
+        ?
+        0.025f
+        :
+        0.16f;
+
+    float transitionAuthorityAmount =
+        1.0f - expf(-dt / transitionAuthoritySeconds);
+
+    transitionAuthorityBlend +=
+        (
+            transitionAuthorityTarget
+            -
+            transitionAuthorityBlend
+        )
+        *
+        transitionAuthorityAmount;
+
+    transitionAuthorityBlend = constrain(
+        transitionAuthorityBlend,
+        0.0f,
+        1.0f
+    );
+
     float quietBlend =
         (1.0f - driverActivityBlend)
         *
@@ -394,7 +537,8 @@ int GyroController::update(
 
     float settledTarget =
         driftActive &&
-        transitionTime <= 0.0f
+        transitionTime <= 0.0f &&
+        transitionAuthorityBlend < 0.20f
         ?
         quietBlend
         :
@@ -430,7 +574,10 @@ int GyroController::update(
         integralAccumulator = 0.0f;
         integralCorrection = 0;
     }
-    else if(transitionTime > 0.0f)
+    else if(
+        transitionTime > 0.0f ||
+        transitionAuthorityBlend > 0.35f
+    )
     {
         controlPhase = PHASE_TRANSITION;
     }
@@ -442,6 +589,168 @@ int GyroController::update(
     {
         controlPhase = PHASE_ENTRY;
     }
+
+    bool huntCandidate =
+        controlPhase == PHASE_SETTLED &&
+        settledBlend >= 0.65f &&
+        driverActivityBlend <= 0.20f &&
+        transitionAuthorityBlend <= 0.15f &&
+        throttlePredictionBlend <= 0.25f &&
+        yawAbs >= 15.0f;
+
+    if(!huntBaselineReady)
+    {
+        huntBaselineYaw = filteredYaw;
+        huntBaselineReady = true;
+    }
+
+    float huntBaselineSeconds =
+        huntCandidate
+        ?
+        HUNT_BASELINE_SECONDS
+        :
+        0.08f;
+
+    float huntBaselineAmount =
+        1.0f - expf(-dt / huntBaselineSeconds);
+
+    huntBaselineYaw +=
+        (filteredYaw - huntBaselineYaw)
+        *
+        huntBaselineAmount;
+
+    float huntResidual =
+        filteredYaw - huntBaselineYaw;
+
+    huntCrossingAge = min(
+        huntCrossingAge + dt,
+        2.0f
+    );
+
+    huntConfidence = max(
+        0.0f,
+        huntConfidence - dt * 0.18f
+    );
+
+    if(huntCandidate)
+    {
+        huntHalfCyclePeak = max(
+            huntHalfCyclePeak,
+            fabsf(huntResidual)
+        );
+
+        int8_t residualSign =
+            huntResidual >= HUNT_RESIDUAL_THRESHOLD
+            ?
+            1
+            :
+            (
+                huntResidual <= -HUNT_RESIDUAL_THRESHOLD
+                ?
+                -1
+                :
+                0
+            );
+
+        if(residualSign != 0)
+        {
+            if(huntResidualSign == 0)
+            {
+                huntResidualSign = residualSign;
+                huntCrossingAge = 0.0f;
+                huntHalfCyclePeak = fabsf(huntResidual);
+            }
+            else if(residualSign != huntResidualSign)
+            {
+                bool validHalfCycle =
+                    huntCrossingAge >= HUNT_MIN_HALF_PERIOD &&
+                    huntCrossingAge <= HUNT_MAX_HALF_PERIOD &&
+                    huntHalfCyclePeak >= HUNT_MIN_PEAK;
+
+                if(validHalfCycle)
+                {
+                    float measuredFrequency =
+                        1.0f / (2.0f * huntCrossingAge);
+
+                    huntFrequency +=
+                        (measuredFrequency - huntFrequency)
+                        *
+                        0.35f;
+
+                    huntAmplitude +=
+                        (huntHalfCyclePeak - huntAmplitude)
+                        *
+                        0.40f;
+
+                    huntConfidence = min(
+                        1.0f,
+                        huntConfidence + 0.34f
+                    );
+                }
+                else
+                {
+                    huntConfidence *= 0.65f;
+                }
+
+                huntResidualSign = residualSign;
+                huntCrossingAge = 0.0f;
+                huntHalfCyclePeak = fabsf(huntResidual);
+            }
+        }
+    }
+    else
+    {
+        huntResidualSign = 0;
+        huntCrossingAge = 0.0f;
+        huntHalfCyclePeak = 0.0f;
+        huntAmplitude +=
+            (0.0f - huntAmplitude)
+            *
+            (1.0f - expf(-dt / 0.35f));
+    }
+
+    float huntAmplitudeBlend = constrain(
+        (huntAmplitude - HUNT_MIN_PEAK) / 18.0f,
+        0.0f,
+        1.0f
+    );
+
+    float huntSuppressionTarget =
+        huntCandidate
+        ?
+        huntConfidence
+        *
+        huntAmplitudeBlend
+        *
+        settledBlend
+        :
+        0.0f;
+
+    float huntSuppressionSeconds =
+        huntSuppressionTarget > huntSuppression
+        ?
+        0.16f
+        :
+        0.65f;
+
+    huntSuppression +=
+        (
+            huntSuppressionTarget
+            -
+            huntSuppression
+        )
+        *
+        (
+            1.0f
+            -
+            expf(-dt / huntSuppressionSeconds)
+        );
+
+    huntSuppression = constrain(
+        huntSuppression,
+        0.0f,
+        1.0f
+    );
 
     if(driftActive)
     {
@@ -532,12 +841,22 @@ int GyroController::update(
     float directDampingScale =
         1.0f - 0.60f * tailSlideBlend;
 
+    float transitionDirectScale =
+        1.0f - 0.10f * transitionAuthorityBlend;
+
+    float huntDirectScale =
+        1.0f - 0.30f * huntSuppression;
+
     float directCorrection =
         predictedYaw
         *
         gyroGain
         *
-        directDampingScale;
+        directDampingScale
+        *
+        transitionDirectScale
+        *
+        huntDirectScale;
 
     // Countersteer Assist is deliberately sourced from the slow learned
     // drift reference. It increases how much of a settled drift OpenDrift
@@ -552,6 +871,10 @@ int GyroController::update(
         (counterSteerAssist / 100.0f)
         *
         settledBlend
+        *
+        (1.0f - 0.75f * transitionAuthorityBlend)
+        *
+        (1.0f - 0.15f * huntSuppression)
         :
         0.0f;
 
@@ -563,11 +886,24 @@ int GyroController::update(
         +
         steadyAssistCorrection;
 
+    int effectiveMaxCorrection =
+        (int)roundf(
+            maxCorrection
+            *
+            (1.0f - 0.12f * transitionAuthorityBlend)
+        );
+
+    effectiveMaxCorrection = constrain(
+        effectiveMaxCorrection,
+        0,
+        maxCorrection
+    );
+
     // There is no accumulating state to wind up. When direct damping has
     // saturated, memory may help it unwind but may not push farther into the
     // same limit.
     if(
-        fabsf(baseCorrection) >= maxCorrection &&
+        fabsf(baseCorrection) >= effectiveMaxCorrection &&
         integralCorrection * baseCorrection > 0.0f
     )
     {
@@ -581,8 +917,8 @@ int GyroController::update(
                 +
                 integralCorrection
             ),
-            -maxCorrection,
-            maxCorrection
+            -effectiveMaxCorrection,
+            effectiveMaxCorrection
         );
 
     if(idle && correctedYaw == 0.0f)
@@ -608,6 +944,10 @@ int GyroController::update(
     memoryFeedbackTelemetry = integralCorrection;
     driverActivityTelemetry = driverActivityBlend;
     throttlePredictionBlendTelemetry = throttlePredictionBlend;
+    throttleLiftBlendTelemetry = throttleLiftBlend;
+    huntSuppressionTelemetry = huntSuppression;
+    huntFrequencyTelemetry = huntFrequency;
+    transitionAuthorityTelemetry = transitionAuthorityBlend;
 
     return servoOutput;
 }
@@ -858,9 +1198,33 @@ float GyroController::getThrottlePredictionBlend()
 }
 
 
+float GyroController::getThrottleLiftBlend()
+{
+    return throttleLiftBlendTelemetry;
+}
+
+
 float GyroController::getSteeringActivity()
 {
     return steeringActivity;
+}
+
+
+float GyroController::getHuntSuppression()
+{
+    return huntSuppressionTelemetry;
+}
+
+
+float GyroController::getHuntFrequency()
+{
+    return huntFrequencyTelemetry;
+}
+
+
+float GyroController::getTransitionAuthorityBlend()
+{
+    return transitionAuthorityTelemetry;
 }
 
 

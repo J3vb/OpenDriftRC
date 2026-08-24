@@ -16,7 +16,7 @@ they do not overwrite the corresponding PWM tune.
 
 All targets use the complete path: bounded CRSF receive processing, parameter
 telemetry, GPIO 16 ESC PWM, deterministic neutral behavior, and the
-[EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.4/OpenDrift.lua). The round target proved stable with a SpeedyBee SB Nano at
+[EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua). The round target proved stable with a SpeedyBee SB Nano at
 the MT12's F1000 packet rate after the receive loop was given an explicit byte
 budget; the AMOLED target now uses the same CRSF implementation.
 
@@ -40,7 +40,7 @@ OpenDrift outputs are:
 
 | OpenDrift board | Connect to | Signal |
 |---|---|---|
-| GPIO 15 | Steering servo signal | 250 Hz PWM |
+| GPIO 15 | Steering servo signal | Selectable 250/333 Hz PWM |
 | GPIO 16 | ESC throttle signal | 50 Hz PWM |
 
 Do not power the servo or ESC motor from the display board. A DIY display-board
@@ -77,10 +77,10 @@ outputs; use external power and a common ground for lights and controllers.
 - If the link is lost, the full build commands neutral throttle immediately.
   Reconnection requires another neutral hold before live throttle passes.
 
-## [EdgeTX parameter tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.4/OpenDrift.lua)
+## [EdgeTX parameter tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua)
 
-Download [`OpenDrift.lua`](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.4/OpenDrift.lua) and copy it to `SCRIPTS/TOOLS/OpenDrift.lua` on the radio SD
-card, then open **OpenDrift** from the [EdgeTX Tools menu](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.4/OpenDrift.lua). The current tool reads
+Download [`OpenDrift.lua`](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua) and copy it to `SCRIPTS/TOOLS/OpenDrift.lua` on the radio SD
+card, then open **OpenDrift** from the [EdgeTX Tools menu](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua). The current tool reads
 and writes sixteen settings over full-duplex CRSF:
 
 - saved gain, deadband, max correction, and smoothing;
@@ -100,7 +100,7 @@ show as reserved because they carry the CRSF UART.
 ## Problems found during validation
 
 - An F1000 receiver can keep the UART continuously non-empty. CRSF receive work
-  is bounded per update so it cannot starve the 250 Hz controller.
+  is bounded per update so it cannot starve the selected-rate controller.
 - Using the general servo allocator for simultaneous 250 Hz steering and 50 Hz
   throttle exhausted or cross-routed ESP32 timing resources. `EscOutput` now
   owns a dedicated 14-bit LEDC channel for throttle.
@@ -121,7 +121,7 @@ show as reserved because they carry the CRSF UART.
    `throttle=ARMED`.
 7. Turn the transmitter off. Steering and throttle must return to neutral and
    the report must return to `throttle=LOCKED`.
-8. Open the [EdgeTX tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.4/OpenDrift.lua), change one harmless value, and confirm both the radio
+8. Open the [EdgeTX tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua), change one harmless value, and confirm both the radio
 acknowledgement and gyro-screen refresh.
 
 

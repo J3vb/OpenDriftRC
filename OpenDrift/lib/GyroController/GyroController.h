@@ -70,7 +70,11 @@ public:
     float getMemoryFeedback();
     float getDriverActivityBlend();
     float getThrottlePredictionBlend();
+    float getThrottleLiftBlend();
     float getSteeringActivity();
+    float getHuntSuppression();
+    float getHuntFrequency();
+    float getTransitionAuthorityBlend();
 
     int getControlPhase();
     float getSettledBlend();
@@ -115,11 +119,27 @@ private:
 
     float throttleRate = 0.0f;
     float throttleTransientTime = 0.0f;
+    float throttleApplyTime = 0.0f;
+    float throttleLiftTime = 0.0f;
+    float previousThrottleLevel = 0.0f;
+    float filteredThrottleLoadRate = 0.0f;
+    float throttleLiftBlend = 0.0f;
     int lastThrottlePulse = 1500;
     bool throttleReady = false;
 
     uint8_t controlPhase = 0;
     float settledBlend = 0.0f;
+    float transitionAuthorityBlend = 0.0f;
+
+    float huntBaselineYaw = 0.0f;
+    float huntHalfCyclePeak = 0.0f;
+    float huntAmplitude = 0.0f;
+    float huntCrossingAge = 0.0f;
+    float huntConfidence = 0.0f;
+    float huntSuppression = 0.0f;
+    float huntFrequency = 0.0f;
+    int8_t huntResidualSign = 0;
+    bool huntBaselineReady = false;
 
     float predictedYawTelemetry = 0.0f;
     float driftReferenceTelemetry = 0.0f;
@@ -130,6 +150,10 @@ private:
     float memoryFeedbackTelemetry = 0.0f;
     float driverActivityTelemetry = 0.0f;
     float throttlePredictionBlendTelemetry = 0.0f;
+    float throttleLiftBlendTelemetry = 0.0f;
+    float huntSuppressionTelemetry = 0.0f;
+    float huntFrequencyTelemetry = 0.0f;
+    float transitionAuthorityTelemetry = 0.0f;
 
     int servoOutput = 1500;
     int correctionOutput = 0;

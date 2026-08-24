@@ -2161,7 +2161,7 @@ void UI::drawSystemPage(
     );
 
     lcd->drawString(
-        "OPEN",
+        "RATE (REBOOT)",
         22,
         64
     );
@@ -2198,15 +2198,24 @@ void UI::drawSystemPage(
         OD_TEXT
     );
 
-    lcd->drawString(
-        "OpenDrift",
+    drawAmoledButton(
+        lcd,
         150,
-        56
+        54,
+        240,
+        38,
+        settings.getControlLoopHz() == 333 ? "333 HZ" : "250 HZ",
+        settings.getControlLoopHz() == 333 ? OD_AMBER : OD_CYAN,
+        2
     );
 
     lcd->drawString(
         #if defined(OPENDRIFT_INPUT_CRSF)
+        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+        "CRSF OOPS",
+        #else
         "CRSF INPUT",
+        #endif
         #else
         "PWM INPUT",
         #endif
@@ -2227,7 +2236,9 @@ void UI::drawSystemPage(
         240,
         38,
         #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+        "RC TX17 / RX18",
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "RX1 / TX2",
         #else
         "RX17 / TX18",
@@ -2316,7 +2327,9 @@ void UI::drawSystemPage(
     lcd->setTextColor(TFT_WHITE);
     lcd->drawCenterString(
         #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+        "RC TX17 / RX18",
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "1 RX / 2 TX",
         #else
         "17 RX / 18 TX",
@@ -5061,6 +5074,9 @@ bool UI::actionButtonAt(
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 296, 70, 130, 92);
 
+    if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 54, 240, 38))
+        return true;
+
     if(
         page == PAGE_SYSTEM
         #if defined(OPENDRIFT_INPUT_CRSF)
@@ -6149,6 +6165,28 @@ void UI::update(
             lastTouchState =
                 touched;
 
+            return;
+        }
+
+        if(
+            page == PAGE_SYSTEM &&
+            buttonPressed(
+                x,
+                y,
+                150,
+                54,
+                240,
+                38
+            )
+        )
+        {
+            settings.setControlLoopHz(
+                settings.getControlLoopHz() == 250 ? 333 : 250
+            );
+
+            drawSystemPage(settings);
+
+            lastTouchState = touched;
             return;
         }
 

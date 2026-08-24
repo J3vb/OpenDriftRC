@@ -195,7 +195,9 @@ void WebConfigurator::handleRoot()
     html += String(throttleRadio->getPulseWidth());
     html += throttleRadio->hasSignal() ? F(" OK") : F(" NO SIGNAL");
     #if defined(OPENDRIFT_INPUT_CRSF)
-    #if defined(OPENDRIFT_AMOLED_V2)
+    #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+    html += F("</div><div class='pill'>CRSF OOPS: receiver TX to GPIO 17 / RX to GPIO 18");
+    #elif defined(OPENDRIFT_AMOLED_V2)
     html += F("</div><div class='pill'>CRSF: GPIO 1 RX / 2 TX");
     #else
     html += F("</div><div class='pill'>CRSF: GPIO 17 RX / 18 TX");
@@ -295,6 +297,11 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>Servo</h2>");
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
+    html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
+    if(settings->getControlLoopHz() == 250) html += F(" selected");
+    html += F(">250 Hz - broad servo compatibility</option><option value='333'");
+    if(settings->getControlLoopHz() == 333) html += F(" selected");
+    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting.</p>");
     html += F("<div class='row'>");
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
@@ -310,7 +317,9 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>Gain Channel Calibration</h2><div class='row'>");
     #if defined(OPENDRIFT_INPUT_CRSF)
-    #if defined(OPENDRIFT_AMOLED_V2)
+    #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
+    html += F("Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.");
+    #elif defined(OPENDRIFT_AMOLED_V2)
     html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.");
     #else
     html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold.");
@@ -602,6 +611,13 @@ void WebConfigurator::handleSave()
         getIntArg(
             "servoQuiet",
             settings->getServoQuiet()
+        )
+    );
+
+    settings->setControlLoopHz(
+        getIntArg(
+            "controlLoopHz",
+            settings->getControlLoopHz()
         )
     );
 

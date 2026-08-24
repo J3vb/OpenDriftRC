@@ -8,8 +8,8 @@ OpenDrift v1.0 is a clean-sheet controller built from extensive track testing.
 It uses a deliberately short control path so each adjustment has a clear job.
 
 OpenDrift v1.0 runs the IMU, control calculation, and steering output in a dedicated
-250 Hz task. Display, touch, Wi-Fi, web configuration, and logging run outside
-the control task. The steering servo output is also 250 Hz; throttle passthrough
+250 Hz or 333 Hz task. Display, touch, Wi-Fi, web configuration, and logging run outside
+the control task. The steering servo output uses the same selected rate; throttle passthrough
 remains 50 Hz.
 
 ## Mechanical baseline first
@@ -39,12 +39,17 @@ The active path is intentionally short:
 3. Estimate short-horizon yaw from filtered yaw acceleration.
 4. Extend that prediction briefly when throttle announces a chassis-load
    change.
-5. Apply direct yaw correction using Gain.
-6. While the driver and throttle are quiet, learn a slow drift reference.
-7. Add optional Countersteer Assist from that slow reference.
-8. Apply Drift Memory only to deviation from that reference.
-9. Clamp correction with saturation-aware memory behavior.
-10. Add correction to receiver steering and send it to the servo.
+5. Hold a longer prediction envelope after throttle lift so off-throttle load
+   changes do not arrive as a surprise.
+6. Reduce authority briefly during deliberate transitions to limit overshoot.
+7. Detect repeated settled-drift hunting and apply bounded suppression only
+   while that pattern persists.
+8. Apply direct yaw correction using Gain.
+9. While the driver and throttle are quiet, learn a slow drift reference.
+10. Add optional Countersteer Assist from that slow reference.
+11. Apply Drift Memory only to deviation from that reference.
+12. Clamp correction with saturation-aware memory behavior.
+13. Add correction to receiver steering and send it to the servo.
 
 Driver steering activity and throttle changes make the slow reference follow
 the car quickly. They do not disable the fast direct damping path.
@@ -94,6 +99,7 @@ Use a stand or hold the chassis with the wheels clear before driving.
 | Drift Memory | `0.00` |
 | Memory Limit | `80` |
 | Servo Quiet | `0` |
+| Control / servo rate | `250 Hz` |
 
 Check that rotating the chassis produces steering correction in the direction
 that opposes the rotation. Reverse gyro correction if it assists the rotation.
@@ -127,6 +133,10 @@ Change one setting at a time.
 | Transition carries the old drift | Lower Hold Assist or Drift Memory |
 | Mid-drift wheel oscillation | Lower Gain first; verify servo and chassis before adding filtering |
 | Correction sits at Max Correction | More gain will not add authority; inspect travel and geometry |
+
+## Control and servo rate
+
+Use **250 Hz** unless the servo documentation explicitly lists 333 Hz support. It is the compatibility setting and works with a broader range of digital servos. **333 Hz** shortens the command interval from 4 ms to about 3 ms and may improve response on a supported fast servo. Sending 333 Hz to an unsupported servo can cause buzzing, heat, erratic motion, or damage. Restart OpenDrift after changing the rate.
 
 ## Current v1.0 CSV fields
 

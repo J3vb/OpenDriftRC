@@ -175,7 +175,7 @@ void CrsfParameterDevice::sendParameter(
         parameter == 15 ||
         parameter == 16
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
-        || (parameter >= 17 && parameter <= 24)
+        || (parameter >= 17 && parameter <= 25)
         #endif
     )
     {
@@ -183,7 +183,16 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, DATA_SELECTION);
 
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
-        if(parameter >= 17)
+        if(parameter == 25)
+        {
+            appendString(payload, length, "Servo Rate*");
+            appendString(payload, length, "250 Hz;333 Hz");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 1);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter >= 17)
         {
             uint8_t gpio = parameter - 16;
             bool available =
@@ -261,7 +270,7 @@ void CrsfParameterDevice::writeParameter(
             parameter == 15 ||
             parameter == 16
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
-            || (parameter >= 17 && parameter <= 24)
+            || (parameter >= 17 && parameter <= 25)
             #endif
         ) &&
         length >= 1
@@ -342,6 +351,7 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 22: return settings->getAuxChannelForGpio(6);
         case 23: return settings->getAuxChannelForGpio(7);
         case 24: return settings->getAuxChannelForGpio(8);
+        case 25: return settings->getControlLoopHz() == 333 ? 1 : 0;
         #endif
         default: return 0;
     }
@@ -408,6 +418,9 @@ void CrsfParameterDevice::setScaledValue(
             );
             break;
         }
+        case 25:
+            settings->setControlLoopHz(value == 1 ? 333 : 250);
+            break;
         #endif
     }
 }
