@@ -58,12 +58,20 @@ public:
         bool throttleSignal,
         bool gainSignal,
         bool throttleOutputMode,
-        int tailSlideSpeed,
-        float tailSlideBlend,
+        int transitionSpeed,
+        float transitionSpeedBlend,
         float huntSuppression,
         float huntFrequency,
         float transitionAuthorityBlend,
-        float throttleLiftBlend
+        float throttleLiftBlend,
+        float transitionPredictionScale,
+        float huntResidual,
+        float huntRemovedCorrection,
+        int huntConsistentHalfCycles,
+        float huntLatch,
+        int huntStrength,
+        float huntResidualEnvelope,
+        float huntNotchCenter
     );
 
     void clear();
@@ -139,12 +147,20 @@ private:
         float settledBlend;
         float throttleTransient;
         uint32_t signalFlags;
-        int32_t tailSlideSpeed;
-        float tailSlideBlend;
+        int32_t transitionSpeed;
+        float transitionSpeedBlend;
         float huntSuppression;
         float huntFrequency;
         float transitionAuthorityBlend;
         float throttleLiftBlend;
+        float transitionPredictionScale;
+        float huntResidual;
+        float huntRemovedCorrection;
+        int32_t huntConsistentHalfCycles;
+        float huntLatch;
+        int32_t huntStrength;
+        float huntResidualEnvelope;
+        float huntNotchCenter;
     };
 
     static const size_t preferredBufferBytes =
@@ -157,7 +173,6 @@ private:
     static const uint32_t throttleSignalFlag = 1UL << 1;
     static const uint32_t gainSignalFlag = 1UL << 2;
     static const uint32_t throttleOutputFlag = 1UL << 3;
-
     Record* records = nullptr;
 
     size_t capacity = 0;

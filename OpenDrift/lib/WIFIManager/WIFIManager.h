@@ -48,7 +48,9 @@ private:
     bool enabled = false;
 
 
-    unsigned long startTime = 0;
+    unsigned long noClientSince = 0;
+
+    bool clientWasPresent = false;
 
 
     unsigned long timeout =

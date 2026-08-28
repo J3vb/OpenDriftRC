@@ -245,8 +245,10 @@ void WebConfigurator::handleRoot()
         html += String(profile->gyroHoldBoost);
         html += F(" &middot; Countersteer ");
         html += String(profile->gyroCounterSteerAssist);
-        html += F(" &middot; Tail speed ");
-        html += String(profile->gyroTailSlideSpeed);
+        html += F(" &middot; Transition speed ");
+        html += String(profile->gyroTransitionSpeed);
+        html += F(" &middot; Anti Wobble ");
+        html += String(profile->gyroHuntStrength);
         html += F("</small></div>");
 
         html += F("<form method='post' action='/activate-profile'><input type='hidden' name='profile' value='");
@@ -282,10 +284,12 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
     html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01");
     html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1");
+    html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1");
+    html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Tail Response</h2><p class='sub'>Tail Slide Speed adjusts fast gyro damping while steering is moving. 50 is the Open Beta baseline; lower values slow rotation and higher values speed it up. Compare transitions at the same tune.</p><div class='row'>");
-    html += input("Tail slide speed (0-100)", "tailSlideSpeed", String(settings->getGyroTailSlideSpeed()), "number", "1");
+    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping and authority for faster transitions. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
+    html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1");
     html += F("</div></div>");
 
     html += F("<div class='card'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
@@ -394,6 +398,7 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
+    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
 
     html += F("<div class='card'><h2>Blackbox</h2>");
@@ -575,10 +580,10 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setGyroTailSlideSpeed(
+    settings->setGyroTransitionSpeed(
         getIntArg(
-            "tailSlideSpeed",
-            settings->getGyroTailSlideSpeed()
+            "transitionSpeed",
+            settings->getGyroTransitionSpeed()
         )
     );
 
@@ -586,6 +591,13 @@ void WebConfigurator::handleSave()
         getIntArg(
             "predictionStrength",
             settings->getPredictionStrength()
+        )
+    );
+
+    settings->setGyroHuntStrength(
+        getIntArg(
+            "huntStrength",
+            settings->getGyroHuntStrength()
         )
     );
 
@@ -745,12 +757,16 @@ void WebConfigurator::handleSave()
             settings->getGyroCounterSteerAssist()
         );
 
-        gyro->setTailSlideSpeed(
-            settings->getGyroTailSlideSpeed()
+        gyro->setTransitionSpeed(
+            settings->getGyroTransitionSpeed()
         );
 
         gyro->setPredictionStrength(
             settings->getPredictionStrength()
+        );
+
+        gyro->setHuntStrength(
+            settings->getGyroHuntStrength()
         );
     }
 

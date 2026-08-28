@@ -15,13 +15,16 @@ namespace
         {"Memory Limit",      0,  500, 120, 0,   5, "us"},
         {"Hold Assist",       0,  100,   0, 0,   1, "%"},
         {"Countersteer",      0,  100,   0, 0,   1, "%"},
-        {"Tail Slide Speed",  0,  100,  50, 0,   1, "%"},
+        {"Transition Speed",  0,  100,  50, 0,   1, "%"},
         {"Prediction",        0,  100,   0, 0,   1, "%"},
         {"Servo Quiet",       0,   50,   0, 0,   1, "us"},
         {"Steering Travel",   0,  100, 100, 0,   1, "%"},
         {"Servo Travel",     10,  150, 100, 0,   1, "%"},
         {"Servo Center",   1000, 2000,1500, 0,   1, "us"}
     };
+
+    const CrsfParameterDevice::FloatDefinition ANTI_WOBBLE_PARAMETER =
+        {"Anti Wobble", 0, 100, 50, 0, 1, "%"};
 }
 
 
@@ -148,14 +151,27 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, DATA_FOLDER);
         appendString(payload, length, "ROOT");
 
-        for(uint8_t child = 1; child < PARAMETER_COUNT; child++)
+        for(uint8_t child = 1; child <= 16; child++)
         {
             appendByte(payload, length, child);
         }
 
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        for(uint8_t child = 17; child <= 24; child++)
+        {
+            appendByte(payload, length, child);
+        }
+        #endif
+
+        appendByte(payload, length, 25);
+        appendByte(payload, length, 26);
+
         appendByte(payload, length, 0xFF);
     }
-    else if(parameter >= 1 && parameter <= 14)
+    else if(
+        (parameter >= 1 && parameter <= 14) ||
+        parameter == 26
+    )
     {
         const FloatDefinition* definition =
             getFloatDefinition(parameter);
@@ -173,16 +189,16 @@ void CrsfParameterDevice::sendParameter(
     }
     else if(
         parameter == 15 ||
-        parameter == 16
+        parameter == 16 ||
+        parameter == 25
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
-        || (parameter >= 17 && parameter <= 25)
+        || (parameter >= 17 && parameter <= 24)
         #endif
     )
     {
         appendByte(payload, length, 0);
         appendByte(payload, length, DATA_SELECTION);
 
-        #if defined(OPENDRIFT_BOARD_AMOLED_164)
         if(parameter == 25)
         {
             appendString(payload, length, "Servo Rate*");
@@ -192,6 +208,7 @@ void CrsfParameterDevice::sendParameter(
             appendByte(payload, length, 1);
             appendByte(payload, length, 0);
         }
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
         else if(parameter >= 17)
         {
             uint8_t gpio = parameter - 16;
@@ -260,7 +277,13 @@ void CrsfParameterDevice::writeParameter(
     int32_t value = 0;
     uint8_t valueLength = 0;
 
-    if(parameter >= 1 && parameter <= 14 && length >= 4)
+    if(
+        (
+            parameter >= 1 && parameter <= 14
+            || parameter == 26
+        ) &&
+        length >= 4
+    )
     {
         value = readInt32(data);
         valueLength = 4;
@@ -268,9 +291,11 @@ void CrsfParameterDevice::writeParameter(
     else if(
         (
             parameter == 15 ||
-            parameter == 16
+            parameter == 16 ||
+            parameter == 25 ||
+            parameter == 27
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
-            || (parameter >= 17 && parameter <= 25)
+            || (parameter >= 17 && parameter <= 24)
             #endif
         ) &&
         length >= 1
@@ -334,7 +359,7 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 6: return settings->getGyroIntegralLimit();
         case 7: return settings->getGyroHoldBoost();
         case 8: return settings->getGyroCounterSteerAssist();
-        case 9: return settings->getGyroTailSlideSpeed();
+        case 9: return settings->getGyroTransitionSpeed();
         case 10: return settings->getPredictionStrength();
         case 11: return settings->getServoQuiet();
         case 12: return settings->getRadioSteeringTravel();
@@ -351,8 +376,9 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 22: return settings->getAuxChannelForGpio(6);
         case 23: return settings->getAuxChannelForGpio(7);
         case 24: return settings->getAuxChannelForGpio(8);
-        case 25: return settings->getControlLoopHz() == 333 ? 1 : 0;
         #endif
+        case 25: return settings->getControlLoopHz() == 333 ? 1 : 0;
+        case 26: return settings->getGyroHuntStrength();
         default: return 0;
     }
 }
@@ -363,7 +389,10 @@ void CrsfParameterDevice::setScaledValue(
     int32_t value
 )
 {
-    if(parameter >= 1 && parameter <= 14)
+    if(
+        (parameter >= 1 && parameter <= 14) ||
+        parameter == 26
+    )
     {
         const FloatDefinition* definition =
             getFloatDefinition(parameter);
@@ -385,7 +414,7 @@ void CrsfParameterDevice::setScaledValue(
         case 6: settings->setGyroIntegralLimit(value); break;
         case 7: settings->setGyroHoldBoost(value); break;
         case 8: settings->setGyroCounterSteerAssist(value); break;
-        case 9: settings->setGyroTailSlideSpeed(value); break;
+        case 9: settings->setGyroTransitionSpeed(value); break;
         case 10: settings->setPredictionStrength(value); break;
         case 11: settings->setServoQuiet(value); break;
         case 12: settings->setRadioSteeringTravel(value); break;
@@ -418,10 +447,19 @@ void CrsfParameterDevice::setScaledValue(
             );
             break;
         }
+        #endif
         case 25:
             settings->setControlLoopHz(value == 1 ? 333 : 250);
             break;
-        #endif
+        case 26:
+            settings->setGyroHuntStrength(value);
+            if(gyro != nullptr)
+            {
+                gyro->setHuntStrength(
+                    settings->getGyroHuntStrength()
+                );
+            }
+            break;
     }
 }
 
@@ -431,6 +469,11 @@ CrsfParameterDevice::getFloatDefinition(
     uint8_t parameter
 )
 {
+    if(parameter == 26)
+    {
+        return &ANTI_WOBBLE_PARAMETER;
+    }
+
     return &FLOAT_PARAMETERS[parameter - 1];
 }
 

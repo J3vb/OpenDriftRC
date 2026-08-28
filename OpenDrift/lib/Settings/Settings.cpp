@@ -82,11 +82,69 @@ namespace
         int32_t gyroCounterSteerAssist;
         int32_t gyroTailSlideSpeed;
     };
+
+    struct DrivingProfileV5
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+    };
+
+    struct DrivingProfileV6
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+        int32_t gyroHuntSensitivity;
+    };
+
+    struct DrivingProfileV7
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+        int32_t gyroHuntSensitivity;
+        int32_t gyroHuntStrength;
+    };
 }
 
 bool Settings::begin()
 {
-    #if defined(OPENDRIFT_INPUT_CRSF)
+    #if defined(OPENDRIFT_ROUND_LOG51_TUNE)
+    // Private round-display recovery build. Keep its calibration and tuning
+    // isolated from both the normal CRSF and PWM firmware namespaces.
+    prefs.begin("OpenDriftR51", false);
+    #elif defined(OPENDRIFT_INPUT_CRSF)
     // Keep experimental CRSF tuning completely separate from the RC1 PWM
     // build, even when both firmwares are flashed onto the same board.
     prefs.begin("OpenDriftCRSF", false);
@@ -141,7 +199,7 @@ bool Settings::begin()
 
     if(prefs.isKey("tailSpeedC"))
     {
-        gyroTailSlideSpeed = constrain(
+        gyroTransitionSpeed = constrain(
             prefs.getInt("tailSpeedC", 50),
             0,
             100
@@ -154,13 +212,13 @@ bool Settings::begin()
         // Experimental v3 used 0 as the proven response and 100 as the
         // maximum release. Preserve that exact behavior in the centered
         // scale, where old 0 -> new 50 and old 100 -> new 100.
-        gyroTailSlideSpeed = constrain(
+        gyroTransitionSpeed = constrain(
             50 + legacyTailSlideSpeed / 2,
             50,
             100
         );
 
-        prefs.putInt("tailSpeedC", gyroTailSlideSpeed);
+        prefs.putInt("tailSpeedC", gyroTransitionSpeed);
     }
 
     if(prefs.isKey("prediction"))
@@ -173,9 +231,15 @@ bool Settings::begin()
         prefs.putInt("prediction", predictionStrength);
     }
 
+    gyroHuntStrength = constrain(
+        prefs.getInt("huntStrength", 50),
+        0,
+        100
+    );
+
     const char* retiredKeys[] = {
         "gyroAttack", "gyroReturn", "gyroWob", "gyroHunt",
-        "strDamp", "terrainAssist"
+        "strDamp", "huntSense", "terrainAssist"
     };
 
     for(const char* key : retiredKeys)
@@ -276,6 +340,43 @@ bool Settings::begin()
         );
     }
 
+    #if defined(OPENDRIFT_ROUND_LOG51_TUNE)
+    // Seed the proven blackbox-51 tune once. Subsequent UI, web, or EdgeTX
+    // adjustments persist normally and are not overwritten on each boot.
+    // Steering and servo calibration values are deliberately left untouched.
+    if(!prefs.getBool("log51Preset", false))
+    {
+        gain = 1.85f;
+        deadband = 2.0f;
+        gyroMaxCorrection = 370;
+        gyroSmoothing = 0.01f;
+        gyroIntegralGain = 0.0f;
+        gyroIntegralLimit = 120;
+        gyroHoldBoost = 0;
+        gyroCounterSteerAssist = 95;
+        predictionStrength = 30;
+        servoQuiet = 4;
+        gyroTransitionSpeed = 25;
+        gyroHuntStrength = 75;
+        controlLoopHz = 333;
+
+        prefs.putFloat("gain", gain);
+        prefs.putFloat("deadband", deadband);
+        prefs.putInt("gyroMax", gyroMaxCorrection);
+        prefs.putFloat("gyroSmooth", gyroSmoothing);
+        prefs.putFloat("gyroIGain", gyroIntegralGain);
+        prefs.putInt("gyroILim", gyroIntegralLimit);
+        prefs.putInt("gyroHold", gyroHoldBoost);
+        prefs.putInt("counterAssist", gyroCounterSteerAssist);
+        prefs.putInt("prediction", predictionStrength);
+        prefs.putInt("quiet", servoQuiet);
+        prefs.putInt("tailSpeedC", gyroTransitionSpeed);
+        prefs.putInt("huntStrength", gyroHuntStrength);
+        prefs.putUShort("loopHz", controlLoopHz);
+        prefs.putBool("log51Preset", true);
+    }
+    #endif
+
     loadProfiles();
 
     return true;
@@ -341,12 +442,17 @@ void Settings::save()
 
     prefs.putInt(
         "tailSpeedC",
-        gyroTailSlideSpeed
+        gyroTransitionSpeed
     );
 
     prefs.putInt(
         "prediction",
         predictionStrength
+    );
+
+    prefs.putInt(
+        "huntStrength",
+        gyroHuntStrength
     );
 
     prefs.putInt(
@@ -591,14 +697,14 @@ void Settings::setGyroCounterSteerAssist(int value)
     dirty = true;
 }
 
-int Settings::getGyroTailSlideSpeed()
+int Settings::getGyroTransitionSpeed()
 {
-    return gyroTailSlideSpeed;
+    return gyroTransitionSpeed;
 }
 
-void Settings::setGyroTailSlideSpeed(int value)
+void Settings::setGyroTransitionSpeed(int value)
 {
-    gyroTailSlideSpeed = constrain(value, 0, 100);
+    gyroTransitionSpeed = constrain(value, 0, 100);
     dirty = true;
 }
 
@@ -630,6 +736,18 @@ void Settings::setPredictionStrength(int value)
 
     dirty = true;
 }
+
+int Settings::getGyroHuntStrength()
+{
+    return gyroHuntStrength;
+}
+
+void Settings::setGyroHuntStrength(int value)
+{
+    gyroHuntStrength = constrain(value, 0, 100);
+    dirty = true;
+}
+
 
 // --------------------
 // Servo
@@ -1076,12 +1194,98 @@ void Settings::loadProfiles()
                 &profiles[loadedCount],
                 sizeof(DrivingProfile)
             ) == sizeof(DrivingProfile) &&
-            profiles[loadedCount].version == 5 &&
+            profiles[loadedCount].version == 8 &&
             profiles[loadedCount].name[0] != '\0'
         )
         {
             profiles[loadedCount].name[PROFILE_NAME_LENGTH - 1] = '\0';
             loadedCount++;
+        }
+        else if(storedSize == sizeof(DrivingProfileV7))
+        {
+            DrivingProfileV7 legacy = {};
+
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.version == 7 &&
+                legacy.name[0] != '\0'
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                profile.gyroHuntStrength = legacy.gyroHuntStrength;
+                loadedCount++;
+            }
+        }
+        else if(storedSize == sizeof(DrivingProfileV6))
+        {
+            DrivingProfileV6 legacy = {};
+
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.version == 6 &&
+                legacy.name[0] != '\0'
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                profile.gyroHuntStrength = 50;
+                loadedCount++;
+            }
+        }
+        else if(storedSize == sizeof(DrivingProfileV5))
+        {
+            DrivingProfileV5 legacy = {};
+
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.version == 5 &&
+                legacy.name[0] != '\0'
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                loadedCount++;
+            }
         }
         else if(storedSize == sizeof(DrivingProfileV4))
         {
@@ -1107,7 +1311,7 @@ void Settings::loadProfiles()
                 profile.predictionStrength = legacy.gyroHuntDamping;
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
-                profile.gyroTailSlideSpeed = legacy.gyroTailSlideSpeed;
+                profile.gyroTransitionSpeed = legacy.gyroTailSlideSpeed;
                 loadedCount++;
             }
         }
@@ -1135,7 +1339,7 @@ void Settings::loadProfiles()
                 profile.predictionStrength = legacy.gyroHuntDamping;
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
-                profile.gyroTailSlideSpeed = constrain(
+                profile.gyroTransitionSpeed = constrain(
                     50 + legacy.gyroTailSlideSpeed / 2,
                     50,
                     100
@@ -1167,7 +1371,7 @@ void Settings::loadProfiles()
                 profile.predictionStrength = legacy.gyroHuntDamping;
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
-                profile.gyroTailSlideSpeed = 50;
+                profile.gyroTransitionSpeed = 50;
                 loadedCount++;
             }
         }
@@ -1195,7 +1399,7 @@ void Settings::loadProfiles()
                 profile.predictionStrength = legacy.gyroHuntDamping;
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = 0;
-                profile.gyroTailSlideSpeed = 50;
+                profile.gyroTransitionSpeed = 50;
                 loadedCount++;
             }
         }
@@ -1224,7 +1428,7 @@ void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 5;
+    profile.version = 8;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;
@@ -1235,7 +1439,8 @@ void Settings::captureProfile(
     profile.predictionStrength = predictionStrength;
     profile.radioSteeringTravel = radioSteeringTravel;
     profile.gyroCounterSteerAssist = gyroCounterSteerAssist;
-    profile.gyroTailSlideSpeed = gyroTailSlideSpeed;
+    profile.gyroTransitionSpeed = gyroTransitionSpeed;
+    profile.gyroHuntStrength = gyroHuntStrength;
 }
 
 void Settings::applyProfile(
@@ -1252,7 +1457,8 @@ void Settings::applyProfile(
     predictionStrength = profile.predictionStrength;
     radioSteeringTravel = profile.radioSteeringTravel;
     gyroCounterSteerAssist = profile.gyroCounterSteerAssist;
-    gyroTailSlideSpeed = profile.gyroTailSlideSpeed;
+    gyroTransitionSpeed = profile.gyroTransitionSpeed;
+    gyroHuntStrength = profile.gyroHuntStrength;
 }
 
 bool Settings::persistProfile(

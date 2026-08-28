@@ -76,6 +76,12 @@ static uint32_t controlLoopPeriodMs = 4;
 static constexpr uint8_t STARTUP_RETRY_COUNT = 3;
 static constexpr int I2C_SDA_PIN = 47;
 static constexpr int I2C_SCL_PIN = 48;
+static constexpr int AMOLED_RESET_PIN = 21;
+#if defined(OPENDRIFT_AMOLED_V2)
+static constexpr int AMOLED_CS_PIN = 46;
+#else
+static constexpr int AMOLED_CS_PIN = 9;
+#endif
 #endif
 
 struct ControlTelemetry
@@ -232,6 +238,24 @@ void releaseI2cBus()
     pinMode(I2C_SDA_PIN, INPUT_PULLUP);
     pinMode(I2C_SCL_PIN, INPUT_PULLUP);
 }
+
+
+void resetAmoledPanelHardware()
+{
+    // Hold chip-select inactive while the panel reset line is sequenced. This
+    // prevents partial QSPI commands if the ESP starts before the AMOLED rail
+    // has completely settled or after a short off/on power cycle.
+    pinMode(AMOLED_CS_PIN, OUTPUT);
+    digitalWrite(AMOLED_CS_PIN, HIGH);
+
+    pinMode(AMOLED_RESET_PIN, OUTPUT);
+    digitalWrite(AMOLED_RESET_PIN, HIGH);
+    delay(10);
+    digitalWrite(AMOLED_RESET_PIN, LOW);
+    delay(20);
+    digitalWrite(AMOLED_RESET_PIN, HIGH);
+    delay(120);
+}
 #endif
 
 
@@ -298,10 +322,10 @@ public:
             #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
             "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.6 crsf  ttyOD0",
+            "control kernel 1.0.7 crsf  ttyOD0",
             #endif
             #else
-            "control kernel 1.0.6 pwm  ttyOD0",
+            "control kernel 1.0.7 pwm  ttyOD0",
             #endif
             8,
             27
@@ -887,12 +911,16 @@ void runControlIteration()
         settings.getGyroCounterSteerAssist()
     );
 
-    gyro.setTailSlideSpeed(
-        settings.getGyroTailSlideSpeed()
+    gyro.setTransitionSpeed(
+        settings.getGyroTransitionSpeed()
     );
 
     gyro.setPredictionStrength(
         settings.getPredictionStrength()
+    );
+
+    gyro.setHuntStrength(
+        settings.getGyroHuntStrength()
     );
 
     if(i2cBusMutex != nullptr)
@@ -1141,9 +1169,22 @@ void setup()
 {
     Serial.begin(115200);
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Give the external panel and sensor rails time to settle before touching
+    // either bus. This is especially important after a rapid power cycle.
+    delay(800);
+    #else
     delay(500);
+    #endif
 
     Serial.println("OpenDrift Starting");
+
+    #if defined(OPENDRIFT_INPUT_CRSF)
+    // Do not let a powered F1000 receiver start UART activity while the panel,
+    // sensors, PSRAM, and shared resources are still being initialized.
+    pinMode(CRSF_RX_PIN, INPUT);
+    pinMode(CRSF_TX_PIN, INPUT);
+    #endif
 
     esp_reset_reason_t resetReason =
         esp_reset_reason();
@@ -1164,6 +1205,8 @@ void setup()
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     for(uint8_t attempt = 1; attempt <= STARTUP_RETRY_COUNT; attempt++)
     {
+        resetAmoledPanelHardware();
+
         displayOk = lcd.init();
 
         Serial.printf(
@@ -1412,27 +1455,8 @@ void setup()
     //-------------------
 
     #if defined(OPENDRIFT_INPUT_CRSF)
-    bool crsfOk =
-        crsf.begin(
-            CRSF_RX_PIN,
-            CRSF_TX_PIN
-        );
-
-    BaseType_t crsfTaskStarted =
-        crsfOk
-        ? xTaskCreatePinnedToCore(
-            crsfTask,
-            "OpenDriftCRSF",
-            4096,
-            nullptr,
-            3,
-            &crsfTaskHandle,
-            0
-        )
-        : pdFAIL;
-
-    bool crsfReaderOk =
-        crsfTaskStarted == pdPASS;
+    bool crsfOk = false;
+    bool crsfReaderOk = false;
 
     crsfParameters.begin(
         crsf,
@@ -1489,19 +1513,19 @@ void setup()
         throttleRadioOk &&
         sharedPinOk
         #if defined(OPENDRIFT_INPUT_CRSF)
-        && gainRadioOk && crsfOk && crsfReaderOk && throttleOutputOk
+        && gainRadioOk && throttleOutputOk
         #endif
         ;
 
     bootConsole.log(
         #if defined(OPENDRIFT_INPUT_CRSF)
-        "crsf: uart 420k channel decoder online",
+        "crsf: uart startup deferred until UI ready",
         #else
         "rc-input: steering and throttle channels armed",
         #endif
         #if defined(OPENDRIFT_INPUT_CRSF)
-        crsfOk && crsfReaderOk ? "[ OK ]" : "[FAIL]",
-        crsfOk && crsfReaderOk ? TFT_GREEN : TFT_RED
+        "[WAIT]",
+        TFT_CYAN
         #else
         radioOk ? "[ OK ]" : "[FAIL]",
         radioOk ? TFT_GREEN : TFT_RED
@@ -1556,7 +1580,7 @@ void setup()
     );
 
     #if defined(OPENDRIFT_INPUT_CRSF)
-    Serial.println("CRSF input initialized; ESC output awaiting neutral");
+    Serial.println("CRSF pins staged; ESC output awaiting neutral");
     #else
     Serial.println("Radio inputs initialized");
     #endif
@@ -1606,12 +1630,26 @@ void setup()
         settings.getGyroCounterSteerAssist()
     );
 
-    gyro.setTailSlideSpeed(
-        settings.getGyroTailSlideSpeed()
+    gyro.setTransitionSpeed(
+        settings.getGyroTransitionSpeed()
     );
 
     gyro.setPredictionStrength(
         settings.getPredictionStrength()
+    );
+
+    gyro.setHuntStrength(
+        settings.getGyroHuntStrength()
+    );
+
+    gyro.setControlLoopHz(
+        settings.getControlLoopHz()
+    );
+
+    Serial.printf(
+        "Hunt notch: %s (3.2 Hz initial, 2.5-3.6 Hz tracking, Q 1.25, control %d Hz)\n",
+        gyro.isHuntNotchConfigured() ? "READY" : "FAILED",
+        gyro.getControlLoopHz()
     );
 
     //-------------------
@@ -1755,6 +1793,38 @@ void setup()
 
     i2cBusMutex =
         xSemaphoreCreateMutex();
+
+    #if defined(OPENDRIFT_INPUT_CRSF)
+    // Start the live receiver only after every boot-time peripheral and shared
+    // resource is stable. This prevents a continuously streaming F1000 link
+    // from competing with AMOLED/IMU/UI initialization on core 0.
+    crsfOk = crsf.begin(
+        CRSF_RX_PIN,
+        CRSF_TX_PIN
+    );
+
+    BaseType_t crsfTaskStarted =
+        crsfOk
+        ? xTaskCreatePinnedToCore(
+            crsfTask,
+            "OpenDriftCRSF",
+            4096,
+            nullptr,
+            3,
+            &crsfTaskHandle,
+            0
+        )
+        : pdFAIL;
+
+    crsfReaderOk =
+        crsfTaskStarted == pdPASS;
+
+    Serial.printf(
+        "CRSF deferred startup: UART=%s reader=%s\n",
+        crsfOk ? "OK" : "FAIL",
+        crsfReaderOk ? "OK" : "FAIL"
+    );
+    #endif
 
     BaseType_t taskStarted =
         xTaskCreatePinnedToCore(
@@ -2026,12 +2096,20 @@ void loop()
             telemetry.throttleSignal,
             gainRadio.hasSignal(),
             pin18ThrottleOutputMode,
-            settings.getGyroTailSlideSpeed(),
-            gyro.getTailSlideBlend(),
+            settings.getGyroTransitionSpeed(),
+            gyro.getTransitionSpeedBlend(),
             gyro.getHuntSuppression(),
             gyro.getHuntFrequency(),
             gyro.getTransitionAuthorityBlend(),
-            gyro.getThrottleLiftBlend()
+            gyro.getThrottleLiftBlend(),
+            gyro.getTransitionPredictionScale(),
+            gyro.getHuntResidual(),
+            gyro.getHuntRemovedCorrection(),
+            gyro.getHuntConsistentHalfCycles(),
+            gyro.getHuntLatch(),
+            settings.getGyroHuntStrength(),
+            gyro.getHuntResidualEnvelope(),
+            gyro.getHuntNotchCenter()
         );
     }
 

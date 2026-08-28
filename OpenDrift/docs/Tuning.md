@@ -41,9 +41,13 @@ The active path is intentionally short:
    change.
 5. Hold a longer prediction envelope after throttle lift so off-throttle load
    changes do not arrive as a surprise.
-6. Reduce authority briefly during deliberate transitions to limit overshoot.
-7. Detect repeated settled-drift hunting and apply bounded suppression only
-   while that pattern persists.
+6. Taper optional prediction during deliberate transitions so prediction does
+   not run ahead of the physical yaw reversal.
+7. Track and isolate the measured 2.5-3.6 Hz wheel-wobble band during a quiet
+   settled drift, then use Anti Wobble to control notch depth while
+   preserving slow chassis yaw and useful correction outside that band. A
+   shallow guard remains during entry and transitions so the resonance cannot
+   restart while frequency tracking is intentionally frozen.
 8. Apply direct yaw correction using Gain.
 9. While the driver and throttle are quiet, learn a slow drift reference.
 10. Add optional Countersteer Assist from that slow reference.
@@ -68,20 +72,22 @@ the car quickly. They do not disable the fast direct damping path.
 | Drift Memory | Feedback strength for error from the quiet-drift reference |
 | Memory Limit | Maximum Drift Memory contribution in microseconds |
 | Steering Travel | Final logical steering range available to driver and gyro |
+| Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
+| Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
 
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general
 yaw-acceleration look-ahead; throttle temporarily extends that horizon before
 the chassis response develops.
 
-### Tail Slide Speed
+### Transition Speed
 
-Tail Slide Speed is tuned after the core v1.0 settings. Keep it at `50` for the
-Open Beta baseline. Lower values add entry/transition damping;
-higher values release some damping for faster rotation. Its influence follows
-deliberate steering activity, fades substantially in a settled drift, and
-retains at least 40% of the normal fast correction. Test it only after the base
-tune is stable and use matched A/B logs.
+Transition Speed is tuned after the core settings. Keep it at `50` for neutral
+response. Lower values add yaw damping through the complete direction change;
+higher values reduce damping and release some transition authority for faster
+rotation. It follows both the driver's transition intent and the measured yaw
+reversal, then fades out before the next settled drift. Test `25`, `50`, and
+`75` at the same tune first, then refine the preferred direction.
 
 ## Safe first test
 
@@ -100,6 +106,8 @@ Use a stand or hold the chassis with the wheels clear before driving.
 | Memory Limit | `80` |
 | Servo Quiet | `0` |
 | Control / servo rate | `250 Hz` |
+| Transition Speed | `50` |
+| Anti Wobble | `50` |
 
 Check that rotating the chassis produces steering correction in the direction
 that opposes the rotation. Reverse gyro correction if it assists the rotation.
@@ -126,12 +134,14 @@ Change one setting at a time.
 | Initial response is strong but authority stops building | Raise Max Correction carefully |
 | Fast response overshoots before settling | Add a small amount of Prediction |
 | Prediction makes direction changes sharp or nervous | Lower Prediction |
+| Transition happens too quickly or overshoots | Lower Transition Speed |
+| Transition feels held back or rotates too slowly | Raise Transition Speed |
 | Stable drift requires too much sustained driver countersteer | Raise Countersteer Assist |
 | Gyro feels too hands-on after the drift settles | Lower Countersteer Assist |
 | Long drift slowly wanders after entries are already good | Add Hold Assist |
 | Quiet drift reference is present but does not correct enough | Add Drift Memory |
 | Transition carries the old drift | Lower Hold Assist or Drift Memory |
-| Mid-drift wheel oscillation | Lower Gain first; verify servo and chassis before adding filtering |
+| Mid-drift wheel oscillation | Lower Gain first and verify the servo and chassis; then raise Anti Wobble from its default `50` in steps of `10` |
 | Correction sits at Max Correction | More gain will not add authority; inspect travel and geometry |
 
 ## Control and servo rate
@@ -157,8 +167,17 @@ the retired alpha-era tuning fields:
 | `memory_feedback_us` | Drift Memory correction after its limit |
 | `driver_activity_blend` | Driver steering-change activity |
 | `steering_activity_us_s` | Filtered receiver steering rate |
-| `tail_slide_speed` | Saved centered experimental setting; `50` is the RC1 baseline |
-| `tail_slide_blend` | Instantaneous signed rotation-speed adjustment from -1 to 1 |
+| `transition_speed` | Saved centered response setting; `50` is neutral |
+| `transition_speed_blend` | Instantaneous signed transition adjustment from -1 to 1 |
+| `transition_authority_blend` | Detected driver/chassis transition envelope from 0 to 1 |
+| `transition_prediction_scale` | Optional prediction multiplier; reduced while transitioning |
+| `hunt_suppression` | Confidence-weighted attenuation applied to a confirmed periodic residual |
+| `hunt_frequency_hz` | Detected settled-drift oscillation frequency |
+| `hunt_residual_dps` | Fast yaw component around the slow sustained-drift baseline |
+| `hunt_removed_us` | Correction removed from only that oscillating component |
+| `hunt_consistent_half_cycles` | Number of consecutive frequency-consistent half-cycles observed |
+| `hunt_latch` | Confirmed-event hold from 0 to 1; transitions clear it immediately |
+| `anti_wobble` | Saved Anti Wobble notch-depth setting from 0-100; default `50` |
 
 The stage-one onboard logger stores fixed-size binary records entirely in a
 4 MB circular PSRAM buffer. It performs no internal-flash or filesystem writes

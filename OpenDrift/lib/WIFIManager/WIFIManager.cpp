@@ -60,8 +60,8 @@ void WiFiManager::enable()
     enabled = true;
 
 
-    startTime =
-        millis();
+    noClientSince = millis();
+    clientWasPresent = false;
 
 
 
@@ -94,6 +94,8 @@ void WiFiManager::disable()
 
 
     enabled = false;
+    noClientSince = 0;
+    clientWasPresent = false;
 
 
 
@@ -115,16 +117,37 @@ void WiFiManager::update()
 
 
 
-    if(hasClient())
+    unsigned long now = millis();
+    bool clientPresent = hasClient();
+
+    if(clientPresent)
     {
+        if(!clientWasPresent)
+        {
+            Serial.println("WiFi client connected; auto-off paused");
+        }
+
+        clientWasPresent = true;
+        noClientSince = 0;
         return;
+    }
+
+    if(clientWasPresent)
+    {
+        Serial.println("WiFi client disconnected; auto-off timer started");
+        clientWasPresent = false;
+        noClientSince = now;
+    }
+    else if(noClientSince == 0)
+    {
+        noClientSince = now;
     }
 
 
 
     if(
         timeout > 0 &&
-        millis() - startTime
+        now - noClientSince
         > timeout
     )
     {

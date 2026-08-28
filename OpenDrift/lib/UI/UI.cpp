@@ -2501,43 +2501,53 @@ void UI::drawExperimentalPage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(
         lcd,
-        "Tail Response",
+        "Transition",
         OD_MAGENTA
     );
 
     lcd->setTextSize(2);
     lcd->setTextColor(OD_MUTED);
-    lcd->drawString("TAIL SPEED", 22, 58);
+    lcd->drawString("TRANS SPEED", 22, 58);
 
     lcd->setTextSize(3);
     lcd->setTextColor(OD_TEXT);
-    lcd->drawNumber(settings.getGyroTailSlideSpeed(), 146, 48);
+    lcd->drawNumber(settings.getGyroTransitionSpeed(), 146, 48);
 
     drawAmoledButton(lcd, 276, 48, 70, 48, "-", OD_MAGENTA);
     drawAmoledButton(lcd, 364, 48, 70, 48, "+", OD_MAGENTA);
 
     lcd->setTextSize(2);
     lcd->setTextColor(OD_MUTED);
-    lcd->drawString("50 = BASELINE RESPONSE", 22, 132);
+    lcd->drawString("50 = NEUTRAL RESPONSE", 22, 132);
     lcd->drawString("LOWER SLOW / HIGHER FAST", 22, 166);
     #else
     lcd->setTextSize(3);
     lcd->setTextColor(TFT_MAGENTA);
-    lcd->drawCenterString("Tail Response", 120, 14);
+    lcd->drawCenterString("Transition", 120, 14);
 
     drawRoundAdjustRow(
         lcd,
-        "TAIL SPEED",
-        String(settings.getGyroTailSlideSpeed()),
+        "TRANS SPEED",
+        String(settings.getGyroTransitionSpeed()),
         0,
         TFT_MAGENTA
     );
 
-    lcd->setTextSize(1);
-    lcd->setTextColor(ROUND_DIM);
-    lcd->drawCenterString("50 = BASELINE", 120, 125);
-    lcd->drawCenterString("LOWER = SLOWER", 120, 148);
-    lcd->drawCenterString("HIGHER = FASTER", 120, 163);
+    drawRoundAdjustRow(
+        lcd,
+        "ANTI WOBBLE",
+        String(settings.getGyroHuntStrength()),
+        1,
+        TFT_MAGENTA
+    );
+
+    drawRoundAdjustRow(
+        lcd,
+        "RATE (REBOOT)",
+        settings.getControlLoopHz() == 333 ? "333 HZ" : "250 HZ",
+        2,
+        TFT_MAGENTA
+    );
     #endif
 
     drawPageDots();
@@ -3324,30 +3334,30 @@ void UI::drawRadioPage(
 
         drawAmoledButton(
             lcd,
-            286,
-            34,
-            136,
-            44,
+            270,
+            27,
+            158,
+            50,
             "MAX LEFT",
             OD_AMBER
         );
 
         drawAmoledButton(
             lcd,
-            286,
-            90,
-            136,
-            44,
+            270,
+            86,
+            158,
+            50,
             "CENTER",
             OD_AMBER
         );
 
         drawAmoledButton(
             lcd,
-            286,
-            146,
-            136,
-            44,
+            270,
+            145,
+            158,
+            50,
             "MAX RIGHT",
             OD_AMBER
         );
@@ -5037,6 +5047,18 @@ int8_t UI::repeatButtonAt(
 
         if(buttonPressed(x, y, 170, 61, 44, 30))
             return 30;
+
+        if(buttonPressed(x, y, 26, 116, 44, 30))
+            return 31;
+
+        if(buttonPressed(x, y, 170, 116, 44, 30))
+            return 32;
+
+        if(buttonPressed(x, y, 26, 171, 44, 30))
+            return 33;
+
+        if(buttonPressed(x, y, 170, 171, 44, 30))
+            return 34;
     }
 
     return 0;
@@ -5325,23 +5347,51 @@ bool UI::applyRepeatButton(
             break;
 
         case 29:
-            settings.setGyroTailSlideSpeed(
-                settings.getGyroTailSlideSpeed() - 1
+            settings.setGyroTransitionSpeed(
+                settings.getGyroTransitionSpeed() - 1
             );
 
-            gyro.setTailSlideSpeed(
-                settings.getGyroTailSlideSpeed()
+            gyro.setTransitionSpeed(
+                settings.getGyroTransitionSpeed()
             );
             break;
 
         case 30:
-            settings.setGyroTailSlideSpeed(
-                settings.getGyroTailSlideSpeed() + 1
+            settings.setGyroTransitionSpeed(
+                settings.getGyroTransitionSpeed() + 1
             );
 
-            gyro.setTailSlideSpeed(
-                settings.getGyroTailSlideSpeed()
+            gyro.setTransitionSpeed(
+                settings.getGyroTransitionSpeed()
             );
+            break;
+
+        case 31:
+            settings.setGyroHuntStrength(
+                settings.getGyroHuntStrength() - 1
+            );
+
+            gyro.setHuntStrength(
+                settings.getGyroHuntStrength()
+            );
+            break;
+
+        case 32:
+            settings.setGyroHuntStrength(
+                settings.getGyroHuntStrength() + 1
+            );
+
+            gyro.setHuntStrength(
+                settings.getGyroHuntStrength()
+            );
+            break;
+
+        case 33:
+            settings.setControlLoopHz(250);
+            break;
+
+        case 34:
+            settings.setControlLoopHz(333);
             break;
 
         default:
@@ -5992,10 +6042,10 @@ void UI::update(
                 buttonPressed(
                     x,
                     y,
-                    286,
-                    34,
-                    136,
-                    44
+                    270,
+                    27,
+                    158,
+                    50
                 )
             )
             {
@@ -6021,10 +6071,10 @@ void UI::update(
                 buttonPressed(
                     x,
                     y,
-                    286,
-                    90,
-                    136,
-                    44
+                    270,
+                    86,
+                    158,
+                    50
                 )
             )
             {
@@ -6050,10 +6100,10 @@ void UI::update(
                 buttonPressed(
                     x,
                     y,
-                    286,
-                    146,
-                    136,
-                    44
+                    270,
+                    145,
+                    158,
+                    50
                 )
             )
             {

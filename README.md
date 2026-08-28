@@ -37,17 +37,20 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
   - Hold Assist
   - Prediction
   - Countersteer Assist
+  - Transition Speed
+  - Anti Wobble
 - Up to 12 persistent named surface/driving profiles.
 - Scrollable trackside profile selection on both displays.
 - Do-nothing signal-loss behavior when steering input is lost.
 - WiFi access point.
 - Browser-based web configurator.
-- Temporary blackbox v10 CSV logging with OpenDrift v1.0 reference, prediction, throttle, and correction telemetry.
+- Non-blocking PSRAM blackbox logging with controller, prediction, throttle, notch, chassis-motion, and correction telemetry.
 - Persistent settings stored in ESP32 preferences.
-- Tail Slide Speed adjustment centered at the Open Beta baseline of `50`.
+- Transition Speed adjustment centered at the neutral baseline of `50`.
+- Phase-aware Anti Wobble notch with a track-tested default of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
-  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua).
+  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
 
@@ -336,7 +339,8 @@ Current web settings:
 - Max correction
 - Smoothing
 - Prediction strength
-- Tail Slide Speed
+- Transition Speed
+- Anti Wobble
 - Drift memory
 - Memory limit
 - Hold Assist
@@ -359,19 +363,16 @@ Use the web configurator when you want to make several changes quickly. Use the 
 
 ## Onboard Blackbox Log
 
-OpenDrift can store CSV-style blackbox logs in onboard FFat flash storage at about 20 Hz while steering receiver signal is present.
+OpenDrift records fixed-size blackbox samples into a 4 MB circular PSRAM buffer at about 20 Hz while steering receiver signal is present.
 
 Blackbox logging is disabled by default. Enable `Onboard logging` in the web configurator only when you want to collect data, then save settings.
 
-To avoid disturbing gyro timing, log rows are buffered in RAM while driving. The control loop never auto-flushes the log to flash. Use the web configurator to flush, download, or clear the log after the run.
-
-The primary AMOLED build uses a custom 16 MB partition layout with a 6 MB application slot and FFat storage for logging. After changing to this layout, do a full flash erase once before uploading if the board bootloops or the log storage acts strange.
+No flash or filesystem writes occur while driving. Once the circular buffer is full, the oldest records are overwritten so the newest behavior remains available. Download the CSV before removing power because PSRAM is volatile.
 
 The web configurator shows the current log size and provides:
 
 - `Download CSV`
-- `Flush Log`
-- `Clear Log`
+- `Clear RAM Log`
 
 Log rows include:
 
@@ -393,7 +394,7 @@ Log rows include:
 - Predicted yaw, quiet-drift reference, reference error, steady countersteer contribution, and memory correction
 - Driver steering activity and throttle-prediction blend
 - Controller phase (`0` idle, `1` entry, `2` settled, `3` transition) and reference-lock blend
-- Automatic sustained-drift hunt suppression, detected hunt frequency, transition-authority blend, and throttle-lift blend
+- Anti Wobble notch depth, isolated residual, tracked notch frequency, transition-authority blend, and throttle-lift blend
 - Steering/throttle/gain signal state and GPIO 18 mode
 
 Suggested test workflow:
@@ -419,7 +420,7 @@ OpenDrift v1.0 runs this path at the selected 250 Hz or 333 Hz rate:
 4. Estimate short-horizon yaw from filtered yaw acceleration.
 5. Extend that horizon when throttle predicts application or a longer off-throttle load change.
 6. Reduce transition authority briefly during deliberate direction changes to prevent overshoot.
-7. Detect repeated settled-drift hunting and apply bounded automatic suppression only while the pattern persists.
+7. Apply the phase-aware Anti Wobble notch around the tracked 2.5-3.6 Hz wheel-resonance band while preserving slow chassis yaw and useful response outside that band.
 8. Convert predicted yaw directly into correction with Gain.
 9. Learn a slow yaw reference while driver steering and throttle are quiet.
 10. Add optional Countersteer Assist from the slow learned reference only.
@@ -481,7 +482,7 @@ Important folders:
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
-- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.6/OpenDrift.lua).
+- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7/OpenDrift.lua).
 - `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 
