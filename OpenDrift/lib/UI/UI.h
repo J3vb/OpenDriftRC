@@ -9,6 +9,7 @@
 #include "WiFiManager.h"
 #include "Settings.h"
 #include "RadioInput.h"
+#include "Servo.h"
 
 
 class UI
@@ -22,7 +23,8 @@ public:
         WiFiManager& wifi,
         Settings& settings,
         RadioInput& steeringRadio,
-        RadioInput& gainRadio
+        RadioInput& gainRadio,
+        ServoOutput& steeringServo
     );
 
     void setThrottleRadio(
@@ -64,6 +66,8 @@ private:
 
     RadioInput* throttleRadioInput = nullptr;
 
+    ServoOutput* steeringServoOutput = nullptr;
+
     LGFX_Sprite canvas;
 
     LGFX_Sprite transitionCanvas;
@@ -99,7 +103,7 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering, Steering Cal, WiFi, System.
+    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System.
 
     uint8_t page = 0;
 

@@ -6,7 +6,7 @@ local RADIO = 0xEA
 local fields = {
   { 1, "Active Gain",     50,  500,   5, 2 },
   { 2, "Deadband",         0,  200,   1, 1 },
-  { 3, "Max Correction",   0, 1000,  10, 0 },
+  { 3, "Max Corr %",       0,  100,   1, 0 },
   { 4, "Smoothing",        1,  100,   1, 2 },
   { 5, "Drift Memory",     0, 2000,   1, 2 },
   { 6, "Memory Limit",     0,  500,   5, 0 },
@@ -17,10 +17,11 @@ local fields = {
   {26, "Anti Wobble",      0,  100,   1, 0 },
   {11, "Servo Quiet",      0,   50,   1, 0 },
   {12, "Steering Travel",  0,  100,   1, 0 },
-  {27, "Steering Cal",     0,    2,   1, 0, true, false, false, true, false},
+  {27, "Endpoints",        0,    2,   1, 0, true, false, false, true, false},
   {28, "Capture Left",     0,    1,   1, 0, true, false, false, false, true},
   {29, "Capture Center",   0,    1,   1, 0, true, false, false, false, true},
   {30, "Capture Right",    0,    1,   1, 0, true, false, false, false, true},
+  {31, "Reset Cal",        0,    1,   1, 0, true, false, false, false, true},
   {13, "Servo Travel",    10,  150,   1, 0 },
   {14, "Servo Center",  1000, 2000,   1, 0 },
   {15, "Servo Reverse",    0,    1,   1, 0, true},
@@ -228,10 +229,10 @@ local function run(event)
     lcd.drawText(1, 10, "HOLD POSITION + ENTER", 0)
   else
     local calibration = findField(27)
-    local calibrationText = "CAL: ---"
-    if calibration and calibration.value == 2 then calibrationText = "CAL: YES"
-    elseif calibration and calibration.value == 1 then calibrationText = "CAL: PART"
-    elseif calibration and calibration.value == 0 then calibrationText = "CAL: NO" end
+    local calibrationText = "END: ---"
+    if calibration and calibration.value == 2 then calibrationText = "END: YES"
+    elseif calibration and calibration.value == 1 then calibrationText = "END: PART"
+    elseif calibration and calibration.value == 0 then calibrationText = "END: NO" end
     lcd.drawText(1, 10, calibrationText, 0)
     lcd.drawText(127, 10, "CH3 GAIN", RIGHT)
   end

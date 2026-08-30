@@ -25,7 +25,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Selectable GPIO 18 gyro-gain input or throttle passthrough output.
 - Servo output with center, reverse, and travel settings.
 - Servo quiet band for direct-drive steering buzz.
-- Steering calibration for max left, center, and max right.
+- Physical servo endpoint calibration for max left, center, and max right.
 - Separate radio steering travel limit.
 - Separate servo reverse and gyro reverse.
 - Gyro tuning:
@@ -50,7 +50,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Phase-aware Anti Wobble notch with a track-tested default of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
-  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7b/OpenDrift.lua).
+  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
 
@@ -184,7 +184,7 @@ Shows the current gyro gain and provides:
 Primary correction limits:
 
 - `Deadband`: yaw-rate zone ignored around zero.
-- `MAX CORRECTION`: maximum gyro correction in servo microseconds.
+- `MAX CORRECTION`: maximum gyro movement as a percentage of the calibrated physical steering range.
 - `GYRO REV`: reverses only the gyro correction direction.
 
 Use `GYRO REV` when normal steering direction is correct, but the gyro counter-steers the wrong way.
@@ -228,7 +228,7 @@ Conservative first-power values:
 | --- | ---: |
 | Gain | 1.50 |
 | Deadband | 4.0 |
-| Max correction | 250 |
+| Max correction | 50% |
 | Smoothing | 0.01 |
 | Countersteer Assist | 0 |
 | Drift memory | 0.00 |
@@ -270,48 +270,49 @@ channel 3 gain decoded from the digital link.
 
 Steering output setup:
 
-- `TRV`: limits the final steering command range for driver input and gyro correction.
+- `TRV`: scales driver steering input without reducing gyro correction authority.
 - `REV`: reverses physical servo direction.
-- Swipe once more to open the dedicated **Steering Calibration** page.
+- Swipe once more to open the dedicated **Physical Endpoints** page.
 
-### Steering Calibration
+### Physical Servo Endpoints
 
 The calibration page uses three large capture buttons. Each button starts red
-and turns green after it has captured a valid live steering pulse:
+and turns green after it has captured the servo's actual physical PWM position:
 
-- `MAX LEFT`: capture the transmitter held at full left.
+- `MAX LEFT`: position the wheels at their safe physical left stop, then capture it.
 - `CENTER`: capture the transmitter at neutral.
-- `MAX RIGHT`: capture the transmitter held at full right.
+- `MAX RIGHT`: position the wheels at their safe physical right stop, then capture it.
 
-OpenDrift saves the calibration after all three positions are captured and the
-center lies between the two endpoints. Left and right are normalized
-automatically, so calibration also works when the transmitter channel is
-reversed.
+OpenDrift saves the calibration after all three physical positions are captured
+on opposite sides of center. The saved endpoints become the final asymmetric
+servo map and hard clamp, so neither the driver nor gyro can push through them.
 
 CRSF users can perform the same three captures from the EdgeTX `OpenDrift.lua`
 tool. Calibration state is persistent and shared: completing it on the radio
 turns the AMOLED buttons green, while completing it on the display updates the
-radio's `Steering Cal` status to `YES`.
+radio's `Endpoints` status to `YES`.
 
 Suggested calibration flow:
 
-1. Hold steering full left and tap `MAX LEFT`.
+1. Set servo direction first, then use steering/transmitter endpoint adjustment to position the wheels at the safe physical left stop and tap `MAX LEFT`.
 2. Release steering to neutral and tap `CENTER`.
-3. Hold steering full right and tap `MAX RIGHT`.
-4. Confirm all three buttons are green and the page says `CALIBRATION SAVED`.
-5. Return to Steering and check that the output centers around `1500`.
-6. Use `REV` only if normal steering direction is backwards.
+3. Position the wheels at the safe physical right stop and tap `MAX RIGHT`.
+4. Confirm all three buttons are green and the page says `SAVED - TAP TO RESET`.
+5. Return to Steering and verify the wheels remain inside both saved physical stops.
+
+Changing `REV`, Servo Center, or Servo Travel after calibration deliberately
+clears the saved calibration because those changes alter the physical output map.
 
 Servo reverse and gyro reverse are separate on purpose:
 
 - Use `REV` on the Steering page when driver steering moves the wheels backward.
 - Use `GYRO REV` on the Gyro page when driver steering is correct but gyro correction is backward.
 
-Steering calibration and steering travel are separate on purpose:
+Physical endpoint calibration and steering travel are separate on purpose:
 
-- Use `MAX LEFT`, `CENTER`, and `MAX RIGHT` to teach OpenDrift what the receiver outputs.
-- Use `TRV` to limit how far the mixed steering command is allowed to move.
-- Use servo travel when you need to scale the final physical servo output, including gyro correction.
+- Use `MAX LEFT`, `CENTER`, and `MAX RIGHT` to set the servo's physical output limits.
+- Use `TRV` to scale driver steering without reducing gyro authority.
+- Use Max Correction to select how much of the calibrated physical range the gyro may command.
 
 ### WiFi
 
@@ -333,7 +334,7 @@ The Profiles page lists the driving profiles created in the web configurator. Ta
 
 Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
 
-Hardware and installation settings remain global, including gyro/servo direction, servo center and travel, receiver calibration, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
+Hardware and installation settings remain global, including gyro/servo direction, physical steering endpoints, servo center and travel, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
 ### Control and servo rate
 
@@ -444,8 +445,9 @@ OpenDrift v1.0 runs this path at the selected 250 Hz or 333 Hz rate:
 10. Add optional Countersteer Assist from the slow learned reference only.
 11. Apply Drift Memory only to error from that reference.
 12. Prevent memory from pushing farther into correction saturation.
-13. Clamp to Max Correction, optionally reverse, mix with calibrated steering,
-    and output to the steering servo at the selected rate.
+13. Clamp gyro movement to the configured Max Correction percentage, mix it
+    with driver steering, then hard-limit the result to the calibrated physical
+    servo endpoints.
 
 Driver steering activity and throttle changes make the slow reference yield
 immediately. Neither disables the fast direct damping path.
@@ -500,7 +502,7 @@ Important folders:
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
-- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7b/OpenDrift.lua).
+- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua).
 - `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 

@@ -25,7 +25,11 @@ public:
         int centerPulse,
         bool reversed,
         int travelPercent,
-        int quietBand
+        int quietBand,
+        bool endpointCalibrationActive = false,
+        int leftEndpointPulse = 1000,
+        int calibratedCenterPulse = 1500,
+        int rightEndpointPulse = 2000
     );
 
 
@@ -42,6 +46,12 @@ private:
     int travelPercent = 100;
 
     int quietBand = 0;
+
+    bool endpointCalibrationActive = false;
+
+    int leftEndpointPulse = 1000;
+
+    int rightEndpointPulse = 2000;
 
     bool active = false;
 };

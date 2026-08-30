@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.7c - 2026-08-30
+
+### Physical steering limits
+
+- Replaces receiver-range calibration with physical servo endpoint calibration.
+- Captures the servo's actual left, center, and right PWM positions and uses
+  them as the final asymmetric output map and hard safety clamp.
+- Invalidates v1.0.7b receiver-range captures because they are not safe to
+  reinterpret as physical servo limits.
+- Redefines Max Correction as `0-100%` of calibrated physical steering travel;
+  existing settings and profiles migrate from the previous +/-500 us scale.
+- Makes Steering Travel affect driver input only, leaving gyro authority to
+  Max Correction and the calibrated physical endpoints.
+- Gives both AMOLED and round displays dedicated red/green physical endpoint
+  pages and keeps the same captures synchronized with the EdgeTX tool.
+
 ## v1.0.7b - 2026-08-29
 
 ### Steering calibration

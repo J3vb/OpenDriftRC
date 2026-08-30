@@ -26,10 +26,11 @@ Before tuning:
 - Verify the same chassis can drive cleanly with a known-good gyro.
 - Calibrate steering and gyro direction with the wheels safely off the ground.
 
-On the AMOLED, open **Steering Calibration** and capture full left, neutral,
-and full right. Each target changes from red to green; do not drive until all
-three are green and the page reports `CALIBRATION SAVED`. CRSF users can make
-the same captures from `OpenDrift.lua`. Its `CAL: NO/PART/YES` status and the
+Open **Physical Endpoints** and position the wheels at their
+safe physical full-left stop, neutral, and safe full-right stop before capturing
+each point. Each target changes from red to green; do not drive until all
+three are green and the page reports `SAVED - TAP TO RESET`. CRSF users can make
+the same captures from `OpenDrift.lua`. Its `END: NO/PART/YES` status and the
 AMOLED status use the same saved calibration and update each other.
 
 Rear toe-in accidentally present during development made the car and controller
@@ -70,14 +71,14 @@ the car quickly. They do not disable the fast direct damping path.
 |---|---|
 | Gain | Direct correction per degree/second of predicted yaw |
 | Deadband | Removes very small corrected yaw near zero |
-| Max Correction | Hard correction limit in microseconds |
+| Max Correction | Maximum gyro movement as a percentage of calibrated physical steering travel |
 | Smoothing | The only yaw low-pass; larger values add more filtering |
 | Countersteer Assist | Adds slow settled-drift countersteer without increasing fast damping; `0` preserves the base response |
 | Prediction | Continuous yaw-acceleration look-ahead from 0–100 |
 | Hold Assist | Controls how slowly a quiet-drift reference follows yaw |
 | Drift Memory | Feedback strength for error from the quiet-drift reference |
 | Memory Limit | Maximum Drift Memory contribution in microseconds |
-| Steering Travel | Final logical steering range available to driver and gyro |
+| Steering Travel | Scales driver steering only; it does not reduce gyro authority |
 | Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
 
@@ -103,7 +104,7 @@ Use a stand or hold the chassis with the wheels clear before driving.
 |---|---:|
 | Gain | `1.50` |
 | Deadband | `4` |
-| Max Correction | `250` |
+| Max Correction | `50%` |
 | Smoothing | `0.01` |
 | Countersteer Assist | `0` |
 | Prediction | `0` |

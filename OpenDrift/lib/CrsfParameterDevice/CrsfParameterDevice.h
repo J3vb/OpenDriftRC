@@ -6,6 +6,7 @@
 #include "GyroController.h"
 #include "RadioInput.h"
 #include "Settings.h"
+#include "Servo.h"
 
 
 class CrsfParameterDevice
@@ -16,7 +17,8 @@ public:
         CrsfInput& input,
         Settings& settings,
         GyroController& gyro,
-        RadioInput& steeringRadio
+        RadioInput& steeringRadio,
+        ServoOutput& steeringServo
     );
 
     void update();
@@ -27,7 +29,7 @@ public:
 private:
 
     static constexpr uint8_t DEVICE_ADDRESS = 0xC8;
-    static constexpr uint8_t PARAMETER_COUNT = 30;
+    static constexpr uint8_t PARAMETER_COUNT = 31;
 
     static constexpr uint8_t TYPE_PARAMETER_PING = 0x28;
     static constexpr uint8_t TYPE_DEVICE_INFO = 0x29;
@@ -59,6 +61,7 @@ private:
     Settings* settings = nullptr;
     GyroController* gyro = nullptr;
     RadioInput* steeringRadio = nullptr;
+    ServoOutput* steeringServo = nullptr;
     bool settingsChanged = false;
 
     void processFrame(

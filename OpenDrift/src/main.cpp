@@ -322,10 +322,10 @@ public:
             #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
             "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.7b crsf ttyOD0",
+            "control kernel 1.0.7c crsf ttyOD0",
             #endif
             #else
-            "control kernel 1.0.7b pwm  ttyOD0",
+            "control kernel 1.0.7c pwm  ttyOD0",
             #endif
             8,
             27
@@ -689,58 +689,38 @@ int mapSteeringPulse(
     Settings& settings
 )
 {
-    int steeringMin =
-        settings.getSteeringMin();
-
-    int steeringCenter =
-        settings.getSteeringCenter();
-
-    int steeringMax =
-        settings.getSteeringMax();
-
-    if(abs(pulse - steeringCenter) <= 4)
+    if(settings.isSteeringCalibrated())
     {
-        return 1500;
+        int left = settings.getSteeringCapturedInputPulse(0);
+        int center = settings.getSteeringCapturedInputPulse(1);
+        int right = settings.getSteeringCapturedInputPulse(2);
+        int leftDelta = left - center;
+        int rightDelta = right - center;
+
+        if(
+            abs(leftDelta) >= 10 &&
+            abs(rightDelta) >= 10 &&
+            leftDelta * rightDelta < 0
+        )
+        {
+            bool towardLeft = left < center
+                ? pulse <= center
+                : pulse >= center;
+
+            return towardLeft
+                ? map(constrain(pulse, min(left, center), max(left, center)), left, center, 1000, 1500)
+                : map(constrain(pulse, min(center, right), max(center, right)), center, right, 1500, 2000);
+        }
     }
 
-    if(
-        steeringCenter <= steeringMin ||
-        steeringCenter >= steeringMax
-    )
-    {
-        return constrain(
-            pulse,
-            1000,
-            2000
-        );
-    }
-
-    if(pulse < steeringCenter)
-    {
-        return map(
-            constrain(
-                pulse,
-                steeringMin,
-                steeringCenter
-            ),
-            steeringMin,
-            steeringCenter,
-            1000,
-            1500
-        );
-    }
-
-    return map(
-        constrain(
-            pulse,
-            steeringCenter,
-            steeringMax
-        ),
-        steeringCenter,
-        steeringMax,
-        1500,
-        2000
-    );
+    #if defined(OPENDRIFT_INPUT_CRSF)
+    // CRSF's standard 172-1811 channel range decodes to 988-2012 us.
+    // Normalize that protocol range here; physical endpoint calibration belongs
+    // exclusively to the physical servo-endpoint stage.
+    return map(constrain(pulse, 988, 2012), 988, 2012, 1000, 2000);
+    #else
+    return constrain(pulse, 1000, 2000);
+    #endif
 }
 
 
@@ -765,28 +745,6 @@ int applyRadioSteeringTravel(
         1500 + offset,
         1000,
         2000
-    );
-}
-
-
-
-int constrainToRadioSteeringTravel(
-    int steeringCommand,
-    Settings& settings
-)
-{
-    int travel =
-        settings.getRadioSteeringTravel();
-
-    int maxOffset =
-        (500 * travel)
-        /
-        100;
-
-    return constrain(
-        steeringCommand,
-        1500 - maxOffset,
-        1500 + maxOffset
     );
 }
 
@@ -892,7 +850,7 @@ void runControlIteration()
     );
 
     gyro.setMaxCorrection(
-        settings.getGyroMaxCorrection()
+        settings.getGyroMaxCorrection() * 5
     );
 
     gyro.setIntegralGain(
@@ -998,22 +956,31 @@ void runControlIteration()
 
     if(steeringSignal)
     {
-        servoCommand =
-            constrainToRadioSteeringTravel(
-                steeringCommand + gyroCorrection,
-                settings
-            );
+        // Steering Travel scales only the driver's command. Max Correction
+        // independently controls gyro authority, and physical calibration is
+        // the final hard clamp applied by ServoOutput.
+        servoCommand = constrain(
+            steeringCommand + gyroCorrection,
+            1000,
+            2000
+        );
 
         steeringServo.configure(
             settings.getServoCenter(),
             settings.getServoReverse(),
             settings.getServoTravel(),
-            settings.getServoQuiet()
+            settings.getServoQuiet(),
+            settings.isSteeringCalibrated(),
+            settings.getSteeringMin(),
+            settings.getSteeringCenter(),
+            settings.getSteeringMax()
         );
 
         steeringServo.writeMicroseconds(
             servoCommand
         );
+
+        servoCommand = steeringServo.getPosition();
     }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
@@ -1425,7 +1392,11 @@ void setup()
         settings.getServoCenter(),
         settings.getServoReverse(),
         settings.getServoTravel(),
-        settings.getServoQuiet()
+        settings.getServoQuiet(),
+        settings.isSteeringCalibrated(),
+        settings.getSteeringMin(),
+        settings.getSteeringCenter(),
+        settings.getSteeringMax()
     );
 
     steeringServo.center();
@@ -1462,7 +1433,8 @@ void setup()
         crsf,
         settings,
         gyro,
-        steeringRadio
+        steeringRadio,
+        steeringServo
     );
 
     bool steeringRadioOk = steeringRadio.beginExternal();
@@ -1612,7 +1584,7 @@ void setup()
     );
 
     gyro.setMaxCorrection(
-        settings.getGyroMaxCorrection()
+        settings.getGyroMaxCorrection() * 5
     );
 
     gyro.setIntegralGain(
@@ -1781,7 +1753,8 @@ void setup()
         wifi,
         settings,
         steeringRadio,
-        gainRadio
+        gainRadio,
+        steeringServo
     );
 
     #if defined(OPENDRIFT_INPUT_CRSF)

@@ -276,7 +276,7 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
     html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01");
     html += input("Deadband", "deadband", String(settings->getDeadband(), 2), "number", "1");
-    html += input("Max correction (us)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
+    html += input("Max correction (% physical travel)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
     html += F("</div>");
     html += checkbox("Reverse gyro correction", "gyroReverse", settings->getGyroReverse());
     html += F("</div>");
@@ -312,9 +312,9 @@ void WebConfigurator::handleRoot()
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Steering Calibration</h2><p class='sub'>Status: <strong>");
+    html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
     html += settings->isSteeringCalibrated() ? F("CALIBRATED") : F("NOT CALIBRATED");
-    html += F("</strong>. Capture from the AMOLED page or EdgeTX tool, or enter all three valid pulse values below.</p><div class='row'>");
+    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Position the wheels at each safe physical endpoint and capture it from the display or EdgeTX tool, or enter all three pulse values below.</p><div class='row'>");
     html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
     html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
     html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
@@ -751,7 +751,7 @@ void WebConfigurator::handleSave()
         );
 
         gyro->setMaxCorrection(
-            settings->getGyroMaxCorrection()
+            settings->getGyroMaxCorrection() * 5
         );
 
         gyro->setIntegralGain(

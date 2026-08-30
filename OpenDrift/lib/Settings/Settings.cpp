@@ -2,6 +2,29 @@
 
 namespace
 {
+    int legacyMaxCorrectionToPercent(int value)
+    {
+        return constrain((value + 2) / 5, 0, 100);
+    }
+
+    struct DrivingProfileV8
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+        int32_t gyroHuntStrength;
+    };
+
     struct DrivingProfileV1
     {
         uint32_t version;
@@ -167,10 +190,25 @@ bool Settings::begin()
         false
     );
 
-    gyroMaxCorrection = prefs.getInt(
-        "gyroMax",
-        250
-    );
+    if(prefs.isKey("gyroMaxPct"))
+    {
+        gyroMaxCorrection = constrain(
+            prefs.getInt("gyroMaxPct", 50),
+            0,
+            100
+        );
+    }
+    else if(prefs.isKey("gyroMax"))
+    {
+        gyroMaxCorrection = legacyMaxCorrectionToPercent(
+            prefs.getInt("gyroMax", 250)
+        );
+        prefs.putInt("gyroMaxPct", gyroMaxCorrection);
+    }
+    else
+    {
+        gyroMaxCorrection = 50;
+    }
 
     gyroSmoothing = prefs.getFloat(
         "gyroSmooth",
@@ -287,60 +325,28 @@ bool Settings::begin()
         false
     );
 
+    // v1.0.7b stored receiver input endpoints under the steering keys. They
+    // cannot safely be reused as physical servo stops, so only the new servo
+    // endpoint schema is accepted as calibrated.
+    steeringCenter = prefs.getInt("servoCalC", servoCenter);
+    int fallbackOffset = (500 * constrain(servoTravel, 1, 100)) / 100;
     steeringMin = prefs.getInt(
-        "strMin",
-        1000
+        "servoCalL",
+        servoCenter + (servoReverse ? fallbackOffset : -fallbackOffset)
     );
-
-    steeringCenter = prefs.getInt(
-        "strCenter",
-        1500
-    );
-
     steeringMax = prefs.getInt(
-        "strMax",
-        2000
+        "servoCalR",
+        servoCenter + (servoReverse ? -fallbackOffset : fallbackOffset)
     );
-
-    steeringCapturedPulses[0] = prefs.getInt(
-        "strCapL",
-        steeringMin
-    );
-
-    steeringCapturedPulses[1] = prefs.getInt(
-        "strCapC",
-        steeringCenter
-    );
-
-    steeringCapturedPulses[2] = prefs.getInt(
-        "strCapR",
-        steeringMax
-    );
-
-    if(prefs.isKey("strCalMask"))
-    {
-        steeringCalibrationMask =
-            prefs.getUChar("strCalMask", 0) & 0x07;
-    }
-    else
-    {
-        // Preserve a visibly customized calibration from older firmware.
-        // Untouched 1000/1500/2000 defaults remain explicitly uncalibrated.
-        bool legacyCalibration =
-            steeringMin != 1000 ||
-            steeringCenter != 1500 ||
-            steeringMax != 2000;
-
-        bool legacyValid =
-            steeringMax - steeringMin >= 100 &&
-            steeringCenter > steeringMin + 10 &&
-            steeringCenter < steeringMax - 10;
-
-        steeringCalibrationMask =
-            legacyCalibration && legacyValid
-            ? 0x07
-            : 0x00;
-    }
+    steeringCapturedPulses[0] = steeringMin;
+    steeringCapturedPulses[1] = steeringCenter;
+    steeringCapturedPulses[2] = steeringMax;
+    steeringCapturedInputPulses[0] = prefs.getInt("servoInL", 1000);
+    steeringCapturedInputPulses[1] = prefs.getInt("servoInC", 1500);
+    steeringCapturedInputPulses[2] = prefs.getInt("servoInR", 2000);
+    steeringCalibrationMask = prefs.getBool("servoEndV1", false)
+        ? (prefs.getUChar("servoCalM", 0) & 0x07)
+        : 0;
 
     radioSteeringTravel = prefs.getInt(
         "strTravel",
@@ -388,7 +394,7 @@ bool Settings::begin()
     {
         gain = 1.85f;
         deadband = 2.0f;
-        gyroMaxCorrection = 370;
+        gyroMaxCorrection = 74;
         gyroSmoothing = 0.01f;
         gyroIntegralGain = 0.0f;
         gyroIntegralLimit = 120;
@@ -402,7 +408,7 @@ bool Settings::begin()
 
         prefs.putFloat("gain", gain);
         prefs.putFloat("deadband", deadband);
-        prefs.putInt("gyroMax", gyroMaxCorrection);
+        prefs.putInt("gyroMaxPct", gyroMaxCorrection);
         prefs.putFloat("gyroSmooth", gyroSmoothing);
         prefs.putFloat("gyroIGain", gyroIntegralGain);
         prefs.putInt("gyroILim", gyroIntegralLimit);
@@ -451,7 +457,7 @@ void Settings::save()
     );
 
     prefs.putInt(
-        "gyroMax",
+        "gyroMaxPct",
         gyroMaxCorrection
     );
 
@@ -535,40 +541,14 @@ void Settings::save()
         blackboxEnabled
     );
 
-    prefs.putInt(
-        "strMin",
-        steeringMin
-    );
-
-    prefs.putInt(
-        "strCenter",
-        steeringCenter
-    );
-
-    prefs.putInt(
-        "strMax",
-        steeringMax
-    );
-
-    prefs.putUChar(
-        "strCalMask",
-        steeringCalibrationMask & 0x07
-    );
-
-    prefs.putInt(
-        "strCapL",
-        steeringCapturedPulses[0]
-    );
-
-    prefs.putInt(
-        "strCapC",
-        steeringCapturedPulses[1]
-    );
-
-    prefs.putInt(
-        "strCapR",
-        steeringCapturedPulses[2]
-    );
+    prefs.putBool("servoEndV1", true);
+    prefs.putInt("servoCalL", steeringCapturedPulses[0]);
+    prefs.putInt("servoCalC", steeringCapturedPulses[1]);
+    prefs.putInt("servoCalR", steeringCapturedPulses[2]);
+    prefs.putUChar("servoCalM", steeringCalibrationMask & 0x07);
+    prefs.putInt("servoInL", steeringCapturedInputPulses[0]);
+    prefs.putInt("servoInC", steeringCapturedInputPulses[1]);
+    prefs.putInt("servoInR", steeringCapturedInputPulses[2]);
 
     prefs.putInt(
         "strTravel",
@@ -684,7 +664,7 @@ void Settings::setGyroMaxCorrection(int value)
         constrain(
             value,
             0,
-            1000
+            100
         );
 
     dirty = true;
@@ -820,7 +800,13 @@ int Settings::getServoCenter()
 
 void Settings::setServoCenter(int value)
 {
+    if(servoCenter == value)
+    {
+        return;
+    }
+
     servoCenter = value;
+    clearSteeringCalibration();
     dirty = true;
 }
 
@@ -831,7 +817,13 @@ bool Settings::getServoReverse()
 
 void Settings::setServoReverse(bool value)
 {
+    if(servoReverse == value)
+    {
+        return;
+    }
+
     servoReverse = value;
+    clearSteeringCalibration();
     dirty = true;
 }
 
@@ -842,7 +834,13 @@ int Settings::getServoTravel()
 
 void Settings::setServoTravel(int value)
 {
+    if(servoTravel == value)
+    {
+        return;
+    }
+
     servoTravel = value;
+    clearSteeringCalibration();
     dirty = true;
 }
 
@@ -932,6 +930,7 @@ void Settings::setSteeringMin(int value)
     }
 
     steeringMin = value;
+    steeringCapturedPulses[0] = value;
     steeringCalibrationMask = 0;
     dirty = true;
 }
@@ -949,6 +948,7 @@ void Settings::setSteeringCenter(int value)
     }
 
     steeringCenter = value;
+    steeringCapturedPulses[1] = value;
     steeringCalibrationMask = 0;
     dirty = true;
 }
@@ -966,6 +966,7 @@ void Settings::setSteeringMax(int value)
     }
 
     steeringMax = value;
+    steeringCapturedPulses[2] = value;
     steeringCalibrationMask = 0;
     dirty = true;
 }
@@ -977,11 +978,14 @@ uint8_t Settings::getSteeringCalibrationMask()
 
 bool Settings::isSteeringCalibrated()
 {
+    int leftDelta = steeringMin - steeringCenter;
+    int rightDelta = steeringMax - steeringCenter;
+
     return
         getSteeringCalibrationMask() == 0x07 &&
-        steeringMax - steeringMin >= 100 &&
-        steeringCenter > steeringMin + 10 &&
-        steeringCenter < steeringMax - 10;
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
 }
 
 int Settings::getSteeringCapturedPulse(
@@ -996,21 +1000,39 @@ int Settings::getSteeringCapturedPulse(
     return steeringCapturedPulses[point];
 }
 
+int Settings::getSteeringCapturedInputPulse(
+    uint8_t point
+)
+{
+    if(point >= 3)
+    {
+        return 1500;
+    }
+
+    return steeringCapturedInputPulses[point];
+}
+
 bool Settings::captureSteeringCalibrationPoint(
     uint8_t point,
-    int pulse
+    int physicalPulse,
+    int inputPulse
 )
 {
     if(
         point >= 3 ||
-        pulse < 900 ||
-        pulse > 2100
+        physicalPulse < 900 ||
+        physicalPulse > 2100
     )
     {
         return false;
     }
 
-    steeringCapturedPulses[point] = pulse;
+    steeringCapturedPulses[point] = physicalPulse;
+
+    if(inputPulse >= 800 && inputPulse <= 2200)
+    {
+        steeringCapturedInputPulses[point] = inputPulse;
+    }
     steeringCalibrationMask |= (1U << point);
     dirty = true;
 
@@ -1019,20 +1041,16 @@ bool Settings::captureSteeringCalibrationPoint(
         return true;
     }
 
-    int steeringLow = min(
-        steeringCapturedPulses[0],
-        steeringCapturedPulses[2]
-    );
+    int leftDelta =
+        steeringCapturedPulses[0] - steeringCapturedPulses[1];
 
-    int steeringHigh = max(
-        steeringCapturedPulses[0],
-        steeringCapturedPulses[2]
-    );
+    int rightDelta =
+        steeringCapturedPulses[2] - steeringCapturedPulses[1];
 
     bool validCalibration =
-        steeringHigh - steeringLow >= 100 &&
-        steeringCapturedPulses[1] > steeringLow + 10 &&
-        steeringCapturedPulses[1] < steeringHigh - 10;
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
 
     if(!validCalibration)
     {
@@ -1042,19 +1060,22 @@ bool Settings::captureSteeringCalibrationPoint(
         return false;
     }
 
-    steeringMin = steeringLow;
+    steeringMin = steeringCapturedPulses[0];
     steeringCenter = steeringCapturedPulses[1];
-    steeringMax = steeringHigh;
+    steeringMax = steeringCapturedPulses[2];
 
     return true;
 }
 
 bool Settings::confirmStoredSteeringCalibration()
 {
+    int leftDelta = steeringMin - steeringCenter;
+    int rightDelta = steeringMax - steeringCenter;
+
     bool validCalibration =
-        steeringMax - steeringMin >= 100 &&
-        steeringCenter > steeringMin + 10 &&
-        steeringCenter < steeringMax - 10;
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
 
     if(!validCalibration)
     {
@@ -1070,6 +1091,12 @@ bool Settings::confirmStoredSteeringCalibration()
     dirty = true;
 
     return true;
+}
+
+void Settings::clearSteeringCalibration()
+{
+    steeringCalibrationMask = 0;
+    dirty = true;
 }
 
 int Settings::getRadioSteeringTravel()
@@ -1374,12 +1401,41 @@ void Settings::loadProfiles()
                 &profiles[loadedCount],
                 sizeof(DrivingProfile)
             ) == sizeof(DrivingProfile) &&
-            profiles[loadedCount].version == 8 &&
+            profiles[loadedCount].version == 9 &&
             profiles[loadedCount].name[0] != '\0'
         )
         {
             profiles[loadedCount].name[PROFILE_NAME_LENGTH - 1] = '\0';
             loadedCount++;
+        }
+        else if(storedSize == sizeof(DrivingProfileV8))
+        {
+            DrivingProfileV8 legacy = {};
+
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.version == 8 &&
+                legacy.name[0] != '\0'
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                profile.gyroHuntStrength = legacy.gyroHuntStrength;
+                loadedCount++;
+            }
         }
         else if(storedSize == sizeof(DrivingProfileV7))
         {
@@ -1399,7 +1455,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.predictionStrength;
@@ -1428,7 +1484,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.predictionStrength;
@@ -1457,7 +1513,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.predictionStrength;
@@ -1485,7 +1541,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.gyroHuntDamping;
@@ -1513,7 +1569,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.gyroHuntDamping;
@@ -1545,7 +1601,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.gyroHuntDamping;
@@ -1573,7 +1629,7 @@ void Settings::loadProfiles()
                 profile.deadband = legacy.deadband;
                 profile.gyroSmoothing = legacy.gyroSmoothing;
                 profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
                 profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
                 profile.gyroHoldBoost = legacy.gyroHoldBoost;
                 profile.predictionStrength = legacy.gyroHuntDamping;
@@ -1608,7 +1664,7 @@ void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 8;
+    profile.version = 9;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;

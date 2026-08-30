@@ -9,7 +9,7 @@ namespace
     {
         {"Active Gain",      50,  500, 150, 2,   5, "x"},
         {"Deadband",          0,  200,  20, 1,   1, "dps"},
-        {"Max Correction",    0, 1000, 250, 0,  10, "us"},
+        {"Max Correction",    0,  100,  50, 0,   1, "%"},
         {"Smoothing",         1,  100,  10, 2,   1, ""},
         {"Drift Memory",      0, 2000,   0, 2,   1, ""},
         {"Memory Limit",      0,  500, 120, 0,   5, "us"},
@@ -32,13 +32,15 @@ void CrsfParameterDevice::begin(
     CrsfInput& input,
     Settings& storedSettings,
     GyroController& activeGyro,
-    RadioInput& activeSteeringRadio
+    RadioInput& activeSteeringRadio,
+    ServoOutput& activeSteeringServo
 )
 {
     crsf = &input;
     settings = &storedSettings;
     gyro = &activeGyro;
     steeringRadio = &activeSteeringRadio;
+    steeringServo = &activeSteeringServo;
 }
 
 
@@ -168,7 +170,7 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 25);
         appendByte(payload, length, 26);
 
-        for(uint8_t child = 27; child <= 30; child++)
+        for(uint8_t child = 27; child <= 31; child++)
         {
             appendByte(payload, length, child);
         }
@@ -198,7 +200,7 @@ void CrsfParameterDevice::sendParameter(
         parameter == 15 ||
         parameter == 16 ||
         parameter == 25 ||
-        (parameter >= 27 && parameter <= 30)
+        (parameter >= 27 && parameter <= 31)
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
         || (parameter >= 17 && parameter <= 24)
         #endif
@@ -209,19 +211,21 @@ void CrsfParameterDevice::sendParameter(
 
         if(parameter == 27)
         {
-            appendString(payload, length, "Steering Cal");
+            appendString(payload, length, "Endpoints");
             appendString(payload, length, "NOT CAL;PARTIAL;CALIBRATED");
             appendByte(payload, length, getScaledValue(parameter));
             appendByte(payload, length, 0);
             appendByte(payload, length, 2);
             appendByte(payload, length, 0);
         }
-        else if(parameter >= 28 && parameter <= 30)
+        else if(parameter >= 28 && parameter <= 31)
         {
             const char* name =
                 parameter == 28
                 ? "Capture Left"
-                : (parameter == 29 ? "Capture Center" : "Capture Right");
+                : (parameter == 29
+                    ? "Capture Center"
+                    : (parameter == 30 ? "Capture Right" : "Reset Cal"));
 
             appendString(payload, length, name);
             appendString(payload, length, "READY;CAPTURE");
@@ -324,7 +328,7 @@ void CrsfParameterDevice::writeParameter(
             parameter == 15 ||
             parameter == 16 ||
             parameter == 25 ||
-            (parameter >= 27 && parameter <= 30)
+            (parameter >= 27 && parameter <= 31)
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
             || (parameter >= 17 && parameter <= 24)
             #endif
@@ -422,6 +426,7 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 28:
         case 29:
         case 30:
+        case 31:
             return 0;
         default: return 0;
     }
@@ -514,13 +519,21 @@ void CrsfParameterDevice::setScaledValue(
             if(
                 value == 1 &&
                 steeringRadio != nullptr &&
-                steeringRadio->hasSignal()
+                steeringRadio->hasSignal() &&
+                steeringServo != nullptr
             )
             {
                 settings->captureSteeringCalibrationPoint(
                     parameter - 28,
+                    steeringServo->getPosition(),
                     steeringRadio->getPulseWidth()
                 );
+            }
+            break;
+        case 31:
+            if(value == 1)
+            {
+                settings->clearSteeringCalibration();
             }
             break;
     }

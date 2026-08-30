@@ -12,7 +12,7 @@ public:
 
     struct DrivingProfile
     {
-        uint32_t version = 8;
+        uint32_t version = 9;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -20,7 +20,7 @@ public:
         float gyroSmoothing = 0.10f;
         float gyroIntegralGain = 0.0f;
 
-        int32_t gyroMaxCorrection = 250;
+        int32_t gyroMaxCorrection = 50;
         int32_t gyroIntegralLimit = 120;
         int32_t gyroHoldBoost = 0;
         int32_t predictionStrength = 0;
@@ -111,8 +111,14 @@ public:
     uint8_t getSteeringCalibrationMask();
     bool isSteeringCalibrated();
     int getSteeringCapturedPulse(uint8_t point);
-    bool captureSteeringCalibrationPoint(uint8_t point, int pulse);
+    int getSteeringCapturedInputPulse(uint8_t point);
+    bool captureSteeringCalibrationPoint(
+        uint8_t point,
+        int physicalPulse,
+        int inputPulse = 0
+    );
     bool confirmStoredSteeringCalibration();
+    void clearSteeringCalibration();
 
     int getRadioSteeringTravel();
     void setRadioSteeringTravel(int value);
@@ -157,7 +163,7 @@ private:
 
     bool gyroReverse = false;
 
-    int gyroMaxCorrection = 250;
+    int gyroMaxCorrection = 50;
 
     float gyroSmoothing = 0.10f;
 
@@ -200,6 +206,8 @@ private:
     uint8_t steeringCalibrationMask = 0;
 
     int steeringCapturedPulses[3] = {1000, 1500, 2000};
+
+    int steeringCapturedInputPulses[3] = {1000, 1500, 2000};
 
     int radioSteeringTravel = 100;
 

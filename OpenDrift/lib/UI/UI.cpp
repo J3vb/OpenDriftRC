@@ -396,64 +396,45 @@ static int mapSteeringForDisplay(
     Settings& settings
 )
 {
-    int steeringMin =
-        settings.getSteeringMin();
-
-    int steeringCenter =
-        settings.getSteeringCenter();
-
-    int steeringMax =
-        settings.getSteeringMax();
-
-    if(abs(pulse - steeringCenter) <= 4)
+    if(settings.isSteeringCalibrated())
     {
-        return 1500;
+        int left = settings.getSteeringCapturedInputPulse(0);
+        int center = settings.getSteeringCapturedInputPulse(1);
+        int right = settings.getSteeringCapturedInputPulse(2);
+        int leftDelta = left - center;
+        int rightDelta = right - center;
+
+        if(
+            abs(leftDelta) >= 10 &&
+            abs(rightDelta) >= 10 &&
+            leftDelta * rightDelta < 0
+        )
+        {
+            bool towardLeft = left < center
+                ? pulse <= center
+                : pulse >= center;
+
+            int mappedPulse = towardLeft
+                ? map(constrain(pulse, min(left, center), max(left, center)), left, center, 1000, 1500)
+                : map(constrain(pulse, min(center, right), max(center, right)), center, right, 1500, 2000);
+
+            int offset = mappedPulse - 1500;
+            offset = (offset * settings.getRadioSteeringTravel()) / 100;
+            return constrain(1500 + offset, 1000, 2000);
+        }
     }
 
-    int mappedPulse = 1500;
-
-    if(
-        steeringCenter <= steeringMin ||
-        steeringCenter >= steeringMax
-    )
-    {
-        mappedPulse =
-            constrain(
-            pulse,
-            1000,
-            2000
-        );
-    }
-    else if(pulse < steeringCenter)
-    {
-        mappedPulse =
-            map(
-                constrain(
-                    pulse,
-                    steeringMin,
-                    steeringCenter
-                ),
-                steeringMin,
-                steeringCenter,
-                1000,
-                1500
-            );
-    }
-    else
-    {
-        mappedPulse =
-            map(
-                constrain(
-                    pulse,
-                    steeringCenter,
-                    steeringMax
-                ),
-                steeringCenter,
-                steeringMax,
-                1500,
-                2000
-            );
-    }
+    #if defined(OPENDRIFT_INPUT_CRSF)
+    int mappedPulse = map(
+        constrain(pulse, 988, 2012),
+        988,
+        2012,
+        1000,
+        2000
+    );
+    #else
+    int mappedPulse = constrain(pulse, 1000, 2000);
+    #endif
 
     int offset =
         mappedPulse - 1500;
@@ -478,10 +459,12 @@ void UI::begin(
     WiFiManager& wifi,
     Settings& settings,
     RadioInput& steeringRadio,
-    RadioInput& gainRadio
+    RadioInput& gainRadio,
+    ServoOutput& steeringServo
 )
 {
     this->display = display;
+    steeringServoOutput = &steeringServo;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     bool usePsram =
@@ -1889,7 +1872,7 @@ void UI::drawCorePage(
 
     drawRoundAdjustRow(
         lcd,
-        "MAX CORRECTION",
+        "MAX CORR %",
         String(settings.getGyroMaxCorrection()),
         1,
         TFT_MAGENTA
@@ -1944,7 +1927,7 @@ void UI::drawCorePage(
     );
 
     lcd->drawString(
-        "MAX CORR",
+        "MAX CORR %",
         22,
         120
     );
@@ -3082,7 +3065,7 @@ void UI::drawRoundRadioPage(
     const char* title =
         radioSection == 0
         ? "Radio"
-        : (radioSection == 1 ? "Steering" : "Steer Cal");
+        : (radioSection == 1 ? "Steering" : "Endpoints");
 
     lcd->drawCenterString(title, 120, 16);
     lcd->setTextColor(TFT_WHITE);
@@ -3191,29 +3174,66 @@ void UI::drawRoundRadioPage(
     }
     else
     {
-        const int values[3] =
+        const bool steeringSignal = steeringRadio.hasSignal();
+        const uint8_t calibrationMask =
+            settings.getSteeringCalibrationMask();
+        const bool calibrationSaved =
+            settings.isSteeringCalibrated();
+
+        if(calibrationSaved)
         {
-            settings.getSteeringMin(),
-            settings.getSteeringCenter(),
-            settings.getSteeringMax()
-        };
+            steeringCalibrationError = false;
+        }
+
+        const char* status = calibrationSaved
+            ? "SAVED - TAP TO RESET"
+            : (!steeringSignal
+                ? "NO STEERING SIGNAL"
+                : (steeringCalibrationError
+                    ? "INVALID - RETRY"
+                    : (calibrationMask != 0
+                        ? "CAPTURE REMAINING"
+                        : "SET PHYSICAL STOPS")));
+
+        lcd->setTextSize(1);
+        lcd->setTextColor(
+            calibrationSaved
+                ? TFT_GREEN
+                : ((!steeringSignal || steeringCalibrationError)
+                    ? TFT_RED
+                    : 0xBDF7)
+        );
+        lcd->drawCenterString(status, 120, 43);
 
         const char* labels[3] =
         {
-            "CAPTURE LEFT",
-            "CAPTURE CENTER",
-            "CAPTURE RIGHT"
+            "MAX LEFT",
+            "CENTER",
+            "MAX RIGHT"
         };
 
         for(int i = 0; i < 3; i++)
         {
-            int y = 55 + (i * 49);
+            const int y = 57 + (i * 50);
+            const bool captured =
+                (calibrationMask & (1U << i)) != 0;
+            const uint16_t color =
+                captured ? TFT_GREEN : TFT_RED;
+            String label = labels[i];
 
-            lcd->drawRect(40, y, 160, 36, TFT_YELLOW);
-            lcd->setTextSize(1);
+            if(captured)
+            {
+                label += "  ";
+                label += String(
+                    settings.getSteeringCapturedPulse(i)
+                );
+            }
+
+            lcd->drawRect(20, y, 200, 42, color);
+            lcd->drawRect(21, y + 1, 198, 40, color);
+            lcd->setTextSize(2);
             lcd->setTextColor(TFT_WHITE);
-            lcd->drawString(labels[i], 51, y + 7);
-            lcd->drawNumber(values[i], 151, y + 7);
+            lcd->drawCenterString(label.c_str(), 120, y + 11);
         }
     }
 
@@ -3245,7 +3265,7 @@ void UI::drawSteeringCalibrationPage(
 
     drawAmoledHeader(
         lcd,
-        "Steering Calibration",
+        "Physical Endpoints",
         OD_AMBER
     );
 
@@ -3274,7 +3294,7 @@ void UI::drawSteeringCalibrationPage(
 
     const char* status =
         calibrationSaved
-        ? "CALIBRATION SAVED"
+            ? "SAVED - TAP TO RESET"
         : (
             !steeringSignal
             ? "NO SIGNAL"
@@ -3505,7 +3525,7 @@ void UI::drawRadioPage(
 
         lcd->setTextColor(OD_AMBER);
         lcd->drawCenterString(
-            "CALIBRATION",
+            "ENDPOINTS",
             361,
             194
         );
@@ -5028,14 +5048,26 @@ bool UI::captureSteeringCalibration(
     Settings& settings
 )
 {
+    if(settings.isSteeringCalibrated())
+    {
+        settings.clearSteeringCalibration();
+        steeringCalibrationError = false;
+        return true;
+    }
+
     if(!steeringRadio.hasSignal())
     {
         steeringCalibrationError = true;
         return false;
     }
 
-    uint16_t pulse =
-        steeringRadio.getPulseWidth();
+    if(steeringServoOutput == nullptr)
+    {
+        steeringCalibrationError = true;
+        return false;
+    }
+
+    int pulse = steeringServoOutput->getPosition();
 
     if(pulse < 900 || pulse > 2100)
     {
@@ -5046,7 +5078,8 @@ bool UI::captureSteeringCalibration(
     bool captured =
         settings.captureSteeringCalibrationPoint(
             point,
-            pulse
+            pulse,
+            steeringRadio.getPulseWidth()
         );
 
     steeringCalibrationError = !captured;
@@ -5293,9 +5326,9 @@ bool UI::actionButtonAt(
     if(page == PAGE_STEERING_CAL)
     {
         return
-            buttonPressed(x, y, 40, 55, 160, 36) ||
-            buttonPressed(x, y, 40, 104, 160, 36) ||
-            buttonPressed(x, y, 40, 153, 160, 36);
+            buttonPressed(x, y, 20, 57, 200, 42) ||
+            buttonPressed(x, y, 20, 107, 200, 42) ||
+            buttonPressed(x, y, 20, 157, 200, 42);
     }
 
     if(page == PAGE_WIFI)
@@ -6580,37 +6613,25 @@ void UI::update(
 
         if(page == PAGE_STEERING_CAL)
         {
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(x, y, 40, 55, 160, 36)
-            )
+            int8_t calibrationPoint =
+                buttonPressed(x, y, 20, 57, 200, 42)
+                ? 0
+                : (buttonPressed(x, y, 20, 107, 200, 42)
+                    ? 1
+                    : (buttonPressed(x, y, 20, 157, 200, 42)
+                        ? 2
+                        : -1));
+
+            if(calibrationPoint >= 0)
             {
-                settings.setSteeringMin(
-                    steeringRadio.getPulseWidth()
+                captureSteeringCalibration(
+                    calibrationPoint,
+                    steeringRadio,
+                    settings
                 );
             }
 
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(x, y, 40, 104, 160, 36)
-            )
-            {
-                settings.setSteeringCenter(
-                    steeringRadio.getPulseWidth()
-                );
-            }
-
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(x, y, 40, 153, 160, 36)
-            )
-            {
-                settings.setSteeringMax(
-                    steeringRadio.getPulseWidth()
-                );
-            }
-
-            drawRadioPage(
+            drawSteeringCalibrationPage(
                 steeringRadio,
                 gainRadio,
                 settings,

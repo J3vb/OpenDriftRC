@@ -58,26 +58,30 @@ void ServoOutput::end()
 
 void ServoOutput::writeMicroseconds(int us)
 {
-    int correction =
-        us - 1500;
+    us = constrain(us, 1000, 2000);
 
-    if(reversed)
+    int targetPulse = centerPulse;
+
+    if(endpointCalibrationActive)
     {
-        correction =
-            -correction;
+        targetPulse = us <= 1500
+            ? map(us, 1000, 1500, leftEndpointPulse, centerPulse)
+            : map(us, 1500, 2000, centerPulse, rightEndpointPulse);
+    }
+    else
+    {
+        int correction = us - 1500;
+
+        if(reversed)
+        {
+            correction = -correction;
+        }
+
+        correction = (correction * travelPercent) / 100;
+        targetPulse = centerPulse + correction;
     }
 
-    correction =
-        (correction * travelPercent)
-        /
-        100;
-
-    int targetPulse =
-        constrain(
-            centerPulse + correction,
-            1000,
-            2000
-        );
+    targetPulse = constrain(targetPulse, 900, 2100);
 
     if(
         quietBand > 0 &&
@@ -124,15 +128,29 @@ void ServoOutput::configure(
     int centerPulseValue,
     bool reversedValue,
     int travelPercentValue,
-    int quietBandValue
+    int quietBandValue,
+    bool calibratedEndpointsActive,
+    int leftEndpointValue,
+    int calibratedCenterValue,
+    int rightEndpointValue
 )
 {
-    centerPulse =
-        constrain(
-            centerPulseValue,
-            1000,
-            2000
-        );
+    int candidateCenter = constrain(calibratedCenterValue, 900, 2100);
+    int leftDelta = leftEndpointValue - candidateCenter;
+    int rightDelta = rightEndpointValue - candidateCenter;
+
+    endpointCalibrationActive =
+        calibratedEndpointsActive &&
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
+
+    centerPulse = endpointCalibrationActive
+        ? candidateCenter
+        : constrain(centerPulseValue, 1000, 2000);
+
+    leftEndpointPulse = constrain(leftEndpointValue, 900, 2100);
+    rightEndpointPulse = constrain(rightEndpointValue, 900, 2100);
 
     reversed =
         reversedValue;
