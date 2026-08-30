@@ -26,6 +26,12 @@ Before tuning:
 - Verify the same chassis can drive cleanly with a known-good gyro.
 - Calibrate steering and gyro direction with the wheels safely off the ground.
 
+On the AMOLED, open **Steering Calibration** and capture full left, neutral,
+and full right. Each target changes from red to green; do not drive until all
+three are green and the page reports `CALIBRATION SAVED`. CRSF users can make
+the same captures from `OpenDrift.lua`. Its `CAL: NO/PART/YES` status and the
+AMOLED status use the same saved calibration and update each other.
+
 Rear toe-in accidentally present during development made the car and controller
 fight one another. Correcting the alignment materially improved both OpenDrift
 and commercial gyros.

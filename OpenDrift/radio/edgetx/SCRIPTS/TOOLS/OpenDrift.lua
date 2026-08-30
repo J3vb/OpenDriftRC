@@ -17,6 +17,10 @@ local fields = {
   {26, "Anti Wobble",      0,  100,   1, 0 },
   {11, "Servo Quiet",      0,   50,   1, 0 },
   {12, "Steering Travel",  0,  100,   1, 0 },
+  {27, "Steering Cal",     0,    2,   1, 0, true, false, false, true, false},
+  {28, "Capture Left",     0,    1,   1, 0, true, false, false, false, true},
+  {29, "Capture Center",   0,    1,   1, 0, true, false, false, false, true},
+  {30, "Capture Right",    0,    1,   1, 0, true, false, false, false, true},
   {13, "Servo Travel",    10,  150,   1, 0 },
   {14, "Servo Center",  1000, 2000,   1, 0 },
   {15, "Servo Reverse",    0,    1,   1, 0, true},
@@ -40,6 +44,7 @@ local lastRx = 0
 local nextRequest = 0
 local requestIndex = 2
 local nextGainRequest = 0
+local nextCalibrationRequest = 0
 
 local function readInt32(data, index)
   local value = data[index] * 16777216
@@ -127,6 +132,12 @@ end
 
 local function valueText(field)
   if field.value == nil then return "---" end
+  if field[10] then
+    if field.value == 2 then return "YES" end
+    if field.value == 1 then return "PARTIAL" end
+    return "NO"
+  end
+  if field[11] then return "PRESS" end
   if field[8] then
     if field[4] == 0 then return "RES" end
     return field.value == 0 and "OFF" or "CH" .. tostring(field.value)
@@ -148,6 +159,7 @@ end
 
 local function adjust(step)
   local field = fields[selected]
+  if field[10] or field[11] then return end
   if field.value == nil then return end
   field.value = math.max(field[3], math.min(field[4], field.value + step * field[5]))
   writeField(field)
@@ -158,6 +170,7 @@ local function init()
   requestIndex = 2
   nextRequest = 0
   nextGainRequest = 0
+  nextCalibrationRequest = 0
 end
 
 local function run(event)
@@ -180,13 +193,28 @@ local function run(event)
     nextGainRequest = now + 25
   end
 
+  -- Calibration can also be completed from the AMOLED page. Poll its shared
+  -- persisted status frequently so the radio follows screen-side captures.
+  if now >= nextCalibrationRequest then
+    requestField(findField(27))
+    nextCalibrationRequest = now + 25
+  end
+
   local right = event == EVT_ROT_RIGHT or event == EVT_VIRTUAL_NEXT
   local left = event == EVT_ROT_LEFT or event == EVT_VIRTUAL_PREV
   local enter = event == EVT_ENTER_BREAK or event == EVT_VIRTUAL_ENTER
 
   if enter then
-    editing = not editing
-    if not editing then requestField(fields[selected]) end
+    local field = fields[selected]
+    if field[11] then
+      field.value = 1
+      writeField(field)
+      field.value = 0
+      requestField(findField(27))
+    elseif not field[10] then
+      editing = not editing
+      if not editing then requestField(field) end
+    end
   elseif right then
     if editing then adjust(1) else moveSelection(1) end
   elseif left then
@@ -196,7 +224,17 @@ local function run(event)
   lcd.clear()
   lcd.drawText(1, 0, "OpenDrift CRSF", INVERS)
   lcd.drawText(127, 0, connected and "LINK" or "WAIT", RIGHT + INVERS)
-  lcd.drawText(1, 10, "CH3 GAIN | * REBOOT", 0)
+  if fields[selected][11] then
+    lcd.drawText(1, 10, "HOLD POSITION + ENTER", 0)
+  else
+    local calibration = findField(27)
+    local calibrationText = "CAL: ---"
+    if calibration and calibration.value == 2 then calibrationText = "CAL: YES"
+    elseif calibration and calibration.value == 1 then calibrationText = "CAL: PART"
+    elseif calibration and calibration.value == 0 then calibrationText = "CAL: NO" end
+    lcd.drawText(1, 10, calibrationText, 0)
+    lcd.drawText(127, 10, "CH3 GAIN", RIGHT)
+  end
 
   for row = 0, 3 do
     local index = scroll + row

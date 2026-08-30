@@ -50,7 +50,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Phase-aware Anti Wobble notch with a track-tested default of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
-  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7/OpenDrift.lua).
+  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7b/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
 
@@ -268,21 +268,39 @@ channel 3 gain decoded from the digital link.
 
 ### Steering
 
-Steering calibration and servo direction:
+Steering output setup:
 
-- `MAX LEFT`: capture current steering pulse as full left.
-- `CENTER`: capture current steering pulse as neutral.
-- `MAX RIGHT`: capture current steering pulse as full right.
 - `TRV`: limits the final steering command range for driver input and gyro correction.
-- `REV`: reverse physical servo direction.
+- `REV`: reverses physical servo direction.
+- Swipe once more to open the dedicated **Steering Calibration** page.
+
+### Steering Calibration
+
+The calibration page uses three large capture buttons. Each button starts red
+and turns green after it has captured a valid live steering pulse:
+
+- `MAX LEFT`: capture the transmitter held at full left.
+- `CENTER`: capture the transmitter at neutral.
+- `MAX RIGHT`: capture the transmitter held at full right.
+
+OpenDrift saves the calibration after all three positions are captured and the
+center lies between the two endpoints. Left and right are normalized
+automatically, so calibration also works when the transmitter channel is
+reversed.
+
+CRSF users can perform the same three captures from the EdgeTX `OpenDrift.lua`
+tool. Calibration state is persistent and shared: completing it on the radio
+turns the AMOLED buttons green, while completing it on the display updates the
+radio's `Steering Cal` status to `YES`.
 
 Suggested calibration flow:
 
 1. Hold steering full left and tap `MAX LEFT`.
 2. Release steering to neutral and tap `CENTER`.
 3. Hold steering full right and tap `MAX RIGHT`.
-4. Check that the output value centers around `1500`.
-5. Use `REV` only if normal steering direction is backwards.
+4. Confirm all three buttons are green and the page says `CALIBRATION SAVED`.
+5. Return to Steering and check that the output centers around `1500`.
+6. Use `REV` only if normal steering direction is backwards.
 
 Servo reverse and gyro reverse are separate on purpose:
 
@@ -482,7 +500,7 @@ Important folders:
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
-- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7/OpenDrift.lua).
+- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7b/OpenDrift.lua).
 - `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 

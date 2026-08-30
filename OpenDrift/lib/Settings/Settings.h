@@ -108,6 +108,12 @@ public:
     int getSteeringMax();
     void setSteeringMax(int value);
 
+    uint8_t getSteeringCalibrationMask();
+    bool isSteeringCalibrated();
+    int getSteeringCapturedPulse(uint8_t point);
+    bool captureSteeringCalibrationPoint(uint8_t point, int pulse);
+    bool confirmStoredSteeringCalibration();
+
     int getRadioSteeringTravel();
     void setRadioSteeringTravel(int value);
 
@@ -190,6 +196,10 @@ private:
     int steeringCenter = 1500;
 
     int steeringMax = 2000;
+
+    uint8_t steeringCalibrationMask = 0;
+
+    int steeringCapturedPulses[3] = {1000, 1500, 2000};
 
     int radioSteeringTravel = 100;
 

@@ -31,12 +31,14 @@ namespace
 void CrsfParameterDevice::begin(
     CrsfInput& input,
     Settings& storedSettings,
-    GyroController& activeGyro
+    GyroController& activeGyro,
+    RadioInput& activeSteeringRadio
 )
 {
     crsf = &input;
     settings = &storedSettings;
     gyro = &activeGyro;
+    steeringRadio = &activeSteeringRadio;
 }
 
 
@@ -166,6 +168,11 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 25);
         appendByte(payload, length, 26);
 
+        for(uint8_t child = 27; child <= 30; child++)
+        {
+            appendByte(payload, length, child);
+        }
+
         appendByte(payload, length, 0xFF);
     }
     else if(
@@ -190,7 +197,8 @@ void CrsfParameterDevice::sendParameter(
     else if(
         parameter == 15 ||
         parameter == 16 ||
-        parameter == 25
+        parameter == 25 ||
+        (parameter >= 27 && parameter <= 30)
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
         || (parameter >= 17 && parameter <= 24)
         #endif
@@ -199,7 +207,30 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 0);
         appendByte(payload, length, DATA_SELECTION);
 
-        if(parameter == 25)
+        if(parameter == 27)
+        {
+            appendString(payload, length, "Steering Cal");
+            appendString(payload, length, "NOT CAL;PARTIAL;CALIBRATED");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 2);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter >= 28 && parameter <= 30)
+        {
+            const char* name =
+                parameter == 28
+                ? "Capture Left"
+                : (parameter == 29 ? "Capture Center" : "Capture Right");
+
+            appendString(payload, length, name);
+            appendString(payload, length, "READY;CAPTURE");
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 1);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter == 25)
         {
             appendString(payload, length, "Servo Rate*");
             appendString(payload, length, "250 Hz;333 Hz");
@@ -293,7 +324,7 @@ void CrsfParameterDevice::writeParameter(
             parameter == 15 ||
             parameter == 16 ||
             parameter == 25 ||
-            parameter == 27
+            (parameter >= 27 && parameter <= 30)
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
             || (parameter >= 17 && parameter <= 24)
             #endif
@@ -379,6 +410,19 @@ int32_t CrsfParameterDevice::getScaledValue(
         #endif
         case 25: return settings->getControlLoopHz() == 333 ? 1 : 0;
         case 26: return settings->getGyroHuntStrength();
+        case 27:
+        {
+            uint8_t mask =
+                settings->getSteeringCalibrationMask();
+
+            return settings->isSteeringCalibrated()
+                ? 2
+                : (mask != 0 ? 1 : 0);
+        }
+        case 28:
+        case 29:
+        case 30:
+            return 0;
         default: return 0;
     }
 }
@@ -457,6 +501,25 @@ void CrsfParameterDevice::setScaledValue(
             {
                 gyro->setHuntStrength(
                     settings->getGyroHuntStrength()
+                );
+            }
+            break;
+        case 27:
+            // Status is read-only. It is derived from the shared persisted
+            // calibration mask used by both the display and EdgeTX.
+            break;
+        case 28:
+        case 29:
+        case 30:
+            if(
+                value == 1 &&
+                steeringRadio != nullptr &&
+                steeringRadio->hasSignal()
+            )
+            {
+                settings->captureSteeringCalibrationPoint(
+                    parameter - 28,
+                    steeringRadio->getPulseWidth()
                 );
             }
             break;

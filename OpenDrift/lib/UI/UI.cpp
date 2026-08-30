@@ -11,16 +11,22 @@ static constexpr uint8_t PAGE_EXPERIMENTAL = 4;
 static constexpr uint8_t PAGE_PROFILES = 5;
 static constexpr uint8_t PAGE_RADIO = 6;
 static constexpr uint8_t PAGE_STEERING = 7;
-
-#if defined(OPENDRIFT_BOARD_AMOLED_164)
-static constexpr uint8_t PAGE_STEERING_CAL = 0xFF;
-static constexpr uint8_t PAGE_WIFI = 8;
-static constexpr uint8_t PAGE_SYSTEM = 9;
-#else
 static constexpr uint8_t PAGE_STEERING_CAL = 8;
 static constexpr uint8_t PAGE_WIFI = 9;
 static constexpr uint8_t PAGE_SYSTEM = 10;
-#endif
+
+
+static uint8_t radioSectionForPage(
+    uint8_t page
+)
+{
+    if(page == PAGE_STEERING_CAL)
+    {
+        return 2;
+    }
+
+    return page == PAGE_STEERING ? 1 : 0;
+}
 
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -713,6 +719,8 @@ void UI::begin(
 
     page = 0;
 
+    steeringCalibrationError = false;
+
 
     drawMainPage(
         gyro,
@@ -792,17 +800,15 @@ void UI::drawPage(
             );
             break;
 
-        #if !defined(OPENDRIFT_BOARD_AMOLED_164)
         case PAGE_STEERING_CAL:
             radioSection = 2;
-            drawRadioPage(
+            drawSteeringCalibrationPage(
                 steeringRadio,
                 gainRadio,
                 settings,
                 gyro
             );
             break;
-        #endif
 
         case PAGE_WIFI:
             drawWifiPage(
@@ -875,7 +881,7 @@ void UI::changePage(
             targetPage;
 
         radioSection =
-            page == PAGE_STEERING ? 1 : 0;
+            radioSectionForPage(page);
 
         LGFX_Sprite* previousLcd =
             lcd;
@@ -936,7 +942,7 @@ void UI::changePage(
             targetPage;
 
         radioSection =
-            page == PAGE_STEERING ? 1 : 0;
+            radioSectionForPage(page);
 
         memcpy(
             canvas.getBuffer(),
@@ -995,9 +1001,7 @@ void UI::changePage(
             targetPage;
 
         radioSection =
-            page == PAGE_STEERING_CAL
-            ? 2
-            : (page == PAGE_STEERING ? 1 : 0);
+            radioSectionForPage(page);
 
         drawPage(
             gyro,
@@ -1045,9 +1049,7 @@ void UI::changePage(
             targetPage;
 
         radioSection =
-            page == PAGE_STEERING_CAL
-            ? 2
-            : (page == PAGE_STEERING ? 1 : 0);
+            radioSectionForPage(page);
 
         memcpy(
             canvas.getBuffer(),
@@ -1076,13 +1078,7 @@ void UI::changePage(
     }
 
     radioSection =
-        #if defined(OPENDRIFT_BOARD_AMOLED_164)
-        page == PAGE_STEERING ? 1 : 0;
-        #else
-        page == PAGE_STEERING_CAL
-        ? 2
-        : (page == PAGE_STEERING ? 1 : 0);
-        #endif
+        radioSectionForPage(page);
 
     drawPage(
         gyro,
@@ -1179,7 +1175,7 @@ bool UI::prepareSwipePreview(
         targetPage;
 
     radioSection =
-        page == PAGE_STEERING ? 1 : 0;
+        radioSectionForPage(page);
 
     drawPage(
         gyro,
@@ -1284,7 +1280,7 @@ void UI::finishSwipePreview(
         }
 
         radioSection =
-            page == PAGE_STEERING ? 1 : 0;
+            radioSectionForPage(page);
 
         memcpy(
             canvas.getBuffer(),
@@ -3226,6 +3222,153 @@ void UI::drawRoundRadioPage(
 
 
 
+void UI::drawSteeringCalibrationPage(
+    RadioInput& steeringRadio,
+    RadioInput& gainRadio,
+    Settings& settings,
+    GyroController& gyro
+)
+{
+    #if !defined(OPENDRIFT_BOARD_AMOLED_164)
+    radioSection = 2;
+
+    drawRoundRadioPage(
+        steeringRadio,
+        gainRadio,
+        settings,
+        gyro
+    );
+
+    return;
+    #else
+    drawUiBackground(lcd);
+
+    drawAmoledHeader(
+        lcd,
+        "Steering Calibration",
+        OD_AMBER
+    );
+
+    const bool steeringSignal =
+        steeringRadio.hasSignal();
+
+    uint8_t calibrationMask =
+        settings.getSteeringCalibrationMask();
+
+    bool leftCaptured =
+        (calibrationMask & 0x01) != 0;
+
+    bool centerCaptured =
+        (calibrationMask & 0x02) != 0;
+
+    bool rightCaptured =
+        (calibrationMask & 0x04) != 0;
+
+    bool calibrationSaved =
+        settings.isSteeringCalibrated();
+
+    if(calibrationSaved)
+    {
+        steeringCalibrationError = false;
+    }
+
+    const char* status =
+        calibrationSaved
+        ? "CALIBRATION SAVED"
+        : (
+            !steeringSignal
+            ? "NO SIGNAL"
+            : (
+                steeringCalibrationError
+                ? "INVALID - RETRY"
+                : (
+                    calibrationMask != 0
+                    ? "CAPTURE REMAINING"
+                    : "CAPTURE ALL 3"
+                )
+            )
+        );
+
+    uint16_t statusColor =
+        calibrationSaved
+        ? OD_GREEN
+        : (
+            !steeringSignal || steeringCalibrationError
+            ? OD_RED
+            : OD_MUTED
+        );
+
+    lcd->setTextSize(1);
+    lcd->setTextColor(statusColor);
+    lcd->drawRightString(status, 434, 20);
+
+    String leftLabel =
+        leftCaptured
+        ? String("MAX LEFT   ") + String(settings.getSteeringCapturedPulse(0))
+        : String("MAX LEFT");
+
+    String centerLabel =
+        centerCaptured
+        ? String("CENTER   ") + String(settings.getSteeringCapturedPulse(1))
+        : String("CENTER");
+
+    String rightLabel =
+        rightCaptured
+        ? String("MAX RIGHT   ") + String(settings.getSteeringCapturedPulse(2))
+        : String("MAX RIGHT");
+
+    const int buttonX = 22;
+    const int buttonWidth = 412;
+    const int buttonHeight = 54;
+
+    drawAmoledButton(
+        lcd,
+        buttonX,
+        54,
+        buttonWidth,
+        buttonHeight,
+        leftLabel.c_str(),
+        leftCaptured ? OD_GREEN : OD_RED,
+        2
+    );
+
+    drawAmoledButton(
+        lcd,
+        buttonX,
+        116,
+        buttonWidth,
+        buttonHeight,
+        centerLabel.c_str(),
+        centerCaptured ? OD_GREEN : OD_RED,
+        2
+    );
+
+    drawAmoledButton(
+        lcd,
+        buttonX,
+        178,
+        buttonWidth,
+        buttonHeight,
+        rightLabel.c_str(),
+        rightCaptured ? OD_GREEN : OD_RED,
+        2
+    );
+
+    // A second outline makes the calibration targets unmistakable without
+    // adding an expensive filled/outlined text rendering pass.
+    lcd->drawRect(buttonX + 1, 55, buttonWidth - 2, buttonHeight - 2,
+        leftCaptured ? OD_GREEN : OD_RED);
+    lcd->drawRect(buttonX + 1, 117, buttonWidth - 2, buttonHeight - 2,
+        centerCaptured ? OD_GREEN : OD_RED);
+    lcd->drawRect(buttonX + 1, 179, buttonWidth - 2, buttonHeight - 2,
+        rightCaptured ? OD_GREEN : OD_RED);
+
+    drawPageDots();
+    #endif
+}
+
+
+
 void UI::drawRadioPage(
     RadioInput& steeringRadio,
     RadioInput& gainRadio,
@@ -3334,41 +3477,11 @@ void UI::drawRadioPage(
 
         drawAmoledButton(
             lcd,
-            270,
-            27,
-            158,
-            50,
-            "MAX LEFT",
-            OD_AMBER
-        );
-
-        drawAmoledButton(
-            lcd,
-            270,
-            86,
-            158,
-            50,
-            "CENTER",
-            OD_AMBER
-        );
-
-        drawAmoledButton(
-            lcd,
-            270,
-            145,
-            158,
-            50,
-            "MAX RIGHT",
-            OD_AMBER
-        );
-
-        drawAmoledButton(
-            lcd,
-            286,
-            202,
-            62,
-            36,
-            "REV",
+            294,
+            66,
+            134,
+            64,
+            "REVERSE",
             settings.getServoReverse() ? OD_GREEN : OD_DIM
         );
 
@@ -3376,10 +3489,25 @@ void UI::drawRadioPage(
             settings.getServoReverse() ? OD_GREEN : OD_MUTED
         );
 
-        lcd->drawString(
+        lcd->drawCenterString(
             settings.getServoReverse() ? "ON" : "OFF",
-            360,
-            210
+            361,
+            140
+        );
+
+        lcd->setTextSize(1);
+        lcd->setTextColor(OD_MUTED);
+        lcd->drawCenterString(
+            "SWIPE FOR",
+            361,
+            176
+        );
+
+        lcd->setTextColor(OD_AMBER);
+        lcd->drawCenterString(
+            "CALIBRATION",
+            361,
+            194
         );
 
         drawPageDots();
@@ -4085,17 +4213,21 @@ void UI::updateRadioPage(
         lcd->setTextSize(2);
 
         lcd->fillRect(
-            358,
-            208,
-            58,
+            334,
+            136,
+            54,
             22,
             TFT_BLACK
         );
 
-        lcd->drawString(
+        lcd->setTextColor(
+            settings.getServoReverse() ? OD_GREEN : OD_MUTED
+        );
+
+        lcd->drawCenterString(
             settings.getServoReverse() ? "ON" : "OFF",
-            360,
-            210
+            361,
+            140
         );
 
         lcd->setTextColor(
@@ -4890,6 +5022,38 @@ bool UI::buttonPressed(
 }
 
 
+bool UI::captureSteeringCalibration(
+    uint8_t point,
+    RadioInput& steeringRadio,
+    Settings& settings
+)
+{
+    if(!steeringRadio.hasSignal())
+    {
+        steeringCalibrationError = true;
+        return false;
+    }
+
+    uint16_t pulse =
+        steeringRadio.getPulseWidth();
+
+    if(pulse < 900 || pulse > 2100)
+    {
+        steeringCalibrationError = true;
+        return false;
+    }
+
+    bool captured =
+        settings.captureSteeringCalibrationPoint(
+            point,
+            pulse
+        );
+
+    steeringCalibrationError = !captured;
+    return captured;
+}
+
+
 int8_t UI::repeatButtonAt(
     uint16_t x,
     uint16_t y
@@ -5085,12 +5249,17 @@ bool UI::actionButtonAt(
     if(page == PAGE_STEERING)
     {
         return
-            buttonPressed(x, y, 286, 34, 136, 44) ||
-            buttonPressed(x, y, 286, 90, 136, 44) ||
-            buttonPressed(x, y, 286, 146, 136, 44) ||
             buttonPressed(x, y, 202, 158, 34, 40) ||
             buttonPressed(x, y, 242, 158, 34, 40) ||
-            buttonPressed(x, y, 286, 202, 62, 36);
+            buttonPressed(x, y, 294, 66, 134, 64);
+    }
+
+    if(page == PAGE_STEERING_CAL)
+    {
+        return
+            buttonPressed(x, y, 22, 54, 412, 54) ||
+            buttonPressed(x, y, 22, 116, 412, 54) ||
+            buttonPressed(x, y, 22, 178, 412, 54);
     }
 
     if(page == PAGE_WIFI)
@@ -6037,93 +6206,6 @@ void UI::update(
 
         if(page == PAGE_STEERING)
         {
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(
-                    x,
-                    y,
-                    270,
-                    27,
-                    158,
-                    50
-                )
-            )
-            {
-                settings.setSteeringMin(
-                    steeringRadio.getPulseWidth()
-                );
-
-                drawRadioPage(
-                    steeringRadio,
-                    gainRadio,
-                    settings,
-                    gyro
-                );
-
-                lastTouchState =
-                    touched;
-
-                return;
-            }
-
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(
-                    x,
-                    y,
-                    270,
-                    86,
-                    158,
-                    50
-                )
-            )
-            {
-                settings.setSteeringCenter(
-                    steeringRadio.getPulseWidth()
-                );
-
-                drawRadioPage(
-                    steeringRadio,
-                    gainRadio,
-                    settings,
-                    gyro
-                );
-
-                lastTouchState =
-                    touched;
-
-                return;
-            }
-
-            if(
-                steeringRadio.hasSignal() &&
-                buttonPressed(
-                    x,
-                    y,
-                    270,
-                    145,
-                    158,
-                    50
-                )
-            )
-            {
-                settings.setSteeringMax(
-                    steeringRadio.getPulseWidth()
-                );
-
-                drawRadioPage(
-                    steeringRadio,
-                    gainRadio,
-                    settings,
-                    gyro
-                );
-
-                lastTouchState =
-                    touched;
-
-                return;
-            }
-
             if(buttonPressed(x, y, 202, 158, 34, 40))
             {
                 settings.setRadioSteeringTravel(
@@ -6162,13 +6244,50 @@ void UI::update(
                 return;
             }
 
-            if(buttonPressed(x, y, 286, 202, 62, 36))
+            if(buttonPressed(x, y, 294, 66, 134, 64))
             {
                 settings.setServoReverse(
                     !settings.getServoReverse()
                 );
 
                 drawRadioPage(
+                    steeringRadio,
+                    gainRadio,
+                    settings,
+                    gyro
+                );
+
+                lastTouchState =
+                    touched;
+
+                return;
+            }
+        }
+
+        if(page == PAGE_STEERING_CAL)
+        {
+            int8_t calibrationPoint =
+                buttonPressed(x, y, 22, 54, 412, 54)
+                ? 0
+                : (
+                    buttonPressed(x, y, 22, 116, 412, 54)
+                    ? 1
+                    : (
+                        buttonPressed(x, y, 22, 178, 412, 54)
+                        ? 2
+                        : -1
+                    )
+                );
+
+            if(calibrationPoint >= 0)
+            {
+                captureSteeringCalibration(
+                    calibrationPoint,
+                    steeringRadio,
+                    settings
+                );
+
+                drawSteeringCalibrationPage(
                     steeringRadio,
                     gainRadio,
                     settings,

@@ -322,10 +322,10 @@ public:
             #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
             "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.7 crsf  ttyOD0",
+            "control kernel 1.0.7b crsf ttyOD0",
             #endif
             #else
-            "control kernel 1.0.7 pwm  ttyOD0",
+            "control kernel 1.0.7b pwm  ttyOD0",
             #endif
             8,
             27
@@ -1461,7 +1461,8 @@ void setup()
     crsfParameters.begin(
         crsf,
         settings,
-        gyro
+        gyro,
+        steeringRadio
     );
 
     bool steeringRadioOk = steeringRadio.beginExternal();

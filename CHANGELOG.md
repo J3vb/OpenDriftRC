@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.7b - 2026-08-29
+
+### Steering calibration
+
+- Moves AMOLED steering calibration onto its own page with three large capture targets.
+- Gives each endpoint a red-to-green confirmation state and reports missing signal or invalid endpoint ordering directly on screen.
+- Fixes stale touch hitboxes that could interpret endpoint taps as swipe gestures.
+- Normalizes captured left/right PWM values so reversed transmitter channels calibrate correctly.
+- Persists shared left/center/right capture state and synchronizes calibration status between the AMOLED page, web configurator, CRSF device, and EdgeTX tool.
+- Adds `Capture Left`, `Capture Center`, and `Capture Right` actions to `OpenDrift.lua` with an always-visible calibration status.
+
 ## v1.0.7 - 2026-08-27
 
 ### Control

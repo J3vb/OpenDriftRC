@@ -99,16 +99,12 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering. Round adds Steering Cal before WiFi/System.
+    // Profiles, Radio, Steering, Steering Cal, WiFi, System.
 
     uint8_t page = 0;
 
 
-    #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    const uint8_t totalPages = 10;
-    #else
     const uint8_t totalPages = 11;
-    #endif
 
 
 
@@ -129,6 +125,8 @@ private:
     unsigned long lastPageSwipe = 0;
 
     uint8_t radioSection = 0;
+
+    bool steeringCalibrationError = false;
 
     int8_t heldRepeatButton = 0;
 
@@ -236,6 +234,13 @@ private:
         GyroController& gyro
     );
 
+    void drawSteeringCalibrationPage(
+        RadioInput& steeringRadio,
+        RadioInput& gainRadio,
+        Settings& settings,
+        GyroController& gyro
+    );
+
     void drawRoundRadioPage(
         RadioInput& steeringRadio,
         RadioInput& gainRadio,
@@ -273,6 +278,12 @@ private:
     bool actionButtonAt(
         uint16_t x,
         uint16_t y
+    );
+
+    bool captureSteeringCalibration(
+        uint8_t point,
+        RadioInput& steeringRadio,
+        Settings& settings
     );
 
     bool applyRepeatButton(

@@ -4,6 +4,7 @@
 
 #include "CrsfInput.h"
 #include "GyroController.h"
+#include "RadioInput.h"
 #include "Settings.h"
 
 
@@ -14,7 +15,8 @@ public:
     void begin(
         CrsfInput& input,
         Settings& settings,
-        GyroController& gyro
+        GyroController& gyro,
+        RadioInput& steeringRadio
     );
 
     void update();
@@ -25,7 +27,7 @@ public:
 private:
 
     static constexpr uint8_t DEVICE_ADDRESS = 0xC8;
-    static constexpr uint8_t PARAMETER_COUNT = 27;
+    static constexpr uint8_t PARAMETER_COUNT = 30;
 
     static constexpr uint8_t TYPE_PARAMETER_PING = 0x28;
     static constexpr uint8_t TYPE_DEVICE_INFO = 0x29;
@@ -56,6 +58,7 @@ private:
     CrsfInput* crsf = nullptr;
     Settings* settings = nullptr;
     GyroController* gyro = nullptr;
+    RadioInput* steeringRadio = nullptr;
     bool settingsChanged = false;
 
     void processFrame(

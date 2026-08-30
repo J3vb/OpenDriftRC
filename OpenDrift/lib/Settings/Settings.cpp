@@ -302,6 +302,46 @@ bool Settings::begin()
         2000
     );
 
+    steeringCapturedPulses[0] = prefs.getInt(
+        "strCapL",
+        steeringMin
+    );
+
+    steeringCapturedPulses[1] = prefs.getInt(
+        "strCapC",
+        steeringCenter
+    );
+
+    steeringCapturedPulses[2] = prefs.getInt(
+        "strCapR",
+        steeringMax
+    );
+
+    if(prefs.isKey("strCalMask"))
+    {
+        steeringCalibrationMask =
+            prefs.getUChar("strCalMask", 0) & 0x07;
+    }
+    else
+    {
+        // Preserve a visibly customized calibration from older firmware.
+        // Untouched 1000/1500/2000 defaults remain explicitly uncalibrated.
+        bool legacyCalibration =
+            steeringMin != 1000 ||
+            steeringCenter != 1500 ||
+            steeringMax != 2000;
+
+        bool legacyValid =
+            steeringMax - steeringMin >= 100 &&
+            steeringCenter > steeringMin + 10 &&
+            steeringCenter < steeringMax - 10;
+
+        steeringCalibrationMask =
+            legacyCalibration && legacyValid
+            ? 0x07
+            : 0x00;
+    }
+
     radioSteeringTravel = prefs.getInt(
         "strTravel",
         100
@@ -508,6 +548,26 @@ void Settings::save()
     prefs.putInt(
         "strMax",
         steeringMax
+    );
+
+    prefs.putUChar(
+        "strCalMask",
+        steeringCalibrationMask & 0x07
+    );
+
+    prefs.putInt(
+        "strCapL",
+        steeringCapturedPulses[0]
+    );
+
+    prefs.putInt(
+        "strCapC",
+        steeringCapturedPulses[1]
+    );
+
+    prefs.putInt(
+        "strCapR",
+        steeringCapturedPulses[2]
     );
 
     prefs.putInt(
@@ -866,7 +926,13 @@ int Settings::getSteeringMin()
 
 void Settings::setSteeringMin(int value)
 {
+    if(steeringMin == value)
+    {
+        return;
+    }
+
     steeringMin = value;
+    steeringCalibrationMask = 0;
     dirty = true;
 }
 
@@ -877,7 +943,13 @@ int Settings::getSteeringCenter()
 
 void Settings::setSteeringCenter(int value)
 {
+    if(steeringCenter == value)
+    {
+        return;
+    }
+
     steeringCenter = value;
+    steeringCalibrationMask = 0;
     dirty = true;
 }
 
@@ -888,8 +960,116 @@ int Settings::getSteeringMax()
 
 void Settings::setSteeringMax(int value)
 {
+    if(steeringMax == value)
+    {
+        return;
+    }
+
     steeringMax = value;
+    steeringCalibrationMask = 0;
     dirty = true;
+}
+
+uint8_t Settings::getSteeringCalibrationMask()
+{
+    return steeringCalibrationMask & 0x07;
+}
+
+bool Settings::isSteeringCalibrated()
+{
+    return
+        getSteeringCalibrationMask() == 0x07 &&
+        steeringMax - steeringMin >= 100 &&
+        steeringCenter > steeringMin + 10 &&
+        steeringCenter < steeringMax - 10;
+}
+
+int Settings::getSteeringCapturedPulse(
+    uint8_t point
+)
+{
+    if(point >= 3)
+    {
+        return 1500;
+    }
+
+    return steeringCapturedPulses[point];
+}
+
+bool Settings::captureSteeringCalibrationPoint(
+    uint8_t point,
+    int pulse
+)
+{
+    if(
+        point >= 3 ||
+        pulse < 900 ||
+        pulse > 2100
+    )
+    {
+        return false;
+    }
+
+    steeringCapturedPulses[point] = pulse;
+    steeringCalibrationMask |= (1U << point);
+    dirty = true;
+
+    if(getSteeringCalibrationMask() != 0x07)
+    {
+        return true;
+    }
+
+    int steeringLow = min(
+        steeringCapturedPulses[0],
+        steeringCapturedPulses[2]
+    );
+
+    int steeringHigh = max(
+        steeringCapturedPulses[0],
+        steeringCapturedPulses[2]
+    );
+
+    bool validCalibration =
+        steeringHigh - steeringLow >= 100 &&
+        steeringCapturedPulses[1] > steeringLow + 10 &&
+        steeringCapturedPulses[1] < steeringHigh - 10;
+
+    if(!validCalibration)
+    {
+        // Keep the two known-good captures and make the rejected position
+        // visibly incomplete on both the display and radio tool.
+        steeringCalibrationMask &= ~(1U << point);
+        return false;
+    }
+
+    steeringMin = steeringLow;
+    steeringCenter = steeringCapturedPulses[1];
+    steeringMax = steeringHigh;
+
+    return true;
+}
+
+bool Settings::confirmStoredSteeringCalibration()
+{
+    bool validCalibration =
+        steeringMax - steeringMin >= 100 &&
+        steeringCenter > steeringMin + 10 &&
+        steeringCenter < steeringMax - 10;
+
+    if(!validCalibration)
+    {
+        steeringCalibrationMask = 0;
+        dirty = true;
+        return false;
+    }
+
+    steeringCapturedPulses[0] = steeringMin;
+    steeringCapturedPulses[1] = steeringCenter;
+    steeringCapturedPulses[2] = steeringMax;
+    steeringCalibrationMask = 0x07;
+    dirty = true;
+
+    return true;
 }
 
 int Settings::getRadioSteeringTravel()
