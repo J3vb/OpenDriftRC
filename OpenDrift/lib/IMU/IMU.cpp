@@ -31,12 +31,50 @@ bool IMU::begin()
         SensorQMI8658::LPF_MODE_0
     );
 
+    gyroLpfMode = 0;
+
 
     qmi.enableAccelerometer();
     qmi.enableGyroscope();
 
 
     return true;
+}
+
+
+bool IMU::setGyroLpfMode(uint8_t mode)
+{
+    mode = constrain(mode, 0, 2);
+
+    if(mode == gyroLpfMode)
+    {
+        return true;
+    }
+
+    SensorQMI8658::LpfMode sensorMode =
+        mode == 1
+        ? SensorQMI8658::LPF_MODE_3
+        : (mode == 2
+            ? SensorQMI8658::LPF_OFF
+            : SensorQMI8658::LPF_MODE_0);
+
+    if(!qmi.configGyroscope(
+        SensorQMI8658::GYR_RANGE_1024DPS,
+        SensorQMI8658::GYR_ODR_896_8Hz,
+        sensorMode
+    ))
+    {
+        return false;
+    }
+
+    gyroLpfMode = mode;
+    return true;
+}
+
+
+uint8_t IMU::getGyroLpfMode() const
+{
+    return gyroLpfMode;
 }
 
 

@@ -4,7 +4,14 @@ namespace
 {
     int legacyMaxCorrectionToPercent(int value)
     {
-        return constrain((value + 2) / 5, 0, 100);
+        // Legacy values used center-to-endpoint microseconds. The current
+        // percentage covers the complete endpoint-to-endpoint correction.
+        return constrain((value + 5) / 10, 0, 100);
+    }
+
+    int centerSpanPercentToFullSpanPercent(int value)
+    {
+        return constrain((value + 1) / 2, 0, 100);
     }
 
     struct DrivingProfileV8
@@ -175,9 +182,13 @@ bool Settings::begin()
     prefs.begin("OpenDrift", false);
     #endif
 
-    gain = prefs.getFloat(
-        "gain",
-        1.5f
+    gain = constrain(
+        prefs.getFloat(
+            "gain",
+            1.5f
+        ),
+        0.0f,
+        3.0f
     );
 
     deadband = prefs.getFloat(
@@ -190,6 +201,9 @@ bool Settings::begin()
         false
     );
 
+    bool maxCorrectionUsesFullSpan =
+        prefs.getBool("maxSpanV1", false);
+
     if(prefs.isKey("gyroMaxPct"))
     {
         gyroMaxCorrection = constrain(
@@ -197,6 +211,14 @@ bool Settings::begin()
             0,
             100
         );
+
+        if(!maxCorrectionUsesFullSpan)
+        {
+            gyroMaxCorrection =
+                centerSpanPercentToFullSpanPercent(
+                    gyroMaxCorrection
+                );
+        }
     }
     else if(prefs.isKey("gyroMax"))
     {
@@ -207,12 +229,28 @@ bool Settings::begin()
     }
     else
     {
-        gyroMaxCorrection = 50;
+        gyroMaxCorrection = 25;
     }
 
-    gyroSmoothing = prefs.getFloat(
-        "gyroSmooth",
-        0.10f
+    if(!maxCorrectionUsesFullSpan)
+    {
+        prefs.putInt("gyroMaxPct", gyroMaxCorrection);
+        prefs.putBool("maxSpanV1", true);
+    }
+
+    gyroSmoothing = constrain(
+        prefs.getFloat(
+            "gyroSmooth",
+            0.10f
+        ),
+        0.0f,
+        1.0f
+    );
+
+    gyroLpfMode = constrain(
+        prefs.getUChar("gyroLpf", 0),
+        0,
+        2
     );
 
     gyroIntegralGain = prefs.getFloat(
@@ -394,7 +432,8 @@ bool Settings::begin()
     {
         gain = 1.85f;
         deadband = 2.0f;
-        gyroMaxCorrection = 74;
+        // 37% on the full-span scale preserves the old 74% authority.
+        gyroMaxCorrection = 37;
         gyroSmoothing = 0.01f;
         gyroIntegralGain = 0.0f;
         gyroIntegralLimit = 120;
@@ -464,6 +503,11 @@ void Settings::save()
     prefs.putFloat(
         "gyroSmooth",
         gyroSmoothing
+    );
+
+    prefs.putUChar(
+        "gyroLpf",
+        gyroLpfMode
     );
 
     prefs.putFloat(
@@ -627,7 +671,7 @@ float Settings::getGain()
 
 void Settings::setGain(float value)
 {
-    gain = value;
+    gain = constrain(value, 0.0f, 3.0f);
     dirty = true;
 }
 
@@ -680,10 +724,21 @@ void Settings::setGyroSmoothing(float value)
     gyroSmoothing =
         constrain(
             value,
-            0.01f,
+            0.0f,
             1.0f
         );
 
+    dirty = true;
+}
+
+uint8_t Settings::getGyroLpfMode()
+{
+    return gyroLpfMode;
+}
+
+void Settings::setGyroLpfMode(uint8_t value)
+{
+    gyroLpfMode = constrain(value, 0, 2);
     dirty = true;
 }
 
@@ -1394,46 +1449,36 @@ void Settings::loadProfiles()
 
         size_t storedSize = prefs.getBytesLength(key);
 
-        if(
-            storedSize == sizeof(DrivingProfile) &&
-            prefs.getBytes(
-                key,
-                &profiles[loadedCount],
-                sizeof(DrivingProfile)
-            ) == sizeof(DrivingProfile) &&
-            profiles[loadedCount].version == 9 &&
-            profiles[loadedCount].name[0] != '\0'
-        )
+        if(storedSize == sizeof(DrivingProfile))
         {
-            profiles[loadedCount].name[PROFILE_NAME_LENGTH - 1] = '\0';
-            loadedCount++;
-        }
-        else if(storedSize == sizeof(DrivingProfileV8))
-        {
-            DrivingProfileV8 legacy = {};
+            DrivingProfile stored = {};
 
             if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 8 &&
-                legacy.name[0] != '\0'
+                prefs.getBytes(key, &stored, sizeof(stored)) == sizeof(stored) &&
+                stored.name[0] != '\0' &&
+                (stored.version == 8 || stored.version == 9 || stored.version == 10)
             )
             {
                 DrivingProfile& profile = profiles[loadedCount];
-                profile = DrivingProfile();
-                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile = stored;
+                profile.version = 10;
                 profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
-                profile.gain = legacy.gain;
-                profile.deadband = legacy.deadband;
-                profile.gyroSmoothing = legacy.gyroSmoothing;
-                profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
-                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
-                profile.gyroHoldBoost = legacy.gyroHoldBoost;
-                profile.predictionStrength = legacy.predictionStrength;
-                profile.radioSteeringTravel = legacy.radioSteeringTravel;
-                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
-                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
-                profile.gyroHuntStrength = legacy.gyroHuntStrength;
+
+                if(stored.version == 9)
+                {
+                    profile.gyroMaxCorrection =
+                        centerSpanPercentToFullSpanPercent(
+                            stored.gyroMaxCorrection
+                        );
+                }
+                else if(stored.version == 8)
+                {
+                    profile.gyroMaxCorrection =
+                        legacyMaxCorrectionToPercent(
+                            stored.gyroMaxCorrection
+                        );
+                }
+
                 loadedCount++;
             }
         }
@@ -1664,7 +1709,7 @@ void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 9;
+    profile.version = 10;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;
@@ -1683,9 +1728,9 @@ void Settings::applyProfile(
     const DrivingProfile& profile
 )
 {
-    gain = profile.gain;
+    gain = constrain(profile.gain, 0.0f, 3.0f);
     deadband = profile.deadband;
-    gyroSmoothing = profile.gyroSmoothing;
+    gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
     gyroIntegralGain = profile.gyroIntegralGain;
     gyroMaxCorrection = profile.gyroMaxCorrection;
     gyroIntegralLimit = profile.gyroIntegralLimit;

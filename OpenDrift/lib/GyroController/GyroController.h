@@ -31,6 +31,7 @@ public:
     void setMaxCorrection(int correction);
     int getMaxCorrection();
     int getCorrection();
+    int getRequestedCorrection();
 
     // Drift Memory is equilibrium-error feedback, never an integral of raw
     // yaw. Drift Memory Limit caps that feedback.
@@ -94,9 +95,6 @@ public:
     float getSettledBlend();
     float getThrottleTransient();
     float getFilteredYaw();
-    int getServoOutput();
-
-
 private:
 
     float gyroGain = 1.5f;
@@ -194,7 +192,7 @@ private:
     float transitionAuthorityTelemetry = 0.0f;
     float transitionPredictionScaleTelemetry = 1.0f;
 
-    int servoOutput = 1500;
+    int requestedCorrectionOutput = 0;
     int correctionOutput = 0;
 
     bool calibrated = false;

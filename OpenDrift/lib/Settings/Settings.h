@@ -12,7 +12,7 @@ public:
 
     struct DrivingProfile
     {
-        uint32_t version = 9;
+        uint32_t version = 10;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -20,7 +20,7 @@ public:
         float gyroSmoothing = 0.10f;
         float gyroIntegralGain = 0.0f;
 
-        int32_t gyroMaxCorrection = 50;
+        int32_t gyroMaxCorrection = 25;
         int32_t gyroIntegralLimit = 120;
         int32_t gyroHoldBoost = 0;
         int32_t predictionStrength = 0;
@@ -49,6 +49,10 @@ public:
 
     float getGyroSmoothing();
     void setGyroSmoothing(float value);
+
+    // 0 = 24 Hz (QMI mode 0), 1 = 120 Hz (mode 3), 2 = hardware LPF off.
+    uint8_t getGyroLpfMode();
+    void setGyroLpfMode(uint8_t value);
 
     float getGyroIntegralGain();
     void setGyroIntegralGain(float value);
@@ -163,9 +167,11 @@ private:
 
     bool gyroReverse = false;
 
-    int gyroMaxCorrection = 50;
+    int gyroMaxCorrection = 25;
 
     float gyroSmoothing = 0.10f;
+
+    uint8_t gyroLpfMode = 0;
 
     float gyroIntegralGain = 0.0f;
 

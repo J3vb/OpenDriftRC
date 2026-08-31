@@ -22,8 +22,10 @@ public:
         float accelDelta,
         float tiltRate,
         float surfaceDisturbance,
-        int rawGyroCorrection,
-        int slewedGyroCorrection,
+        int requestedGyroCorrection,
+        int limitedGyroCorrection,
+        int appliedGyroCorrection,
+        bool correctionSaturated,
         int steeringRaw,
         int steeringCommand,
         int servoCommand,
@@ -34,6 +36,7 @@ public:
         float deadband,
         int maxCorrection,
         float smoothing,
+        int gyroLpfMode,
         float integralGain,
         int integralLimit,
         int integralCorrection,
@@ -114,8 +117,9 @@ private:
         float accelDelta;
         float tiltRate;
         float surfaceDisturbance;
-        int32_t rawGyroCorrection;
-        int32_t slewedGyroCorrection;
+        int32_t requestedGyroCorrection;
+        int32_t limitedGyroCorrection;
+        int32_t appliedGyroCorrection;
         int32_t steeringRaw;
         int32_t steeringCommand;
         int32_t servoCommand;
@@ -126,6 +130,7 @@ private:
         float deadband;
         int32_t maxCorrection;
         float smoothing;
+        int32_t gyroLpfMode;
         float integralGain;
         int32_t integralLimit;
         int32_t integralCorrection;
@@ -173,6 +178,7 @@ private:
     static const uint32_t throttleSignalFlag = 1UL << 1;
     static const uint32_t gainSignalFlag = 1UL << 2;
     static const uint32_t throttleOutputFlag = 1UL << 3;
+    static const uint32_t correctionSaturatedFlag = 1UL << 4;
     Record* records = nullptr;
 
     size_t capacity = 0;

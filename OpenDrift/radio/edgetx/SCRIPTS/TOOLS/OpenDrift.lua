@@ -4,10 +4,11 @@ local DEVICE = 0xC8
 local RADIO = 0xEA
 
 local fields = {
-  { 1, "Active Gain",     50,  500,   5, 2 },
+  { 1, "Active Gain",      0,  300,   5, 2 },
   { 2, "Deadband",         0,  200,   1, 1 },
   { 3, "Max Corr %",       0,  100,   1, 0 },
-  { 4, "Smoothing",        1,  100,   1, 2 },
+  { 4, "Smoothing",        0,  100,   1, 2 },
+  {32, "Gyro LPF",         0,    2,   1, 0, true, false, false, false, false, true},
   { 5, "Drift Memory",     0, 2000,   1, 2 },
   { 6, "Memory Limit",     0,  500,   5, 0 },
   { 7, "Hold Assist",      0,  100,   1, 0 },
@@ -139,6 +140,11 @@ local function valueText(field)
     return "NO"
   end
   if field[11] then return "PRESS" end
+  if field[12] then
+    if field.value == 2 then return "OFF" end
+    if field.value == 1 then return "120 Hz" end
+    return "24 Hz"
+  end
   if field[8] then
     if field[4] == 0 then return "RES" end
     return field.value == 0 and "OFF" or "CH" .. tostring(field.value)

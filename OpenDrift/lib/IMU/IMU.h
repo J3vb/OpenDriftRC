@@ -11,6 +11,9 @@ public:
 
     bool begin();
 
+    bool setGyroLpfMode(uint8_t mode);
+    uint8_t getGyroLpfMode() const;
+
     void update();
 
 
@@ -49,6 +52,8 @@ private:
     float surfaceDisturbanceScore = 0;
 
     bool accelFilterReady = false;
+
+    uint8_t gyroLpfMode = 0;
 
     uint32_t lastUpdateMicros = 0;
 

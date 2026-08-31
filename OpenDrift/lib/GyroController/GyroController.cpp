@@ -113,7 +113,7 @@ void GyroController::resetDynamicState()
     transitionAuthorityTelemetry = 0.0f;
     transitionPredictionScaleTelemetry = 1.0f;
 
-    servoOutput = 1500;
+    requestedCorrectionOutput = 0;
     correctionOutput = 0;
 }
 
@@ -383,27 +383,33 @@ int GyroController::update(
             (yawMagnitude - deadband);
     }
 
-    // One time-based gyro low-pass is the entire filtering chain.
-    float baseFilterAmount =
-        1.0f -
-        constrain(
-            smoothing,
-            0.01f,
-            0.99f
-        );
+    // Zero is a true software-filter bypass for sensor-bandwidth A/B tests.
+    // Non-zero values retain the original time-based smoothing curve.
+    float filterAmount = 1.0f;
 
-    float filterAmount =
-        1.0f -
-        powf(
-            1.0f - baseFilterAmount,
-            dt / 0.02f
-        );
+    if(smoothing > 0.0f)
+    {
+        float baseFilterAmount =
+            1.0f -
+            constrain(
+                smoothing,
+                0.01f,
+                0.99f
+            );
 
-    filterAmount = constrain(
-        filterAmount,
-        0.001f,
-        1.0f
-    );
+        filterAmount =
+            1.0f -
+            powf(
+                1.0f - baseFilterAmount,
+                dt / 0.02f
+            );
+
+        filterAmount = constrain(
+            filterAmount,
+            0.001f,
+            1.0f
+        );
+    }
 
     previousFilteredYaw = filteredYaw;
 
@@ -1240,26 +1246,10 @@ int GyroController::update(
         +
         steadyAssistCorrection;
 
-    // Max Correction remains the absolute safety cap. Faster settings may
-    // deliberately release some transition authority; slower settings retain
-    // the full configured authority but never exceed the user's limit.
-    float fastTransitionRelease = max(
-        transitionSpeedBlend,
-        0.0f
-    );
-
-    int effectiveMaxCorrection =
-        (int)roundf(
-            maxCorrection
-            *
-            (1.0f - 0.30f * fastTransitionRelease)
-        );
-
-    effectiveMaxCorrection = constrain(
-        effectiveMaxCorrection,
-        0,
-        maxCorrection
-    );
+    // Transition Speed shapes the response above, but it must never reduce
+    // the hard correction authority. Doing so made fast transitions hit a
+    // moving ceiling and then snap when that ceiling released.
+    int effectiveMaxCorrection = maxCorrection;
 
     // There is no accumulating state to wind up. When direct damping has
     // saturated, memory may help it unwind but may not push farther into the
@@ -1272,30 +1262,33 @@ int GyroController::update(
         integralCorrection = 0;
     }
 
+    int requestedControllerCorrection =
+        (int)roundf(
+            baseCorrection
+            +
+            integralCorrection
+        );
+
     int targetCorrection =
         constrain(
-            (int)roundf(
-                baseCorrection
-                +
-                integralCorrection
-            ),
+            requestedControllerCorrection,
             -effectiveMaxCorrection,
             effectiveMaxCorrection
         );
 
     if(idle && correctedYaw == 0.0f)
     {
+        requestedControllerCorrection = 0;
         targetCorrection = 0;
         filteredYawAcceleration = 0.0f;
     }
 
-    correctionOutput = targetCorrection;
-
-    servoOutput = constrain(
-        1500 - correctionOutput,
-        1000,
-        2000
-    );
+    // Expose a signed correction, not a fake centered servo command. The
+    // controller's sign convention is opposite the servo mix convention.
+    // The caller combines this with driver input and performs the one final
+    // normalized clamp before calibrated physical endpoints are applied.
+    requestedCorrectionOutput = -requestedControllerCorrection;
+    correctionOutput = -targetCorrection;
 
     predictedYawTelemetry = predictedYaw;
     driftReferenceTelemetry = driftReferenceYaw;
@@ -1324,7 +1317,7 @@ int GyroController::update(
     transitionAuthorityTelemetry = transitionAuthorityBlend;
     transitionPredictionScaleTelemetry = transitionPredictionScale;
 
-    return servoOutput;
+    return correctionOutput;
 }
 
 
@@ -1333,7 +1326,7 @@ void GyroController::setGain(float value)
     gyroGain = constrain(
         value,
         0.0f,
-        10.0f
+        3.0f
     );
 }
 
@@ -1364,7 +1357,7 @@ void GyroController::setSmoothing(float value)
 {
     smoothing = constrain(
         value,
-        0.01f,
+        0.0f,
         1.0f
     );
 }
@@ -1395,6 +1388,12 @@ int GyroController::getMaxCorrection()
 int GyroController::getCorrection()
 {
     return correctionOutput;
+}
+
+
+int GyroController::getRequestedCorrection()
+{
+    return requestedCorrectionOutput;
 }
 
 
@@ -1754,10 +1753,4 @@ float GyroController::getThrottleTransient()
 float GyroController::getFilteredYaw()
 {
     return filteredYaw;
-}
-
-
-int GyroController::getServoOutput()
-{
-    return servoOutput;
 }

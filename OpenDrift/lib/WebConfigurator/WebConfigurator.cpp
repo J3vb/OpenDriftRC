@@ -276,19 +276,27 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
     html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01");
     html += input("Deadband", "deadband", String(settings->getDeadband(), 2), "number", "1");
-    html += input("Max correction (% physical travel)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
+    html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
+    html += F("<p class='sub'>This is the gyro's maximum endpoint-to-endpoint authority. 50% can move from center to one calibrated endpoint; 100% can override one endpoint all the way to the other. Physical endpoint calibration remains the final hard limit.</p>");
     html += F("</div>");
     html += checkbox("Reverse gyro correction", "gyroReverse", settings->getGyroReverse());
     html += F("</div>");
 
     html += F("<div class='card'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
     html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01");
+    html += F("<label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
+    if(settings->getGyroLpfMode() == 0) html += F(" selected");
+    html += F(">24 Hz - original</option><option value='1'");
+    if(settings->getGyroLpfMode() == 1) html += F(" selected");
+    html += F(">120 Hz - low latency</option><option value='2'");
+    if(settings->getGyroLpfMode() == 2) html += F(" selected");
+    html += F(">Off - raw bandwidth</option></select>");
     html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1");
     html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1");
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping and authority for faster transitions. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
+    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
     html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1");
     html += F("</div></div>");
 
@@ -554,6 +562,13 @@ void WebConfigurator::handleSave()
         )
     );
 
+    settings->setGyroLpfMode(
+        getIntArg(
+            "gyroLpfMode",
+            settings->getGyroLpfMode()
+        )
+    );
+
     settings->setGyroIntegralGain(
         getFloatArg(
             "gyroIGain",
@@ -751,7 +766,7 @@ void WebConfigurator::handleSave()
         );
 
         gyro->setMaxCorrection(
-            settings->getGyroMaxCorrection() * 5
+            settings->getGyroMaxCorrection() * 10
         );
 
         gyro->setIntegralGain(

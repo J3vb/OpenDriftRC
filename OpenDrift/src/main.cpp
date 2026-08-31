@@ -87,8 +87,10 @@ static constexpr int AMOLED_CS_PIN = 9;
 struct ControlTelemetry
 {
     float yaw = 0.0f;
-    int rawGyroCorrection = 0;
-    int gyroCorrection = 0;
+    int requestedGyroCorrection = 0;
+    int limitedGyroCorrection = 0;
+    int appliedGyroCorrection = 0;
+    bool correctionSaturated = false;
     int steeringCommand = 1500;
     int servoCommand = 1500;
     bool steeringSignal = false;
@@ -850,7 +852,7 @@ void runControlIteration()
     );
 
     gyro.setMaxCorrection(
-        settings.getGyroMaxCorrection() * 5
+        settings.getGyroMaxCorrection() * 10
     );
 
     gyro.setIntegralGain(
@@ -888,6 +890,10 @@ void runControlIteration()
             portMAX_DELAY
         );
     }
+
+    imu.setGyroLpfMode(
+        settings.getGyroLpfMode()
+    );
 
     imu.update();
 
@@ -930,7 +936,7 @@ void runControlIteration()
     float yaw =
         imu.getYawRate();
 
-    int gyroCommand =
+    int gyroCorrection =
         gyro.update(
             yaw,
             steeringCommand,
@@ -939,17 +945,21 @@ void runControlIteration()
             throttleSignal
         );
 
-    int gyroCorrection =
-        gyroCommand - 1500;
+    int requestedGyroCorrection =
+        gyro.getRequestedCorrection();
 
     if(settings.getGyroReverse())
     {
         gyroCorrection =
             -gyroCorrection;
+        requestedGyroCorrection =
+            -requestedGyroCorrection;
     }
 
-    int rawGyroCorrection =
-        gyroCorrection;
+    int limitedGyroCorrection = gyroCorrection;
+    int appliedGyroCorrection = 0;
+    bool correctionSaturated =
+        requestedGyroCorrection != limitedGyroCorrection;
 
     int servoCommand =
         steeringServo.getPosition();
@@ -964,6 +974,13 @@ void runControlIteration()
             1000,
             2000
         );
+
+        appliedGyroCorrection =
+            servoCommand - steeringCommand;
+
+        correctionSaturated =
+            correctionSaturated ||
+            appliedGyroCorrection != limitedGyroCorrection;
 
         steeringServo.configure(
             settings.getServoCenter(),
@@ -1002,10 +1019,14 @@ void runControlIteration()
     ControlTelemetry nextTelemetry;
 
     nextTelemetry.yaw = yaw;
-    nextTelemetry.rawGyroCorrection =
-        rawGyroCorrection;
-    nextTelemetry.gyroCorrection =
-        gyroCorrection;
+    nextTelemetry.requestedGyroCorrection =
+        requestedGyroCorrection;
+    nextTelemetry.limitedGyroCorrection =
+        limitedGyroCorrection;
+    nextTelemetry.appliedGyroCorrection =
+        appliedGyroCorrection;
+    nextTelemetry.correctionSaturated =
+        correctionSaturated;
     nextTelemetry.steeringCommand =
         steeringCommand;
     nextTelemetry.servoCommand =
@@ -1584,7 +1605,7 @@ void setup()
     );
 
     gyro.setMaxCorrection(
-        settings.getGyroMaxCorrection() * 5
+        settings.getGyroMaxCorrection() * 10
     );
 
     gyro.setIntegralGain(
@@ -2034,8 +2055,10 @@ void loop()
             imu.getAccelDelta(),
             imu.getTiltRate(),
             imu.getSurfaceDisturbanceScore(),
-            telemetry.rawGyroCorrection,
-            telemetry.gyroCorrection,
+            telemetry.requestedGyroCorrection,
+            telemetry.limitedGyroCorrection,
+            telemetry.appliedGyroCorrection,
+            telemetry.correctionSaturated,
             steeringRadio.getPulseWidth(),
             telemetry.steeringCommand,
             telemetry.servoCommand,
@@ -2046,6 +2069,7 @@ void loop()
             settings.getDeadband(),
             settings.getGyroMaxCorrection(),
             settings.getGyroSmoothing(),
+            imu.getGyroLpfMode(),
             settings.getGyroIntegralGain(),
             settings.getGyroIntegralLimit(),
             gyro.getIntegralCorrection(),

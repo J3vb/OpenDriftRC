@@ -34,9 +34,14 @@ channel 3 overrides gain changes made elsewhere while its signal is valid; the
 stored profile gain remains the fallback used without that gain signal.
 
 The tool exposes the gyro and steering values: Active Gain, Deadband, Max Correction,
-Smoothing, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
+Smoothing, Gyro LPF, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
 Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, physical endpoints,
 Servo Travel, Servo Center,
 Servo Reverse, and Gyro Reverse. It also assigns CRSF channel 1–16 or OFF to
 GPIO 1–8 on AMOLED V1 and GPIO 3–8 on AMOLED V2. GPIO 1/2 display `RES` on V2
 because those pins carry the CRSF UART.
+
+`Gyro LPF` selects the QMI8658 hardware filter: `24 Hz` is the original
+low-bandwidth mode, `120 Hz` reduces sensor phase delay, and `Off` bypasses the
+sensor LPF. `Smoothing 0.00` is a true software-filter bypass. Blackbox logs
+record the active selection in `gyro_lpf_mode` as 0, 1, or 2 respectively.

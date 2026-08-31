@@ -71,8 +71,9 @@ the car quickly. They do not disable the fast direct damping path.
 |---|---|
 | Gain | Direct correction per degree/second of predicted yaw |
 | Deadband | Removes very small corrected yaw near zero |
-| Max Correction | Maximum gyro movement as a percentage of calibrated physical steering travel |
-| Smoothing | The only yaw low-pass; larger values add more filtering |
+| Max Correction | Maximum gyro correction as a percentage of the full calibrated endpoint-to-endpoint steering span; `50%` is center-to-endpoint authority and `100%` can override one endpoint all the way to the other |
+| Smoothing | Broad software yaw low-pass; `0.00` bypasses it and larger values add filtering and phase delay |
+| Gyro LPF | QMI8658 hardware bandwidth: original 24 Hz, low-latency 120 Hz, or Off |
 | Countersteer Assist | Adds slow settled-drift countersteer without increasing fast damping; `0` preserves the base response |
 | Prediction | Continuous yaw-acceleration look-ahead from 0–100 |
 | Hold Assist | Controls how slowly a quiet-drift reference follows yaw |
@@ -87,12 +88,24 @@ even with Prediction set to zero. The Prediction setting adds general
 yaw-acceleration look-ahead; throttle temporarily extends that horizon before
 the chassis response develops.
 
+### Gyro filtering
+
+The EdgeTX tool and web configurator expose three QMI8658 hardware modes:
+
+- `24 Hz` (`gyro_lpf_mode=0`) is the original low-bandwidth response.
+- `120 Hz` (`gyro_lpf_mode=1`) reduces phase delay while retaining hardware filtering.
+- `Off` (`gyro_lpf_mode=2`) exposes the unfiltered sensor bandwidth.
+
+`Smoothing 0.00` also bypasses the broad software filter. Change one filter at
+a time and retune Gain after changing bandwidth. Anti Wobble remains useful
+because it is a narrow wheel-mode notch rather than a broad yaw low-pass.
+
 ### Transition Speed
 
 Transition Speed is tuned after the core settings. Keep it at `50` for neutral
 response. Lower values add yaw damping through the complete direction change;
-higher values reduce damping and release some transition authority for faster
-rotation. It follows both the driver's transition intent and the measured yaw
+higher values reduce damping for faster rotation. It never changes the hard
+Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
 
@@ -104,7 +117,7 @@ Use a stand or hold the chassis with the wheels clear before driving.
 |---|---:|
 | Gain | `1.50` |
 | Deadband | `4` |
-| Max Correction | `50%` |
+| Max Correction | `25%` |
 | Smoothing | `0.01` |
 | Countersteer Assist | `0` |
 | Prediction | `0` |
@@ -162,7 +175,10 @@ the retired alpha-era tuning fields:
 
 | Field | Meaning |
 |---|---|
-| `gyro_raw_us`, `gyro_correction_us` | Controller correction before final steering mix |
+| `gyro_requested_us` | Correction requested before Max Correction is applied |
+| `gyro_limited_us` | Correction after the fixed Max Correction limit |
+| `gyro_applied_us` | Correction actually available after combining gyro and driver steering |
+| `correction_saturated` | `1` when either Max Correction or the final normalized steering range clipped the request |
 | `predicted_yaw` | Filtered yaw plus short-horizon prediction |
 | `drift_reference_yaw` | Learned quiet-drift yaw reference |
 | `reference_error` | Filtered yaw minus drift reference |

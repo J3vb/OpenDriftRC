@@ -7,9 +7,9 @@ Unlike the former Tail Slide Speed experiment, the adjustment follows the
 complete transition envelope: driver steering announces the transition and
 measured chassis yaw keeps it active through the physical direction reversal.
 Values below 50 add fast yaw damping for a slower, more deliberate transition.
-Values above 50 reduce damping and release some correction authority for a
-faster transition. It does not command rotation, reverse gyro correction, or
-change steady Countersteer Assist.
+Values above 50 reduce damping for a faster transition. Transition Speed never
+changes the hard Max Correction ceiling. It does not command rotation, reverse
+gyro correction, or change steady Countersteer Assist.
 
 Transition prediction is also tapered while a direction change is in progress.
 If acceleration prediction reaches the new yaw direction before the measured

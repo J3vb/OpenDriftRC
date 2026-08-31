@@ -7,10 +7,10 @@ namespace
 {
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
-        {"Active Gain",      50,  500, 150, 2,   5, "x"},
+        {"Active Gain",       0,  300, 150, 2,   5, "x"},
         {"Deadband",          0,  200,  20, 1,   1, "dps"},
-        {"Max Correction",    0,  100,  50, 0,   1, "%"},
-        {"Smoothing",         1,  100,  10, 2,   1, ""},
+        {"Max Correction",    0,  100,  25, 0,   1, "%"},
+        {"Smoothing",         0,  100,  10, 2,   1, ""},
         {"Drift Memory",      0, 2000,   0, 2,   1, ""},
         {"Memory Limit",      0,  500, 120, 0,   5, "us"},
         {"Hold Assist",       0,  100,   0, 0,   1, "%"},
@@ -175,6 +175,8 @@ void CrsfParameterDevice::sendParameter(
             appendByte(payload, length, child);
         }
 
+        appendByte(payload, length, 32);
+
         appendByte(payload, length, 0xFF);
     }
     else if(
@@ -200,6 +202,7 @@ void CrsfParameterDevice::sendParameter(
         parameter == 15 ||
         parameter == 16 ||
         parameter == 25 ||
+        parameter == 32 ||
         (parameter >= 27 && parameter <= 31)
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
         || (parameter >= 17 && parameter <= 24)
@@ -209,7 +212,16 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 0);
         appendByte(payload, length, DATA_SELECTION);
 
-        if(parameter == 27)
+        if(parameter == 32)
+        {
+            appendString(payload, length, "Gyro LPF");
+            appendString(payload, length, "24 Hz;120 Hz;Off");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 2);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter == 27)
         {
             appendString(payload, length, "Endpoints");
             appendString(payload, length, "NOT CAL;PARTIAL;CALIBRATED");
@@ -328,6 +340,7 @@ void CrsfParameterDevice::writeParameter(
             parameter == 15 ||
             parameter == 16 ||
             parameter == 25 ||
+            parameter == 32 ||
             (parameter >= 27 && parameter <= 31)
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
             || (parameter >= 17 && parameter <= 24)
@@ -428,6 +441,7 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 30:
         case 31:
             return 0;
+        case 32: return settings->getGyroLpfMode();
         default: return 0;
     }
 }
@@ -535,6 +549,11 @@ void CrsfParameterDevice::setScaledValue(
             {
                 settings->clearSteeringCalibration();
             }
+            break;
+        case 32:
+            settings->setGyroLpfMode(
+                constrain(value, 0, 2)
+            );
             break;
     }
 }
