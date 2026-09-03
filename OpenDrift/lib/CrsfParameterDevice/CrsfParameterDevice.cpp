@@ -7,7 +7,7 @@ namespace
 {
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
-        {"Active Gain",       0,  300, 150, 2,   5, "x"},
+        {"Active Gain",       0,  600, 150, 2,   5, "x"},
         {"Deadband",          0,  200,  20, 1,   1, "dps"},
         {"Max Correction",    0,  100,  25, 0,   1, "%"},
         {"Smoothing",         0,  100,  10, 2,   1, ""},
@@ -25,6 +25,12 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition ANTI_WOBBLE_PARAMETER =
         {"Anti Wobble", 0, 100, 50, 0, 1, "%"};
+
+    const CrsfParameterDevice::FloatDefinition CHANNEL_3_GAIN_MIN_PARAMETER =
+        {"CH3 Gain Min", 0, 600, 50, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition CHANNEL_3_GAIN_MAX_PARAMETER =
+        {"CH3 Gain Max", 0, 600, 300, 2, 5, "x"};
 }
 
 
@@ -176,12 +182,16 @@ void CrsfParameterDevice::sendParameter(
         }
 
         appendByte(payload, length, 32);
+        appendByte(payload, length, 33);
+        appendByte(payload, length, 34);
 
         appendByte(payload, length, 0xFF);
     }
     else if(
         (parameter >= 1 && parameter <= 14) ||
-        parameter == 26
+        parameter == 26 ||
+        parameter == 33 ||
+        parameter == 34
     )
     {
         const FloatDefinition* definition =
@@ -328,6 +338,8 @@ void CrsfParameterDevice::writeParameter(
         (
             parameter >= 1 && parameter <= 14
             || parameter == 26
+            || parameter == 33
+            || parameter == 34
         ) &&
         length >= 4
     )
@@ -442,6 +454,8 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 31:
             return 0;
         case 32: return settings->getGyroLpfMode();
+        case 33: return lroundf(settings->getChannel3GainMin() * 100.0f);
+        case 34: return lroundf(settings->getChannel3GainMax() * 100.0f);
         default: return 0;
     }
 }
@@ -454,7 +468,9 @@ void CrsfParameterDevice::setScaledValue(
 {
     if(
         (parameter >= 1 && parameter <= 14) ||
-        parameter == 26
+        parameter == 26 ||
+        parameter == 33 ||
+        parameter == 34
     )
     {
         const FloatDefinition* definition =
@@ -555,6 +571,12 @@ void CrsfParameterDevice::setScaledValue(
                 constrain(value, 0, 2)
             );
             break;
+        case 33:
+            settings->setChannel3GainMin(value / 100.0f);
+            break;
+        case 34:
+            settings->setChannel3GainMax(value / 100.0f);
+            break;
     }
 }
 
@@ -567,6 +589,16 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 26)
     {
         return &ANTI_WOBBLE_PARAMETER;
+    }
+
+    if(parameter == 33)
+    {
+        return &CHANNEL_3_GAIN_MIN_PARAMETER;
+    }
+
+    if(parameter == 34)
+    {
+        return &CHANNEL_3_GAIN_MAX_PARAMETER;
     }
 
     return &FLOAT_PARAMETERS[parameter - 1];

@@ -70,6 +70,7 @@ the car quickly. They do not disable the fast direct damping path.
 | Setting | v1.0 behavior |
 |---|---|
 | Gain | Direct correction per degree/second of predicted yaw |
+| CH3 Gain Min / Max | Maps the full Channel 3 knob or slider range to gain; defaults to `0.50` through `3.00` and supports up to `6.00` |
 | Deadband | Removes very small corrected yaw near zero |
 | Max Correction | Maximum gyro correction as a percentage of the full calibrated endpoint-to-endpoint steering span; `50%` is center-to-endpoint authority and `100%` can override one endpoint all the way to the other |
 | Smoothing | Broad software yaw low-pass; `0.00` bypasses it and larger values add filtering and phase delay |

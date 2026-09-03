@@ -353,6 +353,10 @@ void WebConfigurator::handleRoot()
         settings->getThrottleOutputEnabled()
     );
     #endif
+    html += F("<div class='row'>");
+    html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.05");
+    html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.05");
+    html += F("</div><p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
     html += F("</div>");
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -700,6 +704,20 @@ void WebConfigurator::handleSave()
         getIntArg(
             "gainMax",
             settings->getGainMax()
+        )
+    );
+
+    settings->setChannel3GainMin(
+        getFloatArg(
+            "channel3GainMin",
+            settings->getChannel3GainMin()
+        )
+    );
+
+    settings->setChannel3GainMax(
+        getFloatArg(
+            "channel3GainMax",
+            settings->getChannel3GainMax()
         )
     );
 

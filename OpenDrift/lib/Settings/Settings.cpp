@@ -188,7 +188,7 @@ bool Settings::begin()
             1.5f
         ),
         0.0f,
-        3.0f
+        6.0f
     );
 
     deadband = prefs.getFloat(
@@ -401,6 +401,23 @@ bool Settings::begin()
         2000
     );
 
+    channel3GainMin = constrain(
+        prefs.getFloat("ch3GainLo", 0.5f),
+        0.0f,
+        6.0f
+    );
+
+    channel3GainMax = constrain(
+        prefs.getFloat("ch3GainHi", 3.0f),
+        0.0f,
+        6.0f
+    );
+
+    if(channel3GainMax < channel3GainMin)
+    {
+        channel3GainMax = channel3GainMin;
+    }
+
     throttleOutputEnabled = prefs.getBool(
         "thrOut",
         false
@@ -609,6 +626,16 @@ void Settings::save()
         gainMax
     );
 
+    prefs.putFloat(
+        "ch3GainLo",
+        channel3GainMin
+    );
+
+    prefs.putFloat(
+        "ch3GainHi",
+        channel3GainMax
+    );
+
     prefs.putBool(
         "thrOut",
         throttleOutputEnabled
@@ -671,7 +698,7 @@ float Settings::getGain()
 
 void Settings::setGain(float value)
 {
-    gain = constrain(value, 0.0f, 3.0f);
+    gain = constrain(value, 0.0f, 6.0f);
     dirty = true;
 }
 
@@ -1190,6 +1217,40 @@ int Settings::getGainMax()
 void Settings::setGainMax(int value)
 {
     gainMax = value;
+    dirty = true;
+}
+
+float Settings::getChannel3GainMin()
+{
+    return channel3GainMin;
+}
+
+void Settings::setChannel3GainMin(float value)
+{
+    channel3GainMin = constrain(value, 0.0f, 6.0f);
+
+    if(channel3GainMax < channel3GainMin)
+    {
+        channel3GainMax = channel3GainMin;
+    }
+
+    dirty = true;
+}
+
+float Settings::getChannel3GainMax()
+{
+    return channel3GainMax;
+}
+
+void Settings::setChannel3GainMax(float value)
+{
+    channel3GainMax = constrain(value, 0.0f, 6.0f);
+
+    if(channel3GainMin > channel3GainMax)
+    {
+        channel3GainMin = channel3GainMax;
+    }
+
     dirty = true;
 }
 
@@ -1728,7 +1789,7 @@ void Settings::applyProfile(
     const DrivingProfile& profile
 )
 {
-    gain = constrain(profile.gain, 0.0f, 3.0f);
+    gain = constrain(profile.gain, 0.0f, 6.0f);
     deadband = profile.deadband;
     gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
     gyroIntegralGain = profile.gyroIntegralGain;

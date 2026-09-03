@@ -4,7 +4,9 @@ local DEVICE = 0xC8
 local RADIO = 0xEA
 
 local fields = {
-  { 1, "Active Gain",      0,  300,   5, 2 },
+  { 1, "Active Gain",      0,  600,   5, 2 },
+  {33, "CH3 Gain Min",     0,  600,   5, 2 },
+  {34, "CH3 Gain Max",     0,  600,   5, 2 },
   { 2, "Deadband",         0,  200,   1, 1 },
   { 3, "Max Corr %",       0,  100,   1, 0 },
   { 4, "Smoothing",        0,  100,   1, 2 },

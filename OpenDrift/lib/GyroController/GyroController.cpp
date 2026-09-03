@@ -1326,7 +1326,7 @@ void GyroController::setGain(float value)
     gyroGain = constrain(
         value,
         0.0f,
-        3.0f
+        6.0f
     );
 }
 

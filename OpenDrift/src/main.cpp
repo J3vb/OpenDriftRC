@@ -164,9 +164,6 @@ volatile bool crsfThrottleSignalSnapshot = false;
 volatile int crsfThrottlePulseSnapshot = 1500;
 #endif
 
-const float radioGainMin = 0.5f;
-const float radioGainMax = 3.0f;
-
 const char* ssid = "OpenDrift";
 const char* password = "opendrift";
 
@@ -324,10 +321,10 @@ public:
             #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
             "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.7c crsf ttyOD0",
+            "control kernel 1.0.8 crsf ttyOD0",
             #endif
             #else
-            "control kernel 1.0.7c pwm  ttyOD0",
+            "control kernel 1.0.8 pwm  ttyOD0",
             #endif
             8,
             27
@@ -782,8 +779,11 @@ float mapGainPulse(
         (float)(gainMax - gainMin);
 
     return
-        radioGainMin +
-        ((radioGainMax - radioGainMin) * normalized);
+        settings.getChannel3GainMin() +
+        (
+            (settings.getChannel3GainMax() - settings.getChannel3GainMin())
+            * normalized
+        );
 }
 
 

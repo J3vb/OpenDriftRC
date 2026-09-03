@@ -50,7 +50,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Phase-aware Anti Wobble notch with a track-tested default of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
-  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua).
+  telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
 
@@ -184,7 +184,7 @@ Shows the current gyro gain and provides:
 Primary correction limits:
 
 - `Deadband`: yaw-rate zone ignored around zero.
-- `MAX CORRECTION`: maximum gyro movement as a percentage of the calibrated physical steering range.
+- `MAX CORRECTION`: maximum gyro movement across the full calibrated endpoint-to-endpoint steering span. `50%` equals center-to-endpoint authority; `100%` can override one endpoint to the other.
 - `GYRO REV`: reverses only the gyro correction direction.
 
 Use `GYRO REV` when normal steering direction is correct, but the gyro counter-steers the wrong way.
@@ -193,7 +193,8 @@ Use `GYRO REV` when normal steering direction is correct, but the gyro counter-s
 
 Fast controller behavior:
 
-- `SMOOTHING`: the single time-based yaw low-pass.
+- `SMOOTHING`: the software yaw low-pass; `0.00` bypasses it completely.
+- `GYRO LPF`: QMI8658 hardware filtering at `24 Hz`, lower-latency `120 Hz`, or `Off` for controlled testing.
 - `PREDICTION`: continuous yaw-acceleration look-ahead.
 - `SERVO QUIET`: suppresses very small physical servo-command changes.
 
@@ -228,7 +229,7 @@ Conservative first-power values:
 | --- | ---: |
 | Gain | 1.50 |
 | Deadband | 4.0 |
-| Max correction | 50% |
+| Max correction | 25% |
 | Smoothing | 0.01 |
 | Countersteer Assist | 0 |
 | Drift memory | 0.00 |
@@ -353,6 +354,7 @@ Current web settings:
 - Create named driving profiles from the current tune
 - Activate or delete existing profiles
 - Gyro gain
+- Channel 3 gain minimum / maximum (`0.00-6.00`)
 - Deadband
 - Reverse gyro correction
 - Max correction
@@ -402,8 +404,10 @@ Log rows include:
 - Raw X/Y/Z acceleration in g
 - Total acceleration magnitude and high-frequency acceleration delta
 - A filtered `surface_disturbance` score from `0.0` to `1.0`
-- Raw gyro correction
-- OpenDrift v1.0 correction
+- Requested gyro correction before Max Correction
+- Limited gyro correction after Max Correction
+- Applied gyro correction after the driver/gyro steering mix
+- Correction saturation state
 - Steering input and calibrated steering command
 - Servo output
 - Servo quiet band
@@ -435,19 +439,19 @@ OpenDrift v1.0 runs this path at the selected 250 Hz or 333 Hz rate:
 
 1. Read receiver steering, throttle, and IMU yaw.
 2. Subtract calibrated gyro offset and apply soft deadband.
-3. Apply one time-based yaw low-pass.
+3. Apply the selected hardware gyro LPF and optional software yaw low-pass.
 4. Estimate short-horizon yaw from filtered yaw acceleration.
 5. Extend that horizon when throttle predicts application or a longer off-throttle load change.
-6. Reduce transition authority briefly during deliberate direction changes to prevent overshoot.
+6. Shape damping briefly during deliberate direction changes without changing the hard correction ceiling.
 7. Apply the phase-aware Anti Wobble notch around the tracked 2.5-3.6 Hz wheel-resonance band while preserving slow chassis yaw and useful response outside that band.
 8. Convert predicted yaw directly into correction with Gain.
 9. Learn a slow yaw reference while driver steering and throttle are quiet.
 10. Add optional Countersteer Assist from the slow learned reference only.
 11. Apply Drift Memory only to error from that reference.
 12. Prevent memory from pushing farther into correction saturation.
-13. Clamp gyro movement to the configured Max Correction percentage, mix it
-    with driver steering, then hard-limit the result to the calibrated physical
-    servo endpoints.
+13. Limit signed gyro movement to the configured full-span Max Correction
+    percentage, then mix it with driver steering and clamp the combined command.
+14. Apply the calibrated physical endpoint map as the final hard servo limit.
 
 Driver steering activity and throttle changes make the slow reference yield
 immediately. Neither disables the fast direct damping path.
@@ -502,7 +506,7 @@ Important folders:
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
-- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua).
+- `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
 - `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 

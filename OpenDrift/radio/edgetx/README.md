@@ -1,10 +1,10 @@
-# [OpenDrift EdgeTX tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua)
+# [OpenDrift EdgeTX tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua)
 
 This tool supports the AMOLED V1 and V2 **full-duplex** CRSF firmware targets:
 `waveshare_amoled_164_crsf` and `waveshare_amoled_164_v2_crsf`.
 
-Download [`OpenDrift.lua`](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua), copy it to `SCRIPTS/TOOLS/OpenDrift.lua` on the radio SD card,
-then launch **OpenDrift** from the [EdgeTX Tools menu](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.7c/OpenDrift.lua).
+Download [`OpenDrift.lua`](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua), copy it to `SCRIPTS/TOOLS/OpenDrift.lua` on the radio SD card,
+then launch **OpenDrift** from the [EdgeTX Tools menu](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
 
 CRSF wiring for the full-duplex firmware:
 
@@ -32,8 +32,11 @@ Use `Reset Cal` before expanding or replacing existing endpoints.
 `Active Gain` follows CRSF channel 3 live. The tool shows a reminder that
 channel 3 overrides gain changes made elsewhere while its signal is valid; the
 stored profile gain remains the fallback used without that gain signal.
+`CH3 Gain Min` and `CH3 Gain Max` map the full Channel 3 control movement to
+the desired gyro-gain range. The default remains `0.50` to `3.00`, while both
+the controller and Channel 3 mapping support values up to `6.00`.
 
-The tool exposes the gyro and steering values: Active Gain, Deadband, Max Correction,
+The tool exposes the gyro and steering values: Active Gain, Channel 3 gain range, Deadband, Max Correction,
 Smoothing, Gyro LPF, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
 Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, physical endpoints,
 Servo Travel, Servo Center,

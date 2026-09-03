@@ -1,5 +1,58 @@
 # Changelog
 
+## v1.0.8 - 2026-09-03
+
+### Lower-latency gyro experiments
+
+- Adds selectable QMI8658 gyro-filter modes: the original `24 Hz`, a
+  lower-latency `120 Hz` mode, and hardware LPF bypass for controlled testing.
+- Makes Smoothing `0.00` a true software-filter bypass so hardware and software
+  phase delay can be evaluated independently.
+- Raises the supported gyro Gain ceiling from `3.00` to `6.00` while retaining
+  the existing `0.50-3.00` Channel 3 mapping by default.
+
+### Correction authority
+
+- Refactors the controller to return a signed gyro correction instead of a
+  centered pseudo-servo command, eliminating an unintended internal
+  `1000-2000 us` saturation point.
+- Redefines Max Correction across the full endpoint-to-endpoint steering span:
+  `50%` can move from center to one endpoint, while `100%` can override one
+  endpoint all the way to the other.
+- Migrates existing Max Correction settings and saved profiles to preserve
+  their real correction authority. An old displayed value of `74` becomes
+  approximately `37` without weakening or doubling the tune.
+- Stops Transition Speed from dynamically shrinking the Max Correction ceiling.
+  It now shapes transition damping only.
+- Keeps the combined driver-plus-gyro command and calibrated physical servo
+  endpoints as the final hard safety limits.
+
+### Channel 3 and EdgeTX
+
+- Adds persistent `CH3 Gain Min` and `CH3 Gain Max` controls to the EdgeTX Lua
+  tool and onboard web configurator, adjustable from `0.00` to `6.00`.
+- Keeps Channel 3 authoritative while its receiver signal is valid and reports
+  the resulting live gain consistently to the display and EdgeTX tool.
+- Adds the gyro LPF selector and expanded `0.00-6.00` Active Gain range to the
+  current `OpenDrift.lua` release asset.
+
+### Blackbox and documentation
+
+- Adds `gyro_lpf_mode` so matched filter tests identify the active sensor mode.
+- Replaces ambiguous correction columns with `gyro_requested_us`,
+  `gyro_limited_us`, and `gyro_applied_us`.
+- Adds `correction_saturated` to distinguish Max Correction clipping from final
+  steering-range saturation during entries and transitions.
+- Updates the tuning reference and website for the new gain range, filter modes,
+  full-span Max Correction behavior, tune migration, and test procedure.
+
+### Release targets
+
+- Publishes Waveshare AMOLED 1.64 V1 and V2 firmware with PWM and CRSF receiver
+  support.
+- The deprecated Waveshare Round 1.28 builds remain available at v1.0.7c and
+  are not part of the v1.0.8 public release.
+
 ## v1.0.7c - 2026-08-30
 
 ### Physical steering limits

@@ -133,6 +133,12 @@ public:
     int getGainMax();
     void setGainMax(int value);
 
+    float getChannel3GainMin();
+    void setChannel3GainMin(float value);
+
+    float getChannel3GainMax();
+    void setChannel3GainMax(float value);
+
     bool getThrottleOutputEnabled();
     void setThrottleOutputEnabled(bool value);
 
@@ -220,6 +226,10 @@ private:
     int gainMin = 1000;
 
     int gainMax = 2000;
+
+    float channel3GainMin = 0.5f;
+
+    float channel3GainMax = 3.0f;
 
     bool throttleOutputEnabled = false;
 
