@@ -1,0 +1,15 @@
+{
+    // background.c is a 1.5 MB generated RGB565 pixel array. Parsing it stalls
+    // IntelliSense and pollutes search results; nothing references it by symbol.
+    "C_Cpp.files.exclude": {
+        "**/.pio": true,
+        "**/assets/backgrounds/background.c": true
+    },
+    "search.exclude": {
+        "**/.pio": true,
+        "**/assets/backgrounds/background.c": true
+    },
+    "files.watcherExclude": {
+        "**/.pio/**": true
+    }
+}
