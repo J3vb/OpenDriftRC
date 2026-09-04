@@ -24,6 +24,7 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#include "../include/Version.h"
 
 LGFX lcd;
 
@@ -321,10 +322,10 @@ public:
             #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
             "WARNING swapped pins: 15E 16S 17T 18R",
             #else
-            "control kernel 1.0.8 crsf ttyOD0",
+            "control kernel " OPENDRIFT_VERSION " crsf ttyOD0",
             #endif
             #else
-            "control kernel 1.0.8 pwm  ttyOD0",
+            "control kernel " OPENDRIFT_VERSION " pwm  ttyOD0",
             #endif
             8,
             27
