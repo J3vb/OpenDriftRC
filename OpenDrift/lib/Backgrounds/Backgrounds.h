@@ -57,6 +57,10 @@ public:
         const char* name
     );
 
+    // Deletes every file in the background directory, including leftovers
+    // of interrupted uploads. Used by the factory reset.
+    void eraseAll();
+
     // Streaming upload of one raw image. The data must total PIXEL_BYTES.
     // An existing image with the same name is replaced on success.
     bool beginUpload(
@@ -90,6 +94,7 @@ private:
 
     static constexpr const char* DIRECTORY = "/bg";
     static constexpr const char* EXTENSION = ".rgb";
+    static constexpr const char* BACKUP_EXTENSION = ".bak";
     static constexpr const char* UPLOAD_PATH = "/bg/upload.tmp";
 
     bool ready = false;
@@ -113,4 +118,11 @@ private:
     String pathFor(
         const char* name
     );
+
+    String backupPathFor(
+        const char* name
+    );
+
+    // Finishes or undoes a replacement that lost power halfway.
+    void recoverInterruptedReplacements();
 };

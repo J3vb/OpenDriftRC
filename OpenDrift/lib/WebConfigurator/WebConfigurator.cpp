@@ -282,6 +282,13 @@ void WebConfigurator::update()
             if(factoryResetPending)
             {
                 settings->factoryReset();
+
+                #if defined(OPENDRIFT_BOARD_AMOLED_164)
+                if(backgrounds != nullptr)
+                {
+                    backgrounds->eraseAll();
+                }
+                #endif
             }
             else
             {
@@ -707,67 +714,6 @@ void WebConfigurator::handleRoot()
     html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
     html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p></div>");
 
-    html += F("<div class='card' id='backgrounds'><h2>Backgrounds</h2>");
-
-    if(backgrounds == nullptr || !backgrounds->isReady())
-    {
-        html += F("<p class='sub bad'>Background storage is not available on this board.</p></div>");
-    }
-    else
-    {
-        const char* activeBackground =
-            settings->getBackgroundName();
-
-        html += F("<p class='sub'>Active: <strong>");
-        html += activeBackground[0] != 0 ? activeBackground : "Built-in";
-        html += F("</strong> &middot; stored: ");
-        html += String((int)backgrounds->getCount());
-        html += F(" of ");
-        html += String((int)Backgrounds::MAX_BACKGROUNDS);
-        html += F(" &middot; free: ");
-        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
-        html += F(" KB</p>");
-
-        html += F("<div class='profile");
-
-        if(activeBackground[0] == 0)
-        {
-            html += F(" active");
-        }
-
-        html += F("'><div><strong>Built-in</strong><small>The image compiled into the firmware</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
-
-        // Names are sanitized to letters, digits, - and _ so they are safe
-        // inside attributes without escaping.
-        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
-        {
-            const char* name =
-                backgrounds->getName(i);
-
-            html += F("<div class='profile");
-
-            if(strcmp(name, activeBackground) == 0)
-            {
-                html += F(" active");
-            }
-
-            html += F("'><div><strong>");
-            html += name;
-            html += F("</strong><small>456 x 280 &middot; 250 KB</small></div>");
-            html += F("<form method='post' action='/use-background'><input type='hidden' name='name' value='");
-            html += name;
-            html += F("'><button type='submit'>Use</button></form>");
-            html += F("<form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
-            html += name;
-            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
-        }
-
-        html += F("<label>Image file</label><input id='bgFile' type='file' accept='image/*'>");
-        html += F("<label>Name (letters, digits, - and _)</label><input id='bgName' type='text' maxlength='23' placeholder='Example: track-night'>");
-        html += F("<button type='button' class='secondary' onclick='uploadBackground()'>Convert and upload</button>");
-        html += F("<p class='sub' id='bgStatus'>Any JPG or PNG. Your browser scales and crops it to 456 x 280 and converts it to the panel's pixel format, so the board only stores 250 KB per image and holds up to 16. Upload at the bench, not while driving: it writes flash.</p>");
-        html += F("</div>");
-    }
     #endif
 
     html += F("<div class='card'><h2>Blackbox</h2>");
@@ -833,6 +779,72 @@ void WebConfigurator::handleRoot()
 
     html += F("</div>");
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Outside the settings form on purpose: the Use and Delete buttons
+    // are forms of their own, and forms cannot nest.
+    html += F("<div class='card' id='backgrounds'><h2>Backgrounds</h2>");
+
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        html += F("<p class='sub bad'>Background storage is not available on this board.</p></div>");
+    }
+    else
+    {
+        const char* activeBackground =
+            settings->getBackgroundName();
+
+        html += F("<p class='sub'>Active: <strong>");
+        html += activeBackground[0] != 0 ? activeBackground : "Built-in";
+        html += F("</strong> &middot; stored: ");
+        html += String((int)backgrounds->getCount());
+        html += F(" of ");
+        html += String((int)Backgrounds::MAX_BACKGROUNDS);
+        html += F(" &middot; free: ");
+        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
+        html += F(" KB</p>");
+
+        html += F("<div class='profile");
+
+        if(activeBackground[0] == 0)
+        {
+            html += F(" active");
+        }
+
+        html += F("'><div><strong>Built-in</strong><small>The image compiled into the firmware</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
+
+        // Names are sanitized to letters, digits, - and _ so they are safe
+        // inside attributes without escaping.
+        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
+        {
+            const char* name =
+                backgrounds->getName(i);
+
+            html += F("<div class='profile");
+
+            if(strcmp(name, activeBackground) == 0)
+            {
+                html += F(" active");
+            }
+
+            html += F("'><div><strong>");
+            html += name;
+            html += F("</strong><small>456 x 280 &middot; 250 KB</small></div>");
+            html += F("<form method='post' action='/use-background'><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button type='submit'>Use</button></form>");
+            html += F("<form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
+        }
+
+        html += F("<label>Image file</label><input id='bgFile' type='file' accept='image/*'>");
+        html += F("<label>Name (letters, digits, - and _)</label><input id='bgName' type='text' maxlength='23' placeholder='Example: track-night'>");
+        html += F("<button type='button' class='secondary' onclick='uploadBackground()'>Convert and upload</button>");
+        html += F("<p class='sub' id='bgStatus'>Any JPG or PNG. Your browser scales and crops it to 456 x 280 and converts it to the panel's pixel format, so the board only stores 250 KB per image and holds up to 16. Upload at the bench, not while driving: it writes flash.</p>");
+        html += F("</div>");
+    }
+    #endif
+
     // The settings form above cannot contain another form, so the restart
     // form lives here and the restart buttons elsewhere on the page point
     // at it through their form attribute.
@@ -840,7 +852,7 @@ void WebConfigurator::handleRoot()
     html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
     html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> before a factory reset to keep a copy of the tune and profiles.</p>");
     html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults.</p>");
-    html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, and logging settings. OpenDrift restarts with defaults and the WiFi name ");
+    html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, logging settings, and every uploaded background. OpenDrift restarts with defaults and the WiFi name ");
     html += Settings::defaultWifiSsid();
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");

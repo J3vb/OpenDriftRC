@@ -47,6 +47,8 @@ bool Backgrounds::begin()
         FFat.remove(UPLOAD_PATH);
     }
 
+    recoverInterruptedReplacements();
+
     refresh();
 
     return true;
@@ -404,16 +406,44 @@ bool Backgrounds::endUpload()
     String path =
         pathFor(uploadName);
 
-    if(FFat.exists(path))
+    String backup =
+        backupPathFor(uploadName);
+
+    bool replacing =
+        FFat.exists(path);
+
+    // Keep the old image until the new one is in place, so a failed
+    // rename or a power loss cannot leave the name without a file.
+    if(replacing)
     {
-        FFat.remove(path);
+        if(FFat.exists(backup))
+        {
+            FFat.remove(backup);
+        }
+
+        if(!FFat.rename(path, backup))
+        {
+            uploadError = "Storing the background failed";
+            FFat.remove(UPLOAD_PATH);
+            return false;
+        }
     }
 
     if(!FFat.rename(String(UPLOAD_PATH), path))
     {
+        if(replacing)
+        {
+            FFat.rename(backup, path);
+        }
+
         uploadError = "Storing the background failed";
         FFat.remove(UPLOAD_PATH);
         return false;
+    }
+
+    if(replacing)
+    {
+        FFat.remove(backup);
     }
 
     revision++;
@@ -421,6 +451,182 @@ bool Backgrounds::endUpload()
     refresh();
 
     return true;
+}
+
+
+
+void Backgrounds::eraseAll()
+{
+    if(!ready)
+    {
+        return;
+    }
+
+    // Collect names first so the directory is never modified while it is
+    // being read, then repeat in case one pass could not hold them all.
+    for(uint8_t pass = 0; pass < 4; pass++)
+    {
+        char paths[16][48];
+        uint8_t found = 0;
+
+        File directory =
+            FFat.open(DIRECTORY);
+
+        if(!directory || !directory.isDirectory())
+        {
+            break;
+        }
+
+        while(found < 16)
+        {
+            File entry =
+                directory.openNextFile();
+
+            if(!entry)
+            {
+                break;
+            }
+
+            if(!entry.isDirectory())
+            {
+                const char* fileName =
+                    entry.name();
+
+                const char* slash =
+                    strrchr(fileName, '/');
+
+                if(slash != nullptr)
+                {
+                    fileName = slash + 1;
+                }
+
+                if(strlen(fileName) + strlen(DIRECTORY) + 2 <= sizeof(paths[found]))
+                {
+                    snprintf(
+                        paths[found],
+                        sizeof(paths[found]),
+                        "%s/%s",
+                        DIRECTORY,
+                        fileName
+                    );
+
+                    found++;
+                }
+            }
+
+            entry.close();
+        }
+
+        directory.close();
+
+        for(uint8_t i = 0; i < found; i++)
+        {
+            FFat.remove(paths[i]);
+        }
+
+        if(found < 16)
+        {
+            break;
+        }
+    }
+
+    revision++;
+
+    refresh();
+}
+
+
+
+void Backgrounds::recoverInterruptedReplacements()
+{
+    // A replacement renames the old image to <name>.bak, installs the
+    // upload, then deletes the backup. If power was lost in between, the
+    // backup is still there: restore it when the image is missing and
+    // drop it when the replacement did complete. Names are collected
+    // first so the directory is not modified while it is being read.
+    char pending[MAX_BACKGROUNDS][NAME_LENGTH];
+    uint8_t pendingCount = 0;
+
+    File directory =
+        FFat.open(DIRECTORY);
+
+    if(!directory || !directory.isDirectory())
+    {
+        return;
+    }
+
+    size_t extensionLength =
+        strlen(BACKUP_EXTENSION);
+
+    while(pendingCount < MAX_BACKGROUNDS)
+    {
+        File entry =
+            directory.openNextFile();
+
+        if(!entry)
+        {
+            break;
+        }
+
+        if(!entry.isDirectory())
+        {
+            const char* fileName =
+                entry.name();
+
+            const char* slash =
+                strrchr(fileName, '/');
+
+            if(slash != nullptr)
+            {
+                fileName = slash + 1;
+            }
+
+            size_t length =
+                strlen(fileName);
+
+            if(
+                length > extensionLength &&
+                length - extensionLength < NAME_LENGTH &&
+                strcasecmp(fileName + length - extensionLength, BACKUP_EXTENSION) == 0
+            )
+            {
+                size_t baseLength =
+                    length - extensionLength;
+
+                memcpy(
+                    pending[pendingCount],
+                    fileName,
+                    baseLength
+                );
+
+                pending[pendingCount][baseLength] = 0;
+
+                pendingCount++;
+            }
+        }
+
+        entry.close();
+    }
+
+    directory.close();
+
+    for(uint8_t i = 0; i < pendingCount; i++)
+    {
+        String backup =
+            backupPathFor(pending[i]);
+
+        String image =
+            pathFor(pending[i]);
+
+        if(FFat.exists(image))
+        {
+            FFat.remove(backup);
+        }
+        else
+        {
+            FFat.rename(backup, image);
+        }
+    }
 }
 
 
@@ -505,6 +711,20 @@ String Backgrounds::pathFor(
     path += '/';
     path += name;
     path += EXTENSION;
+
+    return path;
+}
+
+
+
+String Backgrounds::backupPathFor(
+    const char* name
+)
+{
+    String path = DIRECTORY;
+    path += '/';
+    path += name;
+    path += BACKUP_EXTENSION;
 
     return path;
 }

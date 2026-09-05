@@ -408,7 +408,7 @@ The **Backgrounds** card takes any JPG or PNG. Your browser scales and crops it 
 
 **Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. There is no import yet; the keys match the form field names, so values can be typed back in.
 
-The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
+The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings, and every uploaded background) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
 
 Use the web configurator when you want to make several changes quickly. Use the onboard UI when tuning trackside without a phone or laptop.
 
