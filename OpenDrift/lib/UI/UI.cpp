@@ -40,6 +40,20 @@ static constexpr int OD_BACKGROUND_WIDTH = 456;
 static constexpr int OD_BACKGROUND_HEIGHT = 280;
 static constexpr float OD_TEXT_SCALE = 1.15f;
 
+// Row labels use narrower glyphs at the normal height so the longest
+// ones ("COUNTERSTEER", "SERVO QUIET") end before the value column at
+// x=146. Defined ahead of the setTextSize macro below so this two-argument
+// call is left alone.
+static void setAmoledLabelSize(
+    LGFX_Sprite* lcd
+)
+{
+    lcd->setTextSize(
+        1.4f * OD_TEXT_SCALE,
+        2.0f * OD_TEXT_SCALE
+    );
+}
+
 // LovyanGFX supports fractional text scaling. This enlarges all AMOLED
 // typography without adding another rendering pass.
 #define setTextSize(size) setTextSize(static_cast<float>(size) * OD_TEXT_SCALE)
@@ -484,6 +498,8 @@ void UI::begin(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Boot counts as activity so the panel cannot dim during startup.
     lastTouchMs = millis();
+
+    bootControlLoopHz = settings.getControlLoopHz();
 
     applyBackground(
         settings
@@ -1944,7 +1960,7 @@ void UI::drawCorePage(
         OD_MAGENTA
     );
 
-    lcd->setTextSize(2);
+    setAmoledLabelSize(lcd);
 
     lcd->setTextColor(
         OD_MUTED
@@ -2175,8 +2191,10 @@ void UI::drawSystemPage(
         20
     );
 
+    setAmoledLabelSize(lcd);
+
     lcd->drawString(
-        "RATE (REBOOT)",
+        "LOOP RATE",
         22,
         58
     );
@@ -2219,14 +2237,23 @@ void UI::drawSystemPage(
         OD_TEXT
     );
 
+    // The rate only changes at boot, so say so on the button until then.
+    bool rateRestartPending =
+        settings.getControlLoopHz() != bootControlLoopHz;
+
+    const char* rateLabel =
+        settings.getControlLoopHz() == 333
+        ? (rateRestartPending ? "333 HZ RESTART" : "333 HZ")
+        : (rateRestartPending ? "250 HZ RESTART" : "250 HZ");
+
     drawAmoledButton(
         lcd,
         150,
         48,
         240,
         36,
-        settings.getControlLoopHz() == 333 ? "333 HZ" : "250 HZ",
-        settings.getControlLoopHz() == 333 ? OD_AMBER : OD_CYAN,
+        rateLabel,
+        (rateRestartPending || settings.getControlLoopHz() == 333) ? OD_AMBER : OD_CYAN,
         2
     );
 
@@ -2416,7 +2443,7 @@ void UI::drawResponsePage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(lcd, "Response", OD_AMBER);
 
-    lcd->setTextSize(2);
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("SMOOTH", 22, 58);
     lcd->drawString("PREDICT", 22, 120);
@@ -2475,7 +2502,7 @@ void UI::drawDriftAssistPage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(lcd, "Assistance", OD_BLUE);
 
-    lcd->setTextSize(2);
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("COUNTERSTEER", 22, 58);
     lcd->drawString("HOLD ASSIST", 22, 120);
@@ -2765,7 +2792,7 @@ void UI::drawExperimentalPage(
         OD_MAGENTA
     );
 
-    lcd->setTextSize(2);
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("TRANS SPEED", 22, 58);
 

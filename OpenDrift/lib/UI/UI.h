@@ -195,6 +195,10 @@ private:
 
     uint8_t backgroundScroll = 0;
 
+    // Control rate the firmware booted with; the System page flags a
+    // stored rate that differs until the next restart.
+    uint16_t bootControlLoopHz = 250;
+
     // Loads the background named in Settings when it differs from the one
     // on screen, or when storage changed. Returns true when a redraw is
     // needed.
