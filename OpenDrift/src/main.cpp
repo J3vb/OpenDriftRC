@@ -1270,6 +1270,17 @@ void setup()
     controlLoopHz = settings.getControlLoopHz();
     controlLoopPeriodMs = 1000 / controlLoopHz;
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(displayOk)
+    {
+        lcd.setBrightness(
+            opendriftBrightnessLevel(
+                settings.getDisplayBrightness()
+            )
+        );
+    }
+    #endif
+
     bootConsole.log(
         "nvs: mounted OpenDrift settings store",
         settingsOk ? "[ OK ]" : "[WARN]",

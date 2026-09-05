@@ -122,6 +122,10 @@ public:
     bool getBlackboxEnabled();
     void setBlackboxEnabled(bool value);
 
+    // Display (AMOLED). Brightness in percent, steps of 10, 10-100.
+    uint8_t getDisplayBrightness();
+    void setDisplayBrightness(int value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -230,6 +234,8 @@ private:
     char wifiSsid[WIFI_SSID_LENGTH] = {0};
 
     bool blackboxEnabled = false;
+
+    uint8_t displayBrightness = 100;
 
     int steeringMin = 1000;
 

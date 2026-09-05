@@ -139,6 +139,16 @@ private:
     uint8_t profileScroll = 0;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // The UI owns the panel brightness so a change from the web or from
+    // the System page lands here on the next update().
+    uint8_t appliedBrightnessLevel = 0;
+
+    void updateDisplayBrightness(
+        Settings& settings
+    );
+    #endif
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
     bool swipePreviewActive = false;
 
     int8_t swipePreviewDirection = 0;

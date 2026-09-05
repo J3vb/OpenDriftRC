@@ -333,6 +333,8 @@ If your device cannot resolve the name, the address `http://192.168.4.1/` always
 
 Basic firmware/system information. Tap the GPIO 18 mode button to switch between `GAIN INPUT` and `THROTTLE OUT`.
 
+The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
+
 ### Profiles
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
@@ -383,6 +385,7 @@ Current web settings:
 - WiFi enabled on boot
 - WiFi network name (SSID), applied after a restart
 - WiFi auto-off timeout
+- Display brightness (AMOLED, 10-100%)
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
 

@@ -596,6 +596,28 @@ void WebConfigurator::handleRoot()
     html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='card'><h2>Display</h2><label>Brightness</label><select name='displayBrightness'>");
+
+    for(uint8_t percent = 10; percent <= 100; percent += 10)
+    {
+        html += F("<option value='");
+        html += String(percent);
+        html += F("'");
+
+        if(settings->getDisplayBrightness() == percent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += String(percent);
+        html += F("%</option>");
+    }
+
+    html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p></div>");
+    #endif
+
     html += F("<div class='card'><h2>Blackbox</h2>");
     html += checkbox("Enable onboard logging", "blackboxEnabled", settings->getBlackboxEnabled());
     html += F("</div>");
@@ -987,6 +1009,15 @@ void WebConfigurator::handleSave()
     settings->setBlackboxEnabled(
         server.hasArg("blackboxEnabled")
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    settings->setDisplayBrightness(
+        getIntArg(
+            "displayBrightness",
+            settings->getDisplayBrightness()
+        )
+    );
+    #endif
 
     if(gyro != nullptr)
     {

@@ -2149,19 +2149,19 @@ void UI::drawSystemPage(
     lcd->drawString(
         "RATE (REBOOT)",
         22,
-        64
+        58
     );
 
     lcd->drawString(
         "BUILD",
         22,
-        116
+        99
     );
 
     lcd->drawString(
         "BLACKBOX",
         22,
-        168
+        140
     );
 
     lcd->drawString(
@@ -2175,7 +2175,13 @@ void UI::drawSystemPage(
         #endif
         #endif
         22,
-        212
+        181
+    );
+
+    lcd->drawString(
+        "BRIGHTNESS",
+        22,
+        222
     );
 
     lcd->setTextSize(3);
@@ -2187,9 +2193,9 @@ void UI::drawSystemPage(
     drawAmoledButton(
         lcd,
         150,
-        54,
+        48,
         240,
-        38,
+        36,
         settings.getControlLoopHz() == 333 ? "333 HZ" : "250 HZ",
         settings.getControlLoopHz() == 333 ? OD_AMBER : OD_CYAN,
         2
@@ -2206,21 +2212,21 @@ void UI::drawSystemPage(
         "PWM INPUT",
         #endif
         150,
-        108
+        91
     );
 
     lcd->drawString(
         settings.getBlackboxEnabled() ? "ON" : "OFF",
         150,
-        160
+        132
     );
 
     drawAmoledButton(
         lcd,
         150,
-        202,
+        171,
         240,
-        38,
+        36,
         #if defined(OPENDRIFT_INPUT_CRSF)
         #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
         "RC TX17 / RX18",
@@ -2240,6 +2246,24 @@ void UI::drawSystemPage(
         #endif
         2
     );
+
+    String brightnessLabel =
+        String(settings.getDisplayBrightness()) + "%";
+
+    lcd->setTextSize(3);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    lcd->drawString(
+        brightnessLabel.c_str(),
+        150,
+        214
+    );
+
+    drawAmoledButton(lcd, 276, 212, 70, 36, "-", OD_BLUE);
+    drawAmoledButton(lcd, 364, 212, 70, 36, "+", OD_BLUE);
 
     drawPageDots();
 
@@ -5220,6 +5244,15 @@ int8_t UI::repeatButtonAt(
             return 30;
     }
 
+    if(page == PAGE_SYSTEM)
+    {
+        if(buttonPressed(x, y, 276, 212, 70, 36))
+            return 35;
+
+        if(buttonPressed(x, y, 364, 212, 70, 36))
+            return 36;
+    }
+
     return 0;
     #endif
 
@@ -5350,7 +5383,7 @@ bool UI::actionButtonAt(
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 296, 70, 130, 92);
 
-    if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 54, 240, 38))
+    if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 48, 240, 36))
         return true;
 
     if(
@@ -5359,7 +5392,7 @@ bool UI::actionButtonAt(
         && false
         #endif
     )
-        return buttonPressed(x, y, 150, 202, 240, 38);
+        return buttonPressed(x, y, 150, 171, 240, 36);
     #else
     if(page == PAGE_DRIVE)
         return buttonPressed(x, y, 55, 164, 130, 38);
@@ -5648,6 +5681,18 @@ bool UI::applyRepeatButton(
             settings.setControlLoopHz(333);
             break;
 
+        case 35:
+            settings.setDisplayBrightness(
+                settings.getDisplayBrightness() - 10
+            );
+            break;
+
+        case 36:
+            settings.setDisplayBrightness(
+                settings.getDisplayBrightness() + 10
+            );
+            break;
+
         default:
             return false;
     }
@@ -5656,6 +5701,12 @@ bool UI::applyRepeatButton(
     {
         drawCorePage(
             gyro,
+            settings
+        );
+    }
+    else if(page == PAGE_SYSTEM)
+    {
+        drawSystemPage(
             settings
         );
     }
@@ -5683,9 +5734,33 @@ bool UI::applyRepeatButton(
 
 
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void UI::updateDisplayBrightness(
+    Settings& settings
+)
+{
+    if(display == nullptr)
+    {
+        return;
+    }
 
+    uint8_t level =
+        opendriftBrightnessLevel(
+            settings.getDisplayBrightness()
+        );
 
+    if(level == appliedBrightnessLevel)
+    {
+        return;
+    }
 
+    display->setBrightness(
+        level
+    );
+
+    appliedBrightnessLevel = level;
+}
+#endif
 
 
 
@@ -5705,6 +5780,12 @@ void UI::update(
 
     uint8_t gesture =
         touch.getGesture();
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    updateDisplayBrightness(
+        settings
+    );
+    #endif
 
     if(
         refreshRequested &&
@@ -6428,9 +6509,9 @@ void UI::update(
                 x,
                 y,
                 150,
-                54,
+                48,
                 240,
-                38
+                36
             )
         )
         {
@@ -6453,9 +6534,9 @@ void UI::update(
                 x,
                 y,
                 150,
-                202,
+                171,
                 240,
-                38
+                36
             )
         )
         {

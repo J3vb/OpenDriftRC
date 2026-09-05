@@ -374,6 +374,15 @@ bool Settings::begin()
         false
     );
 
+    displayBrightness = constrain(
+        prefs.getUChar(
+            "dispBright",
+            100
+        ),
+        10,
+        100
+    );
+
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
@@ -635,6 +644,11 @@ void Settings::save()
     prefs.putBool(
         "blackbox",
         blackboxEnabled
+    );
+
+    prefs.putUChar(
+        "dispBright",
+        displayBrightness
     );
 
     prefs.putBool("servoEndV1", true);
@@ -1098,6 +1112,28 @@ bool Settings::getBlackboxEnabled()
 void Settings::setBlackboxEnabled(bool value)
 {
     blackboxEnabled = value;
+    dirty = true;
+}
+
+uint8_t Settings::getDisplayBrightness()
+{
+    return displayBrightness;
+}
+
+void Settings::setDisplayBrightness(int value)
+{
+    // Round to the nearest 10 so the display's -/+ buttons and the web
+    // select always agree, then keep the panel readable.
+    int rounded =
+        ((value + 5) / 10) * 10;
+
+    displayBrightness =
+        constrain(
+            rounded,
+            10,
+            100
+        );
+
     dirty = true;
 }
 
