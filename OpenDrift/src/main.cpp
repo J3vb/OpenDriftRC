@@ -165,7 +165,6 @@ volatile bool crsfThrottleSignalSnapshot = false;
 volatile int crsfThrottlePulseSnapshot = 1500;
 #endif
 
-const char* ssid = "OpenDrift";
 const char* password = "opendrift";
 const char* hostname = "opendrift";
 
@@ -1706,7 +1705,7 @@ void setup()
     //-------------------
 
     wifi.begin(
-        ssid,
+        settings.getWifiSsid(),
         password,
         settings.getWifiEnabled(),
         hostname
@@ -1724,12 +1723,13 @@ void setup()
         Serial.print("WiFi IP: ");
         Serial.println(IP);
 
-        char wifiMessage[48];
+        char wifiMessage[80];
 
         snprintf(
             wifiMessage,
             sizeof(wifiMessage),
-            "wlan0: AP OpenDrift ready at %s",
+            "wlan0: AP %s at %s",
+            wifi.getActiveSsid(),
             IP.toString().c_str()
         );
 

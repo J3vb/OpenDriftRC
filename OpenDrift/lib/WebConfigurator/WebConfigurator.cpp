@@ -414,6 +414,8 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
+    html += input("Network name (SSID)", "wifiSsid", String(settings->getWifiSsid()), "text", "");
+    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. Applies the next time WiFi starts: toggle WiFi off and on from the display, or reboot, then join the new network.</p>");
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
     html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
@@ -760,6 +762,13 @@ void WebConfigurator::handleSave()
     settings->setWifiEnabled(
         server.hasArg("wifiEnabled")
     );
+
+    if(server.hasArg("wifiSsid"))
+    {
+        settings->setWifiSsid(
+            server.arg("wifiSsid")
+        );
+    }
 
     settings->setWifiTimeout(
         getIntArg(

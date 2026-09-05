@@ -1,5 +1,9 @@
 #include "Settings.h"
 
+#include <stdio.h>
+
+static const char DEFAULT_WIFI_SSID[] = "OpenDrift";
+
 namespace
 {
     int legacyMaxCorrectionToPercent(int value)
@@ -358,6 +362,13 @@ bool Settings::begin()
         40000
     );
 
+    applyWifiSsid(
+        prefs.getString(
+            "wifiSsid",
+            ""
+        )
+    );
+
     blackboxEnabled = prefs.getBool(
         "blackbox",
         false
@@ -595,6 +606,11 @@ void Settings::save()
     prefs.putULong(
         "timeout",
         wifiTimeout
+    );
+
+    prefs.putString(
+        "wifiSsid",
+        wifiSsid
     );
 
     prefs.putBool(
@@ -978,6 +994,77 @@ void Settings::setWifiTimeout(uint32_t value)
 {
     wifiTimeout = value;
     dirty = true;
+}
+
+const char* Settings::getWifiSsid()
+{
+    // Always hand out the member buffer so callers that keep the pointer
+    // (WiFiManager) see later changes. Lazily fill the default in case
+    // this runs before begin().
+    if(wifiSsid[0] == 0)
+    {
+        applyWifiSsid("");
+    }
+
+    return wifiSsid;
+}
+
+void Settings::setWifiSsid(const String& value)
+{
+    applyWifiSsid(value);
+    dirty = true;
+}
+
+void Settings::applyWifiSsid(const String& value)
+{
+    String clean = sanitizeWifiSsid(value);
+
+    // The buffer is never left empty: an empty or fully rejected name
+    // restores the default, so the access point always has a valid SSID.
+    snprintf(
+        wifiSsid,
+        sizeof(wifiSsid),
+        "%s",
+        clean.length() > 0 ? clean.c_str() : DEFAULT_WIFI_SSID
+    );
+}
+
+// Same character set as profile names so the value is safe inside the
+// web form without escaping. Length is capped at the 32-byte SSID limit.
+String Settings::sanitizeWifiSsid(
+    const String& requestedName
+)
+{
+    String name = requestedName;
+    name.trim();
+
+    String clean;
+    clean.reserve(WIFI_SSID_LENGTH - 1);
+
+    for(
+        size_t i = 0;
+        i < name.length() &&
+        clean.length() < WIFI_SSID_LENGTH - 1;
+        i++
+    )
+    {
+        char value = name.charAt(i);
+
+        if(
+            isAlphaNumeric(value) ||
+            value == ' ' ||
+            value == '-' ||
+            value == '_' ||
+            value == '.'
+        )
+        {
+            clean += value;
+        }
+    }
+
+    clean.trim();
+
+    return clean;
 }
 
 // --------------------

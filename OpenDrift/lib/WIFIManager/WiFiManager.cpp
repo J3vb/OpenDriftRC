@@ -1,5 +1,8 @@
 #include "WiFiManager.h"
 
+#include <stdio.h>
+#include <string.h>
+
 
 
 
@@ -56,8 +59,18 @@ void WiFiManager::enable()
     );
 
 
+    // Capture the name this AP actually starts with. wifiSSID points at
+    // the live setting, which the web configurator can change while the
+    // AP is running; that change only applies on the next enable().
+    snprintf(
+        activeSsid,
+        sizeof(activeSsid),
+        "%s",
+        wifiSSID
+    );
+
     WiFi.softAP(
-        wifiSSID,
+        activeSsid,
         wifiPassword
     );
 
@@ -93,6 +106,11 @@ void WiFiManager::enable()
     );
 
     Serial.printf(
+        "WiFi AP: %s\n",
+        activeSsid
+    );
+
+    Serial.printf(
         "mDNS %s: http://%s/\n",
         mdnsRunning ? "OK" : "FAILED",
         localName.c_str()
@@ -119,6 +137,8 @@ void WiFiManager::disable()
         MDNS.end();
         mdnsRunning = false;
     }
+
+    activeSsid[0] = 0;
 
 
     WiFi.softAPdisconnect(
@@ -236,6 +256,23 @@ const char* WiFiManager::getHostname()
 String WiFiManager::getLocalName()
 {
     return localName;
+}
+
+
+
+const char* WiFiManager::getActiveSsid()
+{
+    return activeSsid;
+}
+
+
+
+bool WiFiManager::isSsidChangePending()
+{
+    return
+        enabled &&
+        wifiSSID != nullptr &&
+        strcmp(activeSsid, wifiSSID) != 0;
 }
 
 

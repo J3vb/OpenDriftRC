@@ -2848,6 +2848,31 @@ void UI::drawWifiPage(
         wifi.isEnabled() ? OD_GREEN : OD_RED
     );
 
+    if(wifi.isEnabled())
+    {
+        // Active network name in the free header space right of the
+        // title rule. Amber while a renamed network is waiting for the
+        // next WiFi start.
+        String ssidLabel = wifi.getActiveSsid();
+
+        if(ssidLabel.length() > 18)
+        {
+            ssidLabel = ssidLabel.substring(0, 17) + "~";
+        }
+
+        lcd->setTextSize(2);
+
+        lcd->setTextColor(
+            wifi.isSsidChangePending() ? OD_AMBER : OD_MUTED
+        );
+
+        lcd->drawString(
+            ssidLabel,
+            205,
+            20
+        );
+    }
+
     lcd->setTextSize(2);
 
     lcd->setTextColor(
