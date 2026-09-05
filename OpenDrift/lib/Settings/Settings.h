@@ -202,6 +202,16 @@ public:
     bool activateProfile(uint8_t index);
     bool deleteProfile(uint8_t index);
 
+    // Stores a profile with the given values, replacing one of the same
+    // name. Values are clamped to the setter ranges. Replacing the active
+    // profile deactivates it, because save() would otherwise overwrite the
+    // import with the live tune. Returns the index, -1 for an unusable
+    // name, -2 when the list is full.
+    int8_t importProfile(
+        const DrivingProfile& incoming,
+        bool& replaced
+    );
+
 private:
 
     Preferences prefs;

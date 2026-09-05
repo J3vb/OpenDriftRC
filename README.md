@@ -353,6 +353,8 @@ The Profiles page lists the driving profiles created in the web configurator. Ta
 
 Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
 
+The web configurator's Driving Profiles card can export every profile to one JSON file and import profiles from such a file, or from a full settings export. Your browser reads the file and sends the values to the board, which clamps them to the same ranges as the settings form. A profile whose name already exists is replaced. If that profile is the active one it is deactivated first, because the active profile continuously saves the live tune and would overwrite the import; tap it afterwards to load the imported values. The list holds 12 profiles.
+
 Hardware and installation settings remain global, including gyro/servo direction, physical steering endpoints, servo center and travel, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
 ### Control and servo rate
@@ -373,6 +375,7 @@ Current web settings:
 
 - Create named driving profiles from the current tune
 - Activate or delete existing profiles
+- Export all driving profiles to a JSON file, and import profiles from a profiles or settings export
 - Gyro gain
 - Channel 3 gain minimum / maximum (`0.00-6.00`)
 - Deadband

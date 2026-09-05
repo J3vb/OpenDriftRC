@@ -100,6 +100,10 @@ private:
 
     void handleSettingsExport();
 
+    void handleProfilesExport();
+
+    void handleProfilesImport();
+
     void handleRestart();
 
     void handleFactoryReset();
@@ -145,5 +149,18 @@ private:
     float getFloatArg(
         const char* name,
         float fallback
+    );
+
+    // Indexed form fields of the profile import, e.g. "gain3".
+    float profileFloatArg(
+        const char* prefix,
+        int index,
+        float fallback
+    );
+
+    int32_t profileIntArg(
+        const char* prefix,
+        int index,
+        int32_t fallback
     );
 };

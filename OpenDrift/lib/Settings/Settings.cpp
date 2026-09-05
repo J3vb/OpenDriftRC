@@ -1724,6 +1724,95 @@ int8_t Settings::createProfile(
     return activeProfileIndex;
 }
 
+int8_t Settings::importProfile(
+    const DrivingProfile& incoming,
+    bool& replaced
+)
+{
+    replaced = false;
+
+    String name =
+        sanitizeProfileName(String(incoming.name));
+
+    if(name.length() == 0)
+    {
+        return -1;
+    }
+
+    if(dirty)
+    {
+        save();
+    }
+
+    int8_t index = -1;
+
+    for(uint8_t i = 0; i < profileCount; i++)
+    {
+        if(name.equalsIgnoreCase(profiles[i].name))
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if(index < 0)
+    {
+        if(profileCount >= MAX_PROFILES)
+        {
+            return -2;
+        }
+
+        index = profileCount;
+        profileCount++;
+    }
+    else
+    {
+        replaced = true;
+
+        if(activeProfileIndex == index)
+        {
+            activeProfileIndex = -1;
+        }
+    }
+
+    DrivingProfile& profile =
+        profiles[index];
+
+    profile = DrivingProfile();
+
+    name.toCharArray(
+        profile.name,
+        PROFILE_NAME_LENGTH
+    );
+
+    profile.gain = constrain(incoming.gain, 0.0f, 6.0f);
+    profile.deadband = constrain(incoming.deadband, 0.0f, 100.0f);
+    profile.gyroSmoothing = constrain(incoming.gyroSmoothing, 0.0f, 1.0f);
+    profile.gyroIntegralGain = constrain(incoming.gyroIntegralGain, 0.0f, 20.0f);
+    profile.gyroMaxCorrection = constrain(incoming.gyroMaxCorrection, 0, 100);
+    profile.gyroIntegralLimit = constrain(incoming.gyroIntegralLimit, 0, 500);
+    profile.gyroHoldBoost = constrain(incoming.gyroHoldBoost, 0, 100);
+    profile.predictionStrength = constrain(incoming.predictionStrength, 0, 100);
+    profile.radioSteeringTravel = constrain(incoming.radioSteeringTravel, 0, 100);
+    profile.gyroCounterSteerAssist = constrain(incoming.gyroCounterSteerAssist, 0, 100);
+    profile.gyroTransitionSpeed = constrain(incoming.gyroTransitionSpeed, 0, 100);
+    profile.gyroHuntStrength = constrain(incoming.gyroHuntStrength, 0, 100);
+
+    persistProfile(index);
+
+    prefs.putUChar(
+        "profCnt",
+        profileCount
+    );
+
+    prefs.putChar(
+        "profAct",
+        activeProfileIndex
+    );
+
+    return index;
+}
+
 bool Settings::activateProfile(
     uint8_t index
 )

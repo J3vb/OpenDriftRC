@@ -46,6 +46,30 @@ namespace
         return quoted;
     }
 
+    // One profile as a JSON object, shared by the settings and profile
+    // exports so an exported profile always imports.
+    void appendProfileJson(
+        String& json,
+        const Settings::DrivingProfile* profile
+    )
+    {
+        json += F("{\"name\":");
+        json += jsonString(profile->name);
+        appendJsonField(json, "gain", String(profile->gain, 2));
+        appendJsonField(json, "deadband", String(profile->deadband, 2));
+        appendJsonField(json, "gyroSmoothing", String(profile->gyroSmoothing, 2));
+        appendJsonField(json, "gyroIntegralGain", String(profile->gyroIntegralGain, 2));
+        appendJsonField(json, "gyroMaxCorrection", String((int)profile->gyroMaxCorrection));
+        appendJsonField(json, "gyroIntegralLimit", String((int)profile->gyroIntegralLimit));
+        appendJsonField(json, "gyroHoldBoost", String((int)profile->gyroHoldBoost));
+        appendJsonField(json, "predictionStrength", String((int)profile->predictionStrength));
+        appendJsonField(json, "radioSteeringTravel", String((int)profile->radioSteeringTravel));
+        appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
+        appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
+        appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
+        json += '}';
+    }
+
     const char* resetReasonText(
         esp_reset_reason_t reason
     )
@@ -203,6 +227,24 @@ void WebConfigurator::begin(
         [this]()
         {
             handleSettingsExport();
+        }
+    );
+
+    server.on(
+        "/profiles.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleProfilesExport();
+        }
+    );
+
+    server.on(
+        "/import-profiles",
+        HTTP_POST,
+        [this]()
+        {
+            handleProfilesImport();
         }
     );
 
@@ -439,7 +481,7 @@ void WebConfigurator::handleRoot()
     #endif
     html += F("</div></div></div>");
 
-    html += F("<div class='card'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
+    html += F("<div class='card' id='profiles'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
     html += settings->getActiveProfileName();
     html += F("</strong>. Active profiles automatically keep trackside tune changes.</p>");
 
@@ -493,6 +535,11 @@ void WebConfigurator::handleRoot()
     {
         html += F("<p class='sub'>Profile limit reached. Delete one to create another.</p>");
     }
+
+    html += F("<p class='sub'><a href='/profiles.json'>Export profiles (JSON)</a> saves every driving profile to one file for backup or sharing.</p>");
+    html += F("<label>Import profiles from a file</label><input id='profileFile' type='file' accept='.json,application/json'>");
+    html += F("<button type='button' class='secondary' onclick='importProfiles()'>Import profiles</button>");
+    html += F("<p class='sub' id='profileImportStatus'>Takes a profiles export or a full settings export. A profile whose name already exists is replaced; if that profile is active it is deactivated so the imported values stick, then tap it to load them. The list holds 12; the browser reads the file and the board only receives checked values.</p>");
 
     html += F("</div>");
 
@@ -931,6 +978,11 @@ void WebConfigurator::handleRoot()
     html += F("</div>");
 
     html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+
+    // The browser parses the JSON and posts plain form fields, so the board
+    // needs no JSON parser and every value goes through the same clamps as
+    // the settings form.
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.readAsText(f);}");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
@@ -1715,21 +1767,7 @@ void WebConfigurator::handleSettingsExport()
 
         firstProfile = false;
 
-        json += F("{\"name\":");
-        json += jsonString(profile->name);
-        appendJsonField(json, "gain", String(profile->gain, 2));
-        appendJsonField(json, "deadband", String(profile->deadband, 2));
-        appendJsonField(json, "gyroSmoothing", String(profile->gyroSmoothing, 2));
-        appendJsonField(json, "gyroIntegralGain", String(profile->gyroIntegralGain, 2));
-        appendJsonField(json, "gyroMaxCorrection", String((int)profile->gyroMaxCorrection));
-        appendJsonField(json, "gyroIntegralLimit", String((int)profile->gyroIntegralLimit));
-        appendJsonField(json, "gyroHoldBoost", String((int)profile->gyroHoldBoost));
-        appendJsonField(json, "predictionStrength", String((int)profile->predictionStrength));
-        appendJsonField(json, "radioSteeringTravel", String((int)profile->radioSteeringTravel));
-        appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
-        appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
-        appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
-        json += '}';
+        appendProfileJson(json, profile);
     }
 
     json += F("]}}");
@@ -1749,6 +1787,225 @@ void WebConfigurator::handleSettingsExport()
         "application/json",
         json
     );
+}
+
+
+
+void WebConfigurator::handleProfilesExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    String json;
+
+    json.reserve(4096);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\",\"profiles\":[");
+
+    bool first = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!first)
+        {
+            json += ',';
+        }
+
+        first = false;
+
+        appendProfileJson(json, profile);
+    }
+
+    json += F("]}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-profiles-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
+    );
+}
+
+
+
+void WebConfigurator::handleProfilesImport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    int count =
+        constrain(
+            getIntArg("count", 0),
+            0,
+            (int)Settings::MAX_PROFILES
+        );
+
+    uint8_t added = 0;
+    uint8_t replaced = 0;
+    uint8_t invalid = 0;
+    uint8_t full = 0;
+
+    for(int i = 0; i < count; i++)
+    {
+        Settings::DrivingProfile profile;
+
+        char key[16];
+
+        snprintf(key, sizeof(key), "n%d", i);
+        server.arg(key).toCharArray(profile.name, Settings::PROFILE_NAME_LENGTH);
+
+        profile.gain = profileFloatArg("gain", i, profile.gain);
+        profile.deadband = profileFloatArg("deadband", i, profile.deadband);
+        profile.gyroSmoothing = profileFloatArg("smooth", i, profile.gyroSmoothing);
+        profile.gyroIntegralGain = profileFloatArg("igain", i, profile.gyroIntegralGain);
+        profile.gyroMaxCorrection = profileIntArg("max", i, profile.gyroMaxCorrection);
+        profile.gyroIntegralLimit = profileIntArg("ilimit", i, profile.gyroIntegralLimit);
+        profile.gyroHoldBoost = profileIntArg("hold", i, profile.gyroHoldBoost);
+        profile.predictionStrength = profileIntArg("pred", i, profile.predictionStrength);
+        profile.radioSteeringTravel = profileIntArg("travel", i, profile.radioSteeringTravel);
+        profile.gyroCounterSteerAssist = profileIntArg("csteer", i, profile.gyroCounterSteerAssist);
+        profile.gyroTransitionSpeed = profileIntArg("tspeed", i, profile.gyroTransitionSpeed);
+        profile.gyroHuntStrength = profileIntArg("wobble", i, profile.gyroHuntStrength);
+
+        bool wasReplaced = false;
+
+        int8_t result =
+            settings->importProfile(
+                profile,
+                wasReplaced
+            );
+
+        if(result == -1)
+        {
+            invalid++;
+        }
+        else if(result == -2)
+        {
+            full++;
+        }
+        else if(wasReplaced)
+        {
+            replaced++;
+        }
+        else
+        {
+            added++;
+        }
+    }
+
+    String summary;
+
+    summary += F("Imported ");
+    summary += String((int)(added + replaced));
+    summary += F(" profile(s): ");
+    summary += String((int)added);
+    summary += F(" added, ");
+    summary += String((int)replaced);
+    summary += F(" replaced");
+
+    if(invalid > 0)
+    {
+        summary += F(", ");
+        summary += String((int)invalid);
+        summary += F(" skipped (unusable name)");
+    }
+
+    if(full > 0)
+    {
+        summary += F(", ");
+        summary += String((int)full);
+        summary += F(" skipped (list full)");
+    }
+
+    summary += '.';
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        (added + replaced) > 0 ? 200 : 400,
+        "text/plain",
+        summary
+    );
+}
+
+
+
+float WebConfigurator::profileFloatArg(
+    const char* prefix,
+    int index,
+    float fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    float value =
+        server.arg(key).toFloat();
+
+    // strtod accepts "nan" and "inf"; neither may reach the controller.
+    return isfinite(value) ? value : fallback;
+}
+
+
+
+int32_t WebConfigurator::profileIntArg(
+    const char* prefix,
+    int index,
+    int32_t fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    return server.arg(key).toInt();
 }
 
 
