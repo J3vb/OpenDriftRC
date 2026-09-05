@@ -1,4 +1,5 @@
 #include "WebConfigurator.h"
+#include "../../include/Version.h"
 
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
@@ -179,7 +180,9 @@ void WebConfigurator::handleRoot()
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
     html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
     html += F("</style></head><body><main>");
-    html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator</div>");
+    html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator &middot; ");
+    html += F(OPENDRIFT_VERSION_STRING);
+    html += F("</div>");
 
     html += F("<div class='card'><h2>Live Radio</h2><div class='status'>");
     html += F("<div class='pill'>Steering: ");
@@ -949,7 +952,7 @@ void WebConfigurator::handleLogDownload()
 
     server.sendHeader(
         "Content-Disposition",
-        "attachment; filename=opendrift-blackbox.csv"
+        "attachment; filename=opendrift-blackbox-" OPENDRIFT_VERSION ".csv"
     );
 
     server.setContentLength(

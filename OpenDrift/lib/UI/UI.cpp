@@ -1,4 +1,5 @@
 #include "UI.h"
+#include "../../include/Version.h"
 
 static constexpr uint16_t ROUND_CYAN = 0x07FF;
 static constexpr uint16_t ROUND_DIM = 0x3186;
@@ -2137,6 +2138,12 @@ void UI::drawSystemPage(
 
     lcd->setTextColor(
         OD_MUTED
+    );
+
+    lcd->drawString(
+        OPENDRIFT_VERSION_STRING,
+        205,
+        20
     );
 
     lcd->drawString(
