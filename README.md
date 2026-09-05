@@ -323,7 +323,9 @@ Shows WiFi state and connected client count.
 
 When WiFi is enabled, connect to the `OpenDrift` network and open:
 
-`http://192.168.4.1/`
+`http://opendrift.local/`
+
+If your device cannot resolve the name, the address `http://192.168.4.1/` always works.
 
 ### System
 
@@ -347,7 +349,9 @@ The setting is global and appears on the AMOLED System page, in the web configur
 
 When WiFi is enabled, OpenDrift starts a web configurator at:
 
-`http://192.168.4.1/`
+`http://opendrift.local/`
+
+If your device cannot resolve the name, the address `http://192.168.4.1/` always works.
 
 Current web settings:
 
@@ -423,7 +427,7 @@ Log rows include:
 Suggested test workflow:
 
 1. Connect to the `OpenDrift` WiFi network.
-2. Open `http://192.168.4.1/`.
+2. Open `http://opendrift.local/` (or `http://192.168.4.1/`).
 3. Enable onboard logging if it is off, then save settings.
 4. Tap `Clear RAM Log`.
 5. Drive the car.
