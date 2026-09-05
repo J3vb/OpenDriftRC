@@ -1651,6 +1651,11 @@ void WebConfigurator::handleSettingsExport()
     // same values straight back through /save. No escaping is needed: the
     // WiFi name and profile names are sanitized to letters, digits, space
     // and - _ . on the way in.
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
+
     String json;
 
     json.reserve(6144);
@@ -1803,6 +1808,11 @@ void WebConfigurator::handleProfilesExport()
 
         return;
     }
+
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
 
     String json;
 
