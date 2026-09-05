@@ -23,7 +23,8 @@ void WebConfigurator::begin(
     RadioInput& gainRadioRef,
     RadioInput& throttleRadioRef,
     BlackboxLogger& blackboxRef,
-    WiFiManager& wifiRef
+    WiFiManager& wifiRef,
+    ServoOutput& steeringServoRef
 )
 {
     settings =
@@ -46,6 +47,9 @@ void WebConfigurator::begin(
 
     wifi =
         &wifiRef;
+
+    steeringServo =
+        &steeringServoRef;
 
     server.on(
         "/",
@@ -134,6 +138,24 @@ void WebConfigurator::begin(
         [this]()
         {
             handleFactoryReset();
+        }
+    );
+
+    server.on(
+        "/capture-endpoint",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointCapture();
+        }
+    );
+
+    server.on(
+        "/reset-endpoints",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointReset();
         }
     );
 
@@ -241,9 +263,10 @@ void WebConfigurator::handleRoot()
     html += F("input[type=checkbox]{width:auto;transform:scale(1.3);margin-right:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}");
     html += F(".status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pill{background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:10px}");
     html += F("button{width:100%;padding:13px 16px;border:0;border-radius:6px;background:#24a36b;color:#fff;font-size:17px;font-weight:700;margin-top:16px}");
-    html += F("button.secondary{background:#3b4148}button.danger{background:#973b45}.warn{color:#e5a733}");
+    html += F("button.secondary{background:#3b4148}button.danger{background:#973b45}.warn{color:#e5a733}.ok{color:#24a36b}.bad{color:#e5484d}");
+    html += F(".endpoints{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.endpoints button{margin:0;padding:10px 6px;font-size:13px}.endpoints small{font-weight:400}");
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
-    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
+    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile,.endpoints{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
     html += F("</style></head><body><main>");
     html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator &middot; ");
     html += F(OPENDRIFT_VERSION_STRING);
@@ -389,9 +412,83 @@ void WebConfigurator::handleRoot()
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
-    html += settings->isSteeringCalibrated() ? F("CALIBRATED") : F("NOT CALIBRATED");
-    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Position the wheels at each safe physical endpoint and capture it from the display or EdgeTX tool, or enter all three pulse values below.</p><div class='row'>");
+    // Same states and colours as the display's endpoint page.
+    bool endpointsSaved =
+        settings->isSteeringCalibrated();
+
+    if(endpointsSaved)
+    {
+        endpointCaptureError = false;
+    }
+
+    bool steeringSignal =
+        steeringRadio != nullptr &&
+        steeringRadio->hasSignal();
+
+    uint8_t endpointMask =
+        settings->getSteeringCalibrationMask();
+
+    html += F("<div class='card' id='endpoints'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong class='");
+    html += endpointsSaved
+        ? F("ok")
+        : (
+            (!steeringSignal || endpointCaptureError)
+            ? F("bad")
+            : F("")
+        );
+    html += F("'>");
+    html += endpointsSaved
+        ? F("CALIBRATED")
+        : (
+            !steeringSignal
+            ? F("NO STEERING SIGNAL")
+            : (
+                endpointCaptureError
+                ? F("INVALID - RETRY")
+                : (
+                    endpointMask != 0
+                    ? F("CAPTURE REMAINING")
+                    : F("CAPTURE ALL 3")
+                )
+            )
+        );
+    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Steer the wheels to each safe physical stop with the transmitter, then capture it here, on the display, or in the EdgeTX tool. Entering all three pulse values by hand also works.</p>");
+    html += F("<p class='sub'>Servo now: <strong id='servoPulse'>");
+    html += steeringServo != nullptr
+        ? String(steeringServo->getPosition())
+        : String(F("--"));
+    html += F("</strong> us &middot; steering signal <strong id='steeringSignal'>");
+    html += steeringSignal ? F("OK") : F("NONE");
+    html += F("</strong></p><div class='endpoints'>");
+
+    static const char* const endpointLabels[3] =
+    {
+        "Capture left",
+        "Capture center",
+        "Capture right"
+    };
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        bool captured =
+            (endpointMask & (1U << point)) != 0;
+
+        html += F("<button type='submit' form='captureEndpoint");
+        html += String(point);
+        html += captured ? F("'>") : F("' class='danger'>");
+        html += endpointLabels[point];
+
+        if(captured)
+        {
+            html += F("<br><small>");
+            html += String(settings->getSteeringCapturedPulse(point));
+            html += F(" us</small>");
+        }
+
+        html += F("</button>");
+    }
+
+    html += F("<button type='submit' form='resetEndpoints' class='secondary'>Reset calibration</button></div><div class='row'>");
     html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
     html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
     html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
@@ -505,6 +602,20 @@ void WebConfigurator::handleRoot()
 
     html += F("<button type='submit'>Save Settings</button></form>");
 
+    // The capture and reset buttons live inside the settings form above,
+    // which cannot nest another form, so they target these through their
+    // form attribute.
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        html += F("<form id='captureEndpoint");
+        html += String(point);
+        html += F("' method='post' action='/capture-endpoint'><input type='hidden' name='point' value='");
+        html += String(point);
+        html += F("'></form>");
+    }
+
+    html += F("<form id='resetEndpoints' method='post' action='/reset-endpoints' onsubmit=\"return confirm('Clear the physical endpoint calibration? The servo returns to the plain center and travel map until all three points are captured again.')\"></form>");
+
     html += F("<div class='card'><h2>Blackbox Log</h2>");
 
     if(!settings->getBlackboxEnabled())
@@ -558,7 +669,7 @@ void WebConfigurator::handleRoot()
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
+    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
 
     server.send(
         200,
@@ -594,13 +705,19 @@ void WebConfigurator::handleLiveStatus()
     #endif
 
     String json;
-    json.reserve(72);
+    json.reserve(128);
     json += F("{\"gain\":");
     json += String(gyro->getGain(), 2);
     json += F(",\"pulse\":");
     json += String(gainRadio->getPulseWidth());
     json += F(",\"override\":");
     json += gainOverride ? F("true") : F("false");
+    json += F(",\"steering\":");
+    json += (steeringRadio != nullptr && steeringRadio->hasSignal()) ? F("true") : F("false");
+    json += F(",\"servo\":");
+    json += steeringServo != nullptr
+        ? String(steeringServo->getPosition())
+        : String(0);
     json += F("}");
 
     server.sendHeader(
@@ -1216,6 +1333,108 @@ void WebConfigurator::handleFactoryReset()
 
     restartAtMs =
         millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleEndpointCapture()
+{
+    if(
+        settings == nullptr ||
+        steeringRadio == nullptr ||
+        steeringServo == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Endpoint capture unavailable"
+        );
+
+        return;
+    }
+
+    int point =
+        getIntArg(
+            "point",
+            -1
+        );
+
+    if(point < 0 || point > 2)
+    {
+        server.send(
+            400,
+            "text/plain",
+            "Invalid endpoint"
+        );
+
+        return;
+    }
+
+    // Same gate and same inputs as the display and the EdgeTX tool: the
+    // servo's current position is only meaningful while the transmitter
+    // is steering it, and the captured pulse must be a sane servo value.
+    if(!steeringRadio->hasSignal())
+    {
+        endpointCaptureError = true;
+    }
+    else
+    {
+        int pulse =
+            steeringServo->getPosition();
+
+        if(pulse < 900 || pulse > 2100)
+        {
+            endpointCaptureError = true;
+        }
+        else
+        {
+            endpointCaptureError =
+                !settings->captureSteeringCalibrationPoint(
+                    (uint8_t)point,
+                    pulse,
+                    steeringRadio->getPulseWidth()
+                );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+void WebConfigurator::handleEndpointReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    settings->clearSteeringCalibration();
+
+    endpointCaptureError = false;
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
 }
 
 

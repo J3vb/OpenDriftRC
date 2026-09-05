@@ -1744,7 +1744,8 @@ void setup()
             gainRadio,
             throttleRadio,
             blackbox,
-            wifi
+            wifi,
+            steeringServo
         );
 
         bootConsole.log(
@@ -1944,7 +1945,8 @@ void loop()
             gainRadio,
             throttleRadio,
             blackbox,
-            wifi
+            wifi,
+            steeringServo
         );
     }
 

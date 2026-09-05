@@ -8,6 +8,7 @@
 #include "RadioInput.h"
 #include "BlackboxLogger.h"
 #include "WiFiManager.h"
+#include "Servo.h"
 
 
 class WebConfigurator
@@ -23,7 +24,8 @@ public:
         RadioInput& gainRadio,
         RadioInput& throttleRadio,
         BlackboxLogger& blackbox,
-        WiFiManager& wifi
+        WiFiManager& wifi,
+        ServoOutput& steeringServo
     );
 
     void update();
@@ -54,7 +56,13 @@ private:
 
     WiFiManager* wifi = nullptr;
 
+    ServoOutput* steeringServo = nullptr;
+
     bool running = false;
+
+    // Web twin of the display's capture error flag: set when a capture is
+    // refused or rejected, cleared by a reset or a completed calibration.
+    bool endpointCaptureError = false;
 
     // A restart request is answered first and executed from update()
     // once the response has had time to leave the socket.
@@ -85,6 +93,10 @@ private:
     void handleRestart();
 
     void handleFactoryReset();
+
+    void handleEndpointCapture();
+
+    void handleEndpointReset();
 
     void sendRestartPage(
         const char* heading,

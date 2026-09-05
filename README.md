@@ -288,10 +288,12 @@ OpenDrift saves the calibration after all three physical positions are captured
 on opposite sides of center. The saved endpoints become the final asymmetric
 servo map and hard clamp, so neither the driver nor gyro can push through them.
 
-CRSF users can perform the same three captures from the EdgeTX `OpenDrift.lua`
-tool. Calibration state is persistent and shared: completing it on the radio
-turns the AMOLED buttons green, while completing it on the display updates the
-radio's `Endpoints` status to `YES`.
+The web configurator's Physical Servo Endpoints card has the same three capture
+buttons and a reset, next to the live servo pulse. CRSF users can perform the
+same three captures from the EdgeTX `OpenDrift.lua` tool. Calibration state is
+persistent and shared: completing it in any of the three places updates the
+other two, so the AMOLED buttons turn green and the radio's `Endpoints` status
+reads `YES` whichever one you used.
 
 Suggested calibration flow:
 
@@ -374,6 +376,7 @@ Current web settings:
 - Servo travel
 - Servo quiet band
 - Steering max left / center / max right
+- Capture left / center / right and reset for the physical servo endpoints, with the live servo pulse
 - Radio steering travel
 - Gain channel low / high
 - GPIO 18 gain-input or throttle-output mode
