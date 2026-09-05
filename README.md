@@ -343,7 +343,7 @@ Hardware and installation settings remain global, including gyro/servo direction
 
 OpenDrift defaults to **250 Hz** for broad digital-servo compatibility. **333 Hz** reduces the output interval from 4 ms to about 3 ms and can sharpen a fast supported servo, but it must only be used when the servo manufacturer explicitly rates the servo for 333 Hz operation. An unsupported update rate can cause heat, buzzing, erratic steering, or servo damage.
 
-The setting is global and appears on the AMOLED System page, in the web configurator, and in the CRSF/EdgeTX parameter list. Restart OpenDrift after changing it so both the control task and steering PWM start at the selected rate.
+The setting is global and appears on the AMOLED System page, in the web configurator, and in the CRSF/EdgeTX parameter list. Restart OpenDrift after changing it so both the control task and steering PWM start at the selected rate. The web configurator has a Restart button for this.
 
 ## Web Configurator
 
@@ -378,12 +378,14 @@ Current web settings:
 - Gain channel low / high
 - GPIO 18 gain-input or throttle-output mode
 - WiFi enabled on boot
-- WiFi network name (SSID), applied the next time WiFi starts
+- WiFi network name (SSID), applied after a restart
 - WiFi auto-off timeout
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
 
 The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
+
+The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate or the WiFi network name; both only apply after a restart. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
 
 Use the web configurator when you want to make several changes quickly. Use the onboard UI when tuning trackside without a phone or laptop.
 

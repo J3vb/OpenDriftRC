@@ -506,6 +506,14 @@ void Settings::update()
     }
 }
 
+void Settings::flush()
+{
+    if(dirty)
+    {
+        save();
+    }
+}
+
 void Settings::save()
 {
     prefs.putFloat(

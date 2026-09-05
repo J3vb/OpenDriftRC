@@ -1,6 +1,8 @@
 #include "WebConfigurator.h"
 #include "../../include/Version.h"
 
+#include <esp_system.h>
+
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
 #endif
@@ -20,7 +22,8 @@ void WebConfigurator::begin(
     RadioInput& steeringRadioRef,
     RadioInput& gainRadioRef,
     RadioInput& throttleRadioRef,
-    BlackboxLogger& blackboxRef
+    BlackboxLogger& blackboxRef,
+    WiFiManager& wifiRef
 )
 {
     settings =
@@ -40,6 +43,9 @@ void WebConfigurator::begin(
 
     blackbox =
         &blackboxRef;
+
+    wifi =
+        &wifiRef;
 
     server.on(
         "/",
@@ -113,6 +119,15 @@ void WebConfigurator::begin(
         }
     );
 
+    server.on(
+        "/restart",
+        HTTP_POST,
+        [this]()
+        {
+            handleRestart();
+        }
+    );
+
     server.onNotFound(
         [this]()
         {
@@ -133,6 +148,27 @@ void WebConfigurator::begin(
 
 void WebConfigurator::update()
 {
+    // Checked before the running guard so a WiFi auto-off inside the
+    // delay window cannot strand a requested restart.
+    if(
+        restartAtMs != 0 &&
+        (long)(millis() - restartAtMs) >= 0
+    )
+    {
+        if(settings != nullptr)
+        {
+            settings->flush();
+        }
+
+        Serial.println(
+            "Restart requested from web configurator"
+        );
+
+        Serial.flush();
+
+        esp_restart();
+    }
+
     if(!running)
     {
         return;
@@ -146,6 +182,13 @@ void WebConfigurator::update()
 bool WebConfigurator::isRunning()
 {
     return running;
+}
+
+
+
+bool WebConfigurator::isRestartPending()
+{
+    return restartAtMs != 0;
 }
 
 
@@ -177,6 +220,7 @@ void WebConfigurator::handleRoot()
     html += F("input[type=checkbox]{width:auto;transform:scale(1.3);margin-right:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}");
     html += F(".status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pill{background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:10px}");
     html += F("button{width:100%;padding:13px 16px;border:0;border-radius:6px;background:#24a36b;color:#fff;font-size:17px;font-weight:700;margin-top:16px}");
+    html += F("button.secondary{background:#3b4148}button.danger{background:#973b45}.warn{color:#e5a733}");
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
     html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
     html += F("</style></head><body><main>");
@@ -316,7 +360,8 @@ void WebConfigurator::handleRoot()
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
     if(settings->getControlLoopHz() == 333) html += F(" selected");
-    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting.</p>");
+    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting: save first, then restart.</p>");
+    html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     html += F("<div class='row'>");
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
@@ -415,7 +460,20 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
     html += input("Network name (SSID)", "wifiSsid", String(settings->getWifiSsid()), "text", "");
-    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. Applies the next time WiFi starts: toggle WiFi off and on from the display, or reboot, then join the new network.</p>");
+    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. A new name applies after a restart, or the next time WiFi is switched on from the display.</p>");
+
+    if(
+        wifi != nullptr &&
+        wifi->isSsidChangePending()
+    )
+    {
+        // The active name is sanitized to the same character set as the
+        // form values, so it is safe to inline.
+        html += F("<p class='sub warn'>Rename pending: the access point still broadcasts <strong>");
+        html += wifi->getActiveSsid();
+        html += F("</strong>. Restart to switch to the new name.</p>");
+        html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
+    }
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
     html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
@@ -466,6 +524,13 @@ void WebConfigurator::handleRoot()
         html += F("<p class='sub'>PSRAM log buffer unavailable.</p>");
     }
 
+    html += F("</div>");
+
+    // The settings form above cannot contain another form, so the restart
+    // form lives here and the restart buttons elsewhere on the page point
+    // at it through their form attribute.
+    html += F("<div class='card'><h2>System</h2><p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
+    html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
     html += F("</div>");
 
     html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
@@ -1068,6 +1133,66 @@ void WebConfigurator::handleLogClear()
 
     server.send(
         303
+    );
+}
+
+
+
+void WebConfigurator::handleRestart()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Persist anything still waiting for the deferred save so a change
+    // made moments ago cannot be lost by the reset.
+    settings->flush();
+
+    // The configured name is the one the access point uses after boot.
+    sendRestartPage(
+        "Restarting",
+        settings->getWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::sendRestartPage(
+    const char* heading,
+    const char* ssid
+)
+{
+    String html;
+
+    html.reserve(1200);
+
+    html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='12;url=/'>");
+    html += F("<title>OpenDrift</title><style>body{font-family:system-ui,Arial,sans-serif;margin:0;background:#101214;color:#f5f5f5}main{max-width:760px;margin:0 auto;padding:18px}h1{font-size:28px;margin:8px 0 2px}p{color:#aeb4bb;font-size:16px}a{color:#65b7ff}</style></head><body><main><h1>");
+    html += heading;
+    html += F("</h1><p>OpenDrift is restarting. Rejoin the WiFi network <strong>");
+    html += ssid;
+    html += F("</strong> in about 10 seconds. This page reloads by itself once you are back on the network, or <a href='/'>reload it</a> yourself.</p>");
+    html += F("<p>The RAM blackbox log does not survive a restart.</p></main></body></html>");
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "text/html",
+        html
     );
 }
 

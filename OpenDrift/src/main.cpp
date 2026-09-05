@@ -1743,7 +1743,8 @@ void setup()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi
         );
 
         bootConsole.log(
@@ -1942,11 +1943,17 @@ void loop()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi
         );
     }
 
-    if(wifi.isEnabled())
+    // A requested restart must still fire if the access point drops
+    // inside the short delay between the response and the reset.
+    if(
+        wifi.isEnabled() ||
+        webConfig.isRestartPending()
+    )
     {
         webConfig.update();
     }

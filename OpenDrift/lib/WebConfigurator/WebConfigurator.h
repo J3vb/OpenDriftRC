@@ -7,6 +7,7 @@
 #include "GyroController.h"
 #include "RadioInput.h"
 #include "BlackboxLogger.h"
+#include "WiFiManager.h"
 
 
 class WebConfigurator
@@ -21,12 +22,18 @@ public:
         RadioInput& steeringRadio,
         RadioInput& gainRadio,
         RadioInput& throttleRadio,
-        BlackboxLogger& blackbox
+        BlackboxLogger& blackbox,
+        WiFiManager& wifi
     );
 
     void update();
 
     bool isRunning();
+
+    // True between a web restart request and the reset itself. The main
+    // loop keeps calling update() while this holds, even if the access
+    // point drops in the meantime.
+    bool isRestartPending();
 
 
 private:
@@ -45,7 +52,15 @@ private:
 
     BlackboxLogger* blackbox = nullptr;
 
+    WiFiManager* wifi = nullptr;
+
     bool running = false;
+
+    // A restart request is answered first and executed from update()
+    // once the response has had time to leave the socket.
+    static constexpr unsigned long RESTART_DELAY_MS = 500;
+
+    unsigned long restartAtMs = 0;
 
     void handleRoot();
 
@@ -62,6 +77,13 @@ private:
     void handleLogDownload();
 
     void handleLogClear();
+
+    void handleRestart();
+
+    void sendRestartPage(
+        const char* heading,
+        const char* ssid
+    );
 
     void handleNotFound();
 

@@ -35,6 +35,10 @@ public:
 
     void update();
 
+    // Write pending changes now instead of waiting for the deferred
+    // save. Used right before a restart.
+    void flush();
+
     // Gyro
     float getGain();
     void setGain(float value);
