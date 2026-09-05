@@ -77,6 +77,7 @@ static uint16_t OD_DIM = 0x3186;
 static uint16_t OD_CYAN = 0x07FF;
 static uint16_t OD_BLUE = 0x3D9F;
 static uint16_t OD_MAGENTA = 0xF81F;
+static uint16_t OD_WARM = 0xFD20;   // page-role amber; OD_AMBER stays fixed for warnings
 
 static bool themeDarkText = false;
 
@@ -91,19 +92,20 @@ struct AmoledAccentPreset
     uint16_t primary;
     uint16_t secondary;
     uint16_t tertiary;
+    uint16_t warm;
 };
 
 // Order matches Settings::themeAccentName(). MIXED keeps the original
 // cyan/blue/magenta split between pages; the others use one colour.
 static const AmoledAccentPreset ACCENT_PRESETS[Settings::THEME_ACCENT_COUNT] =
 {
-    {0x07FF, 0x3D9F, 0xF81F},
-    {0x07FF, 0x07FF, 0x07FF},
-    {0x3D9F, 0x3D9F, 0x3D9F},
-    {0xF81F, 0xF81F, 0xF81F},
-    {0xFD20, 0xFD20, 0xFD20},
-    {0x07E0, 0x07E0, 0x07E0},
-    {0xFFFF, 0xFFFF, 0xFFFF},
+    {0x07FF, 0x3D9F, 0xF81F, 0xFD20},
+    {0x07FF, 0x07FF, 0x07FF, 0x07FF},
+    {0x3D9F, 0x3D9F, 0x3D9F, 0x3D9F},
+    {0xF81F, 0xF81F, 0xF81F, 0xF81F},
+    {0xFD20, 0xFD20, 0xFD20, 0xFD20},
+    {0x07E0, 0x07E0, 0x07E0, 0x07E0},
+    {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF},
 };
 
 static void applyAmoledTheme(
@@ -133,6 +135,7 @@ static void applyAmoledTheme(
     OD_CYAN = preset.primary;
     OD_BLUE = preset.secondary;
     OD_MAGENTA = preset.tertiary;
+    OD_WARM = preset.warm;
 }
 
 static inline uint16_t swapColorBytes(
@@ -585,6 +588,18 @@ static int mapSteeringForDisplay(
     );
 }
 
+
+
+// Text colour for code that both display builds compile: the AMOLED
+// palette follows the theme, the round one is fixed.
+static inline uint16_t uiTextColor()
+{
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    return OD_TEXT;
+    #else
+    return TFT_WHITE;
+    #endif
+}
 
 
 void UI::begin(
@@ -2587,7 +2602,7 @@ void UI::drawResponsePage(
     drawUiBackground(lcd);
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    drawAmoledHeader(lcd, "Response", OD_AMBER);
+    drawAmoledHeader(lcd, "Response", OD_WARM);
 
     drawAmoledRowPanel(lcd, 48, 48);
     drawAmoledRowPanel(lcd, 110, 48);
@@ -2608,8 +2623,8 @@ void UI::drawResponsePage(
     for(int row = 0; row < 3; row++)
     {
         int y = 48 + (row * 62);
-        drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_AMBER);
-        drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_AMBER);
+        drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_WARM);
+        drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_WARM);
     }
     #else
     lcd->setTextSize(3);
@@ -3819,7 +3834,7 @@ void UI::drawSteeringCalibrationPage(
     drawAmoledHeader(
         lcd,
         "Physical Endpoints",
-        OD_AMBER
+        OD_WARM
     );
 
     const bool steeringSignal =
@@ -3962,7 +3977,7 @@ void UI::drawRadioPage(
     drawUiBackground(lcd);
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -3970,7 +3985,7 @@ void UI::drawRadioPage(
     drawAmoledHeader(
         lcd,
         radioSection == 0 ? "Radio" : "Steering",
-        radioSection == 0 ? OD_CYAN : OD_AMBER
+        radioSection == 0 ? OD_CYAN : OD_WARM
     );
 
     lcd->setTextSize(2);
@@ -4035,7 +4050,7 @@ void UI::drawRadioPage(
             34,
             40,
             "-",
-            OD_AMBER
+            OD_WARM
         );
 
         drawAmoledButton(
@@ -4045,7 +4060,7 @@ void UI::drawRadioPage(
             34,
             40,
             "+",
-            OD_AMBER
+            OD_WARM
         );
 
         drawAmoledButton(
@@ -4076,7 +4091,7 @@ void UI::drawRadioPage(
             176
         );
 
-        lcd->setTextColor(OD_AMBER);
+        lcd->setTextColor(OD_WARM);
         lcd->drawCenterString(
             "ENDPOINTS",
             361,
@@ -4342,7 +4357,7 @@ void UI::drawRadioPage(
         20
     );
 
-    lcd->setTextColor(TFT_WHITE);
+    lcd->setTextColor(uiTextColor());
 
     if(radioSection == 1)
     {
@@ -4369,7 +4384,7 @@ void UI::drawRadioPage(
             95,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4383,7 +4398,7 @@ void UI::drawRadioPage(
             135,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4397,7 +4412,7 @@ void UI::drawRadioPage(
             175,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4411,7 +4426,7 @@ void UI::drawRadioPage(
             210,
             50,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4425,7 +4440,7 @@ void UI::drawRadioPage(
             210,
             28,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4451,7 +4466,7 @@ void UI::drawRadioPage(
             210,
             28,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4559,14 +4574,14 @@ void UI::drawRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 3,
         steeringBarH + 6,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4633,7 +4648,7 @@ void UI::drawRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4728,7 +4743,7 @@ void UI::updateRadioPage(
     #endif
 
     lcd->setTextColor(
-        TFT_WHITE,
+        uiTextColor(),
         TFT_BLACK
     );
 
@@ -4804,7 +4819,7 @@ void UI::updateRadioPage(
         );
 
         lcd->setTextColor(
-            TFT_WHITE
+            uiTextColor()
         );
 
         flushDisplay();
@@ -4907,14 +4922,14 @@ void UI::updateRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 4,
         steeringBarH + 8,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -5003,7 +5018,7 @@ void UI::updateRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -5032,7 +5047,7 @@ void UI::updateRadioPage(
     );
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     flushDisplay();
@@ -5141,7 +5156,7 @@ void UI::updateRadioPage(
         );
 
         lcd->setTextColor(
-            TFT_WHITE
+            uiTextColor()
         );
 
         flushDisplay();
@@ -5234,14 +5249,14 @@ void UI::updateRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 3,
         steeringBarH + 6,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -5318,7 +5333,7 @@ void UI::updateRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -5385,7 +5400,7 @@ void UI::updateRadioPage(
     );
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     flushDisplay();

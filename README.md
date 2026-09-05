@@ -339,7 +339,7 @@ Basic firmware/system information. Tap the GPIO 18 mode button to switch between
 
 The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
 
-The `THEME` row has two buttons. The left one cycles the accent colour used for headers, buttons and highlights: Mixed (the original colour per page), Cyan, Blue, Magenta, Amber, Green or White. The right one switches between light and dark text; dark text suits a light photo background. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any image. Both settings are saved and shared with the web configurator.
+The `THEME` row has two buttons. The left one cycles the accent colour used for every page header and the adjustment buttons: Mixed (the original colour per page), Cyan, Blue, Magenta, Amber, Green or White. Amber stays reserved for warnings such as a pending restart or a pending WiFi rename. The right one switches between light and dark text; dark text suits a light photo background. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any image. Both settings are saved and shared with the web configurator.
 
 The Display card also has an idle dim timeout. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default.
 
