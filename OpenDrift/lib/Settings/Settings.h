@@ -137,6 +137,16 @@ public:
     void setBackgroundName(const String& value);
     static String sanitizeBackgroundName(const String& value);
 
+    // AMOLED theme. Text 0 = light text (default), 1 = dark text for light
+    // backgrounds. Accent selects a preset for headers, buttons and
+    // highlights; 0 keeps the original mixed colours.
+    static constexpr uint8_t THEME_ACCENT_COUNT = 7;
+    static const char* themeAccentName(uint8_t accent);
+    uint8_t getThemeText();
+    void setThemeText(int value);
+    uint8_t getThemeAccent();
+    void setThemeAccent(int value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -251,6 +261,10 @@ private:
     uint16_t displayDimTimeout = 0;
 
     char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
+
+    uint8_t themeText = 0;
+
+    uint8_t themeAccent = 0;
 
     int steeringMin = 1000;
 

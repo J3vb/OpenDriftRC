@@ -751,7 +751,33 @@ void WebConfigurator::handleRoot()
 
     html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
     html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
-    html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p></div>");
+    html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p>");
+
+    html += F("<label>Text colour</label><select name='themeText'><option value='0'");
+    if(settings->getThemeText() == 0) html += F(" selected");
+    html += F(">Light text (default)</option><option value='1'");
+    if(settings->getThemeText() == 1) html += F(" selected");
+    html += F(">Dark text, for light backgrounds</option></select>");
+
+    html += F("<label>Accent colour</label><select name='themeAccent'>");
+
+    for(uint8_t accent = 0; accent < Settings::THEME_ACCENT_COUNT; accent++)
+    {
+        html += F("<option value='");
+        html += String((int)accent);
+        html += F("'");
+
+        if(settings->getThemeAccent() == accent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += Settings::themeAccentName(accent);
+        html += F("</option>");
+    }
+
+    html += F("</select><p class='sub'>Headers, buttons and highlights use the accent; Mixed keeps the original colour per page. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any photo. The System page has the same two controls.</p></div>");
 
     #endif
 
@@ -1243,6 +1269,20 @@ void WebConfigurator::handleSave()
             settings->getDisplayDimTimeout()
         )
     );
+
+    settings->setThemeText(
+        getIntArg(
+            "themeText",
+            settings->getThemeText()
+        )
+    );
+
+    settings->setThemeAccent(
+        getIntArg(
+            "themeAccent",
+            settings->getThemeAccent()
+        )
+    );
     #endif
 
     if(gyro != nullptr)
@@ -1613,6 +1653,9 @@ void WebConfigurator::handleSettingsExport()
     appendJsonField(json, "blackboxEnabled", jsonBool(settings->getBlackboxEnabled()));
     appendJsonField(json, "displayBrightness", String((int)settings->getDisplayBrightness()));
     appendJsonField(json, "displayDimTimeout", String((int)settings->getDisplayDimTimeout()));
+    appendJsonField(json, "themeText", String((int)settings->getThemeText()));
+    appendJsonField(json, "themeAccent", String((int)settings->getThemeAccent()));
+    appendJsonField(json, "backgroundName", jsonString(settings->getBackgroundName()));
 
     json += F(",\"endpointCalibration\":{\"calibrated\":");
     json += jsonBool(settings->isSteeringCalibrated());

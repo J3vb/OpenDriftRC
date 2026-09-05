@@ -199,6 +199,17 @@ private:
     // stored rate that differs until the next restart.
     uint16_t bootControlLoopHz = 250;
 
+    // Theme applied to the palette; re-applied when Settings change.
+    uint8_t appliedThemeText = 0;
+
+    uint8_t appliedThemeAccent = 0;
+
+    bool themeApplied = false;
+
+    bool syncTheme(
+        Settings& settings
+    );
+
     // Loads the background named in Settings when it differs from the one
     // on screen, or when storage changed. Returns true when a redraw is
     // needed.

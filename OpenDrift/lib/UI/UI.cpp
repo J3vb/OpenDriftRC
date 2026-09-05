@@ -65,15 +65,112 @@ static_assert(
 );
 
 static constexpr uint16_t OD_BG = TFT_BLACK;
-static constexpr uint16_t OD_TEXT = 0xFFFF;
-static constexpr uint16_t OD_MUTED = 0x9CF3;
-static constexpr uint16_t OD_DIM = 0x3186;
-static constexpr uint16_t OD_CYAN = 0x07FF;
-static constexpr uint16_t OD_BLUE = 0x3D9F;
-static constexpr uint16_t OD_MAGENTA = 0xF81F;
 static constexpr uint16_t OD_AMBER = 0xFD20;
 static constexpr uint16_t OD_GREEN = 0x07E0;
 static constexpr uint16_t OD_RED = 0xF800;
+
+// Themed colours. applyAmoledTheme() assigns them from the Settings theme;
+// these defaults are the original palette.
+static uint16_t OD_TEXT = 0xFFFF;
+static uint16_t OD_MUTED = 0x9CF3;
+static uint16_t OD_DIM = 0x3186;
+static uint16_t OD_CYAN = 0x07FF;
+static uint16_t OD_BLUE = 0x3D9F;
+static uint16_t OD_MAGENTA = 0xF81F;
+
+static bool themeDarkText = false;
+
+// Translucent panel marker. Page canvases treat black as transparent; this
+// near-black value is not produced by anything else the UI draws, and the
+// compositor replaces it with a blended background pixel.
+static constexpr uint16_t OD_PANEL = 0x0020;
+static constexpr uint16_t OD_PANEL_RAW = 0x2000;   // OD_PANEL in the sprite's byte order
+
+struct AmoledAccentPreset
+{
+    uint16_t primary;
+    uint16_t secondary;
+    uint16_t tertiary;
+};
+
+// Order matches Settings::themeAccentName(). MIXED keeps the original
+// cyan/blue/magenta split between pages; the others use one colour.
+static const AmoledAccentPreset ACCENT_PRESETS[Settings::THEME_ACCENT_COUNT] =
+{
+    {0x07FF, 0x3D9F, 0xF81F},
+    {0x07FF, 0x07FF, 0x07FF},
+    {0x3D9F, 0x3D9F, 0x3D9F},
+    {0xF81F, 0xF81F, 0xF81F},
+    {0xFD20, 0xFD20, 0xFD20},
+    {0x07E0, 0x07E0, 0x07E0},
+    {0xFFFF, 0xFFFF, 0xFFFF},
+};
+
+static void applyAmoledTheme(
+    uint8_t textMode,
+    uint8_t accent
+)
+{
+    themeDarkText = textMode == 1;
+
+    if(themeDarkText)
+    {
+        // Near-black rather than black, because black is the transparent key.
+        OD_TEXT = 0x0841;
+        OD_MUTED = 0x4228;
+        OD_DIM = 0xAD75;
+    }
+    else
+    {
+        OD_TEXT = 0xFFFF;
+        OD_MUTED = 0x9CF3;
+        OD_DIM = 0x3186;
+    }
+
+    const AmoledAccentPreset& preset =
+        ACCENT_PRESETS[accent < Settings::THEME_ACCENT_COUNT ? accent : 0];
+
+    OD_CYAN = preset.primary;
+    OD_BLUE = preset.secondary;
+    OD_MAGENTA = preset.tertiary;
+}
+
+static inline uint16_t swapColorBytes(
+    uint16_t value
+)
+{
+    return (uint16_t)((value << 8) | (value >> 8));
+}
+
+// Keeps 3/8 of the background under a panel, and adds 5/8 white when the
+// text is dark, so text stays readable over any photo.
+static inline uint16_t blendPanel(
+    uint16_t background
+)
+{
+    uint16_t part =
+        ((background >> 2) & 0x39E7) +
+        ((background >> 3) & 0x18E3);
+
+    return themeDarkText ? (uint16_t)(part + 0x9CF3) : part;
+}
+
+static inline uint16_t blendPanelRaw(
+    uint16_t backgroundRaw
+)
+{
+    return swapColorBytes(blendPanel(swapColorBytes(backgroundRaw)));
+}
+
+// Full-width translucent panel behind one row of label, value and buttons.
+static void drawAmoledRowPanel(
+    LGFX_Sprite* lcd,
+    int y,
+    int h
+)
+{
+    lcd->fillRoundRect(18, y, 420, h, 6, OD_PANEL);
+}
 
 
 static void drawUiBackground(
@@ -178,6 +275,14 @@ static void drawAmoledButton(
     uint8_t textSize = 2
 )
 {
+    lcd->fillRect(
+        x + 1,
+        y + 1,
+        w - 2,
+        h - 2,
+        OD_PANEL
+    );
+
     lcd->drawRect(
         x,
         y,
@@ -500,6 +605,10 @@ void UI::begin(
     lastTouchMs = millis();
 
     bootControlLoopHz = settings.getControlLoopHz();
+
+    syncTheme(
+        settings
+    );
 
     applyBackground(
         settings
@@ -1404,7 +1513,12 @@ void UI::flushDisplay(
                             sourceX
                         ];
 
-                    if(pageColor != 0)
+                    if(pageColor == OD_PANEL_RAW)
+                    {
+                        color =
+                            blendPanelRaw(color);
+                    }
+                    else if(pageColor != 0)
                     {
                         color =
                             pageColor;
@@ -1462,7 +1576,12 @@ void UI::flushDisplay(
                         y
                     );
 
-                if(pageColor != TFT_BLACK)
+                if(pageColor == OD_PANEL)
+                {
+                    color =
+                        blendPanel((uint16_t)color);
+                }
+                else if(pageColor != TFT_BLACK)
                 {
                     color =
                         pageColor;
@@ -1596,7 +1715,12 @@ void UI::flushTransitionDisplay(
                 }
             }
 
-            if(pageColor != 0)
+            if(pageColor == OD_PANEL_RAW)
+            {
+                color =
+                    blendPanelRaw(color);
+            }
+            else if(pageColor != 0)
             {
                 color =
                     pageColor;
@@ -1712,6 +1836,8 @@ void UI::drawMainPage(
         "Drive",
         OD_CYAN
     );
+
+    lcd->fillRoundRect(18, 52, 240, 106, 6, OD_PANEL);
 
     lcd->setTextSize(2);
 
@@ -1960,6 +2086,10 @@ void UI::drawCorePage(
         OD_MAGENTA
     );
 
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
+
     setAmoledLabelSize(lcd);
 
     lcd->setTextColor(
@@ -2179,6 +2309,12 @@ void UI::drawSystemPage(
         OD_BLUE
     );
 
+    drawAmoledRowPanel(lcd, 48, 36);
+    drawAmoledRowPanel(lcd, 89, 36);
+    drawAmoledRowPanel(lcd, 130, 36);
+    drawAmoledRowPanel(lcd, 171, 36);
+    drawAmoledRowPanel(lcd, 212, 36);
+
     lcd->setTextSize(2);
 
     lcd->setTextColor(
@@ -2200,7 +2336,7 @@ void UI::drawSystemPage(
     );
 
     lcd->drawString(
-        "BUILD",
+        "THEME",
         22,
         99
     );
@@ -2257,18 +2393,28 @@ void UI::drawSystemPage(
         2
     );
 
-    lcd->drawString(
-        #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
-        "CRSF OOPS",
-        #else
-        "CRSF INPUT",
-        #endif
-        #else
-        "PWM INPUT",
-        #endif
+    // The build variant already sits in the header's version string, so
+    // this row picks the theme instead.
+    drawAmoledButton(
+        lcd,
         150,
-        91
+        89,
+        116,
+        36,
+        Settings::themeAccentName(settings.getThemeAccent()),
+        OD_CYAN,
+        2
+    );
+
+    drawAmoledButton(
+        lcd,
+        274,
+        89,
+        116,
+        36,
+        settings.getThemeText() == 1 ? "DARK" : "LIGHT",
+        OD_MUTED,
+        2
     );
 
     lcd->drawString(
@@ -2443,6 +2589,10 @@ void UI::drawResponsePage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(lcd, "Response", OD_AMBER);
 
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
+
     setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("SMOOTH", 22, 58);
@@ -2501,6 +2651,10 @@ void UI::drawDriftAssistPage(
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(lcd, "Assistance", OD_BLUE);
+
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
 
     setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
@@ -2570,6 +2724,40 @@ void UI::setBackgroundStore(
 )
 {
     backgroundStore = &store;
+}
+
+
+bool UI::syncTheme(
+    Settings& settings
+)
+{
+    uint8_t textMode =
+        settings.getThemeText();
+
+    uint8_t accent =
+        settings.getThemeAccent();
+
+    if(
+        themeApplied &&
+        textMode == appliedThemeText &&
+        accent == appliedThemeAccent
+    )
+    {
+        return false;
+    }
+
+    themeApplied = true;
+
+    appliedThemeText = textMode;
+
+    appliedThemeAccent = accent;
+
+    applyAmoledTheme(
+        textMode,
+        accent
+    );
+
+    return true;
 }
 
 
@@ -2710,6 +2898,8 @@ void UI::drawBackgroundsPage(
         uint16_t accent =
             active ? OD_GREEN : OD_DIM;
 
+        lcd->fillRoundRect(18, y, 420, 41, 6, OD_PANEL);
+
         lcd->drawRoundRect(
             18,
             y,
@@ -2791,6 +2981,9 @@ void UI::drawExperimentalPage(
         "Transition",
         OD_MAGENTA
     );
+
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 124, 66);
 
     setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
@@ -2919,6 +3112,8 @@ void UI::drawProfilesPage(
 
             uint16_t accent =
                 active ? OD_GREEN : OD_DIM;
+
+            lcd->fillRoundRect(18, y, 420, 41, 6, OD_PANEL);
 
             lcd->drawRoundRect(
                 18,
@@ -3148,6 +3343,8 @@ void UI::drawWifiPage(
         "WiFi",
         wifi.isEnabled() ? OD_GREEN : OD_RED
     );
+
+    lcd->fillRoundRect(18, 48, 264, 200, 6, OD_PANEL);
 
     if(wifi.isEnabled())
     {
@@ -5664,6 +5861,15 @@ bool UI::actionButtonAt(
         return true;
 
     if(
+        page == PAGE_SYSTEM &&
+        (
+            buttonPressed(x, y, 150, 89, 116, 36) ||
+            buttonPressed(x, y, 274, 89, 116, 36)
+        )
+    )
+        return true;
+
+    if(
         page == PAGE_SYSTEM
         #if defined(OPENDRIFT_INPUT_CRSF)
         && false
@@ -6134,8 +6340,13 @@ void UI::update(
     }
 
     // A background chosen on the web, or an upload replacing the active
-    // file, lands here on the next loop.
+    // file, lands here on the next loop. So does a theme change.
     if(applyBackground(settings))
+    {
+        refreshRequested = true;
+    }
+
+    if(syncTheme(settings))
     {
         refreshRequested = true;
     }
@@ -6962,6 +7173,40 @@ void UI::update(
             settings.setControlLoopHz(
                 settings.getControlLoopHz() == 250 ? 333 : 250
             );
+
+            drawSystemPage(settings);
+
+            lastTouchState = touched;
+            return;
+        }
+
+        if(
+            page == PAGE_SYSTEM &&
+            buttonPressed(x, y, 150, 89, 116, 36)
+        )
+        {
+            settings.setThemeAccent(
+                (settings.getThemeAccent() + 1) % Settings::THEME_ACCENT_COUNT
+            );
+
+            syncTheme(settings);
+
+            drawSystemPage(settings);
+
+            lastTouchState = touched;
+            return;
+        }
+
+        if(
+            page == PAGE_SYSTEM &&
+            buttonPressed(x, y, 274, 89, 116, 36)
+        )
+        {
+            settings.setThemeText(
+                settings.getThemeText() == 1 ? 0 : 1
+            );
+
+            syncTheme(settings);
 
             drawSystemPage(settings);
 

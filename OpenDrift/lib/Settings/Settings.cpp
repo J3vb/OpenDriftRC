@@ -409,6 +409,24 @@ bool Settings::begin()
         );
     }
 
+    themeText = constrain(
+        prefs.getUChar(
+            "thmText",
+            0
+        ),
+        0,
+        1
+    );
+
+    themeAccent = constrain(
+        prefs.getUChar(
+            "thmAccent",
+            0
+        ),
+        0,
+        THEME_ACCENT_COUNT - 1
+    );
+
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
@@ -685,6 +703,16 @@ void Settings::save()
     prefs.putString(
         "bgName",
         backgroundName
+    );
+
+    prefs.putUChar(
+        "thmText",
+        themeText
+    );
+
+    prefs.putUChar(
+        "thmAccent",
+        themeAccent
     );
 
     prefs.putBool("servoEndV1", true);
@@ -1206,6 +1234,58 @@ void Settings::setBackgroundName(const String& value)
         "%s",
         clean.c_str()
     );
+
+    dirty = true;
+}
+
+const char* Settings::themeAccentName(
+    uint8_t accent
+)
+{
+    static const char* const names[THEME_ACCENT_COUNT] =
+    {
+        "MIXED",
+        "CYAN",
+        "BLUE",
+        "MAGENTA",
+        "AMBER",
+        "GREEN",
+        "WHITE"
+    };
+
+    return accent < THEME_ACCENT_COUNT ? names[accent] : names[0];
+}
+
+uint8_t Settings::getThemeText()
+{
+    return themeText;
+}
+
+void Settings::setThemeText(int value)
+{
+    themeText =
+        constrain(
+            value,
+            0,
+            1
+        );
+
+    dirty = true;
+}
+
+uint8_t Settings::getThemeAccent()
+{
+    return themeAccent;
+}
+
+void Settings::setThemeAccent(int value)
+{
+    themeAccent =
+        constrain(
+            value,
+            0,
+            THEME_ACCENT_COUNT - 1
+        );
 
     dirty = true;
 }
