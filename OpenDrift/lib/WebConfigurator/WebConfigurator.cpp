@@ -128,6 +128,15 @@ void WebConfigurator::begin(
         }
     );
 
+    server.on(
+        "/factory-reset",
+        HTTP_POST,
+        [this]()
+        {
+            handleFactoryReset();
+        }
+    );
+
     server.onNotFound(
         [this]()
         {
@@ -157,11 +166,23 @@ void WebConfigurator::update()
     {
         if(settings != nullptr)
         {
-            settings->flush();
+            // Erasing here, microseconds before the reset, means no
+            // deferred save, display press or CRSF write can put the
+            // in-memory settings back into flash.
+            if(factoryResetPending)
+            {
+                settings->factoryReset();
+            }
+            else
+            {
+                settings->flush();
+            }
         }
 
         Serial.println(
-            "Restart requested from web configurator"
+            factoryResetPending
+            ? "Factory reset requested from web configurator"
+            : "Restart requested from web configurator"
         );
 
         Serial.flush();
@@ -531,6 +552,10 @@ void WebConfigurator::handleRoot()
     // at it through their form attribute.
     html += F("<div class='card'><h2>System</h2><p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
     html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
+    html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults. Export or note your tune first.</p>");
+    html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, and logging settings. OpenDrift restarts with defaults and the WiFi name ");
+    html += Settings::defaultWifiSsid();
+    html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
     html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
@@ -1159,6 +1184,34 @@ void WebConfigurator::handleRestart()
     sendRestartPage(
         "Restarting",
         settings->getWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleFactoryReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Nothing is flushed here on purpose: the deferred restart erases
+    // the namespace and the board boots with defaults.
+    factoryResetPending = true;
+
+    sendRestartPage(
+        "Factory reset",
+        Settings::defaultWifiSsid()
     );
 
     restartAtMs =

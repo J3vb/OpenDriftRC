@@ -387,6 +387,8 @@ The web page also shows the active profile, live receiver pulse values for steer
 
 The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate or the WiFi network name; both only apply after a restart. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
 
+The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
+
 Use the web configurator when you want to make several changes quickly. Use the onboard UI when tuning trackside without a phone or laptop.
 
 ## Onboard Blackbox Log

@@ -39,6 +39,13 @@ public:
     // save. Used right before a restart.
     void flush();
 
+    // Erase every key in the open preferences namespace. The caller must
+    // restart immediately: the in-memory copy is left as is and would be
+    // written back by the next save.
+    void factoryReset();
+
+    static const char* defaultWifiSsid();
+
     // Gyro
     float getGain();
     void setGain(float value);

@@ -514,6 +514,17 @@ void Settings::flush()
     }
 }
 
+void Settings::factoryReset()
+{
+    prefs.clear();
+    dirty = false;
+}
+
+const char* Settings::defaultWifiSsid()
+{
+    return DEFAULT_WIFI_SSID;
+}
+
 void Settings::save()
 {
     prefs.putFloat(

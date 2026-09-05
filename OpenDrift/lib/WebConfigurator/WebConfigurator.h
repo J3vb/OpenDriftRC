@@ -62,6 +62,10 @@ private:
 
     unsigned long restartAtMs = 0;
 
+    // Set by /factory-reset: the deferred restart erases the settings
+    // namespace right before the reset instead of flushing it.
+    bool factoryResetPending = false;
+
     void handleRoot();
 
     void handleLiveStatus();
@@ -79,6 +83,8 @@ private:
     void handleLogClear();
 
     void handleRestart();
+
+    void handleFactoryReset();
 
     void sendRestartPage(
         const char* heading,
