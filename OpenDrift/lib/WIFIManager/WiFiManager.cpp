@@ -6,13 +6,18 @@
 void WiFiManager::begin(
     const char* ssid,
     const char* password,
-    bool startEnabled
+    bool startEnabled,
+    const char* hostname
 )
 {
 
     wifiSSID = ssid;
 
     wifiPassword = password;
+
+    wifiHostname = hostname;
+
+    localName = String(hostname) + ".local";
 
 
     if(startEnabled)
@@ -57,6 +62,24 @@ void WiFiManager::enable()
     );
 
 
+    // mDNS serves opendrift.local to iOS, macOS, Windows and Linux clients.
+    mdnsRunning = MDNS.begin(wifiHostname);
+
+    if(mdnsRunning)
+    {
+        MDNS.addService("http", "tcp", 80);
+    }
+
+    // Android browsers do not resolve .local through mDNS. The access point
+    // is already the DHCP-assigned DNS server, so answer the same name here.
+    // Only this one name is answered; every other query gets NXDOMAIN.
+    dnsServer.start(
+        53,
+        localName,
+        WiFi.softAPIP()
+    );
+
+
     enabled = true;
 
 
@@ -67,6 +90,12 @@ void WiFiManager::enable()
 
     Serial.println(
         "WiFi Enabled"
+    );
+
+    Serial.printf(
+        "mDNS %s: http://%s/\n",
+        mdnsRunning ? "OK" : "FAILED",
+        localName.c_str()
     );
 
 }
@@ -81,6 +110,15 @@ void WiFiManager::disable()
     if(!enabled)
         return;
 
+
+
+    dnsServer.stop();
+
+    if(mdnsRunning)
+    {
+        MDNS.end();
+        mdnsRunning = false;
+    }
 
 
     WiFi.softAPdisconnect(
@@ -114,6 +152,9 @@ void WiFiManager::update()
 
     if(!enabled)
         return;
+
+
+    dnsServer.processNextRequest();
 
 
 
@@ -181,6 +222,20 @@ bool WiFiManager::isEnabled()
 
     return enabled;
 
+}
+
+
+
+const char* WiFiManager::getHostname()
+{
+    return wifiHostname;
+}
+
+
+
+String WiFiManager::getLocalName()
+{
+    return localName;
 }
 
 

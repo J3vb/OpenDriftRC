@@ -2906,6 +2906,26 @@ void UI::drawWifiPage(
         170
     );
 
+    lcd->setTextColor(
+        OD_MUTED
+    );
+
+    lcd->drawString(
+        "HOST",
+        22,
+        212
+    );
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    lcd->drawString(
+        wifi.isEnabled() ? wifi.getLocalName() : "--",
+        150,
+        214
+    );
+
     drawAmoledButton(
         lcd,
         296,

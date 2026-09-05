@@ -167,6 +167,7 @@ volatile int crsfThrottlePulseSnapshot = 1500;
 
 const char* ssid = "OpenDrift";
 const char* password = "opendrift";
+const char* hostname = "opendrift";
 
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -1707,7 +1708,8 @@ void setup()
     wifi.begin(
         ssid,
         password,
-        settings.getWifiEnabled()
+        settings.getWifiEnabled(),
+        hostname
     );
 
     wifi.setTimeout(
@@ -1746,6 +1748,19 @@ void setup()
 
         bootConsole.log(
             "httpd: web configurator listening"
+        );
+
+        char mdnsMessage[48];
+
+        snprintf(
+            mdnsMessage,
+            sizeof(mdnsMessage),
+            "mdns: http://%s/",
+            wifi.getLocalName().c_str()
+        );
+
+        bootConsole.log(
+            mdnsMessage
         );
     }
     else
