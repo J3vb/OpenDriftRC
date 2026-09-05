@@ -64,7 +64,8 @@ void WebConfigurator::begin(
     RadioInput& throttleRadioRef,
     BlackboxLogger& blackboxRef,
     WiFiManager& wifiRef,
-    ServoOutput& steeringServoRef
+    ServoOutput& steeringServoRef,
+    Backgrounds& backgroundsRef
 )
 {
     settings =
@@ -90,6 +91,9 @@ void WebConfigurator::begin(
 
     steeringServo =
         &steeringServoRef;
+
+    backgrounds =
+        &backgroundsRef;
 
     server.on(
         "/",
@@ -207,6 +211,41 @@ void WebConfigurator::begin(
             handleEndpointReset();
         }
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // The second handler receives the multipart file in chunks while the
+    // request is parsed; the first one answers once it is complete.
+    server.on(
+        "/upload-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUpload();
+        },
+        [this]()
+        {
+            handleBackgroundUploadChunk();
+        }
+    );
+
+    server.on(
+        "/use-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUse();
+        }
+    );
+
+    server.on(
+        "/delete-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundDelete();
+        }
+    );
+    #endif
 
     server.onNotFound(
         [this]()
@@ -667,6 +706,68 @@ void WebConfigurator::handleRoot()
     html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
     html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
     html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p></div>");
+
+    html += F("<div class='card' id='backgrounds'><h2>Backgrounds</h2>");
+
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        html += F("<p class='sub bad'>Background storage is not available on this board.</p></div>");
+    }
+    else
+    {
+        const char* activeBackground =
+            settings->getBackgroundName();
+
+        html += F("<p class='sub'>Active: <strong>");
+        html += activeBackground[0] != 0 ? activeBackground : "Built-in";
+        html += F("</strong> &middot; stored: ");
+        html += String((int)backgrounds->getCount());
+        html += F(" of ");
+        html += String((int)Backgrounds::MAX_BACKGROUNDS);
+        html += F(" &middot; free: ");
+        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
+        html += F(" KB</p>");
+
+        html += F("<div class='profile");
+
+        if(activeBackground[0] == 0)
+        {
+            html += F(" active");
+        }
+
+        html += F("'><div><strong>Built-in</strong><small>The image compiled into the firmware</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
+
+        // Names are sanitized to letters, digits, - and _ so they are safe
+        // inside attributes without escaping.
+        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
+        {
+            const char* name =
+                backgrounds->getName(i);
+
+            html += F("<div class='profile");
+
+            if(strcmp(name, activeBackground) == 0)
+            {
+                html += F(" active");
+            }
+
+            html += F("'><div><strong>");
+            html += name;
+            html += F("</strong><small>456 x 280 &middot; 250 KB</small></div>");
+            html += F("<form method='post' action='/use-background'><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button type='submit'>Use</button></form>");
+            html += F("<form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
+        }
+
+        html += F("<label>Image file</label><input id='bgFile' type='file' accept='image/*'>");
+        html += F("<label>Name (letters, digits, - and _)</label><input id='bgName' type='text' maxlength='23' placeholder='Example: track-night'>");
+        html += F("<button type='button' class='secondary' onclick='uploadBackground()'>Convert and upload</button>");
+        html += F("<p class='sub' id='bgStatus'>Any JPG or PNG. Your browser scales and crops it to 456 x 280 and converts it to the panel's pixel format, so the board only stores 250 KB per image and holds up to 16. Upload at the bench, not while driving: it writes flash.</p>");
+        html += F("</div>");
+    }
     #endif
 
     html += F("<div class='card'><h2>Blackbox</h2>");
@@ -744,7 +845,16 @@ void WebConfigurator::handleRoot()
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
+    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
+    // raw pixels as a multipart file named <name>.rgb. The board never has
+    // to decode an image format.
+    html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
+    #endif
+
+    html += F("</script></body></html>");
 
     server.send(
         200,
@@ -1695,6 +1805,215 @@ void WebConfigurator::handleEndpointReset()
         303
     );
 }
+
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void WebConfigurator::handleBackgroundUploadChunk()
+{
+    if(backgrounds == nullptr)
+    {
+        return;
+    }
+
+    HTTPUpload& upload =
+        server.upload();
+
+    switch(upload.status)
+    {
+        case UPLOAD_FILE_START:
+        {
+            // The browser sends <name>.rgb; beginUpload() validates the
+            // name and refuses when the list or the partition is full.
+            String name =
+                upload.filename;
+
+            int dot =
+                name.lastIndexOf('.');
+
+            if(dot > 0)
+            {
+                name = name.substring(0, dot);
+            }
+
+            backgroundUploadOk =
+                backgrounds->beginUpload(
+                    name.c_str()
+                );
+
+            break;
+        }
+
+        case UPLOAD_FILE_WRITE:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->writeUpload(
+                        upload.buf,
+                        upload.currentSize
+                    );
+            }
+            break;
+
+        case UPLOAD_FILE_END:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->endUpload();
+            }
+            else
+            {
+                backgrounds->abortUpload();
+            }
+            break;
+
+        default:
+            backgrounds->abortUpload();
+            backgroundUploadOk = false;
+            break;
+    }
+}
+
+
+
+void WebConfigurator::handleBackgroundUpload()
+{
+    if(
+        backgrounds == nullptr ||
+        !backgrounds->isReady()
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    if(backgroundUploadOk)
+    {
+        backgroundUploadOk = false;
+
+        server.send(
+            200,
+            "text/plain",
+            "OK"
+        );
+
+        return;
+    }
+
+    const char* error =
+        backgrounds->getUploadError();
+
+    server.send(
+        400,
+        "text/plain",
+        error[0] != 0 ? error : "No image was received"
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundUse()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    // An unknown name selects the built-in image rather than leaving a
+    // dangling choice behind.
+    if(
+        name.length() > 0 &&
+        (
+            backgrounds == nullptr ||
+            !backgrounds->exists(name.c_str())
+        )
+    )
+    {
+        name = "";
+    }
+
+    settings->setBackgroundName(
+        name
+    );
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundDelete()
+{
+    if(
+        settings == nullptr ||
+        backgrounds == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    if(name.length() > 0)
+    {
+        backgrounds->remove(
+            name.c_str()
+        );
+
+        if(strcmp(settings->getBackgroundName(), name.c_str()) == 0)
+        {
+            settings->setBackgroundName(
+                ""
+            );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+#endif
 
 
 

@@ -9,6 +9,7 @@
 #include "BlackboxLogger.h"
 #include "WiFiManager.h"
 #include "Servo.h"
+#include "Backgrounds.h"
 
 
 class WebConfigurator
@@ -25,7 +26,8 @@ public:
         RadioInput& throttleRadio,
         BlackboxLogger& blackbox,
         WiFiManager& wifi,
-        ServoOutput& steeringServo
+        ServoOutput& steeringServo,
+        Backgrounds& backgrounds
     );
 
     void update();
@@ -58,7 +60,13 @@ private:
 
     ServoOutput* steeringServo = nullptr;
 
+    Backgrounds* backgrounds = nullptr;
+
     bool running = false;
+
+    // Result of the multipart background upload in flight, read by the
+    // completion handler.
+    bool backgroundUploadOk = false;
 
     // Web twin of the display's capture error flag: set when a capture is
     // refused or rejected, cleared by a reset or a completed calibration.
@@ -99,6 +107,14 @@ private:
     void handleEndpointCapture();
 
     void handleEndpointReset();
+
+    void handleBackgroundUpload();
+
+    void handleBackgroundUploadChunk();
+
+    void handleBackgroundUse();
+
+    void handleBackgroundDelete();
 
     void sendRestartPage(
         const char* heading,

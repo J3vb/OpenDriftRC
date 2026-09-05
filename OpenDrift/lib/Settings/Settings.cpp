@@ -392,6 +392,23 @@ bool Settings::begin()
         600
     );
 
+    {
+        String storedBackground =
+            sanitizeBackgroundName(
+                prefs.getString(
+                    "bgName",
+                    ""
+                )
+            );
+
+        snprintf(
+            backgroundName,
+            sizeof(backgroundName),
+            "%s",
+            storedBackground.c_str()
+        );
+    }
+
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
@@ -663,6 +680,11 @@ void Settings::save()
     prefs.putUShort(
         "dispDimS",
         displayDimTimeout
+    );
+
+    prefs.putString(
+        "bgName",
+        backgroundName
     );
 
     prefs.putBool("servoEndV1", true);
@@ -1166,6 +1188,60 @@ void Settings::setDisplayDimTimeout(int value)
         );
 
     dirty = true;
+}
+
+const char* Settings::getBackgroundName()
+{
+    return backgroundName;
+}
+
+void Settings::setBackgroundName(const String& value)
+{
+    String clean =
+        sanitizeBackgroundName(value);
+
+    snprintf(
+        backgroundName,
+        sizeof(backgroundName),
+        "%s",
+        clean.c_str()
+    );
+
+    dirty = true;
+}
+
+// Same rules as Backgrounds::sanitizeName so a stored name always maps to
+// a valid file name and is safe inside the web page.
+String Settings::sanitizeBackgroundName(
+    const String& value
+)
+{
+    String name = value;
+    name.trim();
+
+    String clean;
+    clean.reserve(BACKGROUND_NAME_LENGTH - 1);
+
+    for(
+        size_t i = 0;
+        i < name.length() &&
+        clean.length() < BACKGROUND_NAME_LENGTH - 1;
+        i++
+    )
+    {
+        char character = name.charAt(i);
+
+        if(
+            isAlphaNumeric(character) ||
+            character == '-' ||
+            character == '_'
+        )
+        {
+            clean += character;
+        }
+    }
+
+    return clean;
 }
 
 // --------------------

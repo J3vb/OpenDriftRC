@@ -11,6 +11,10 @@
 #include "RadioInput.h"
 #include "Servo.h"
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+#include "Backgrounds.h"
+#endif
+
 
 class UI
 {
@@ -30,6 +34,14 @@ public:
     void setThrottleRadio(
         RadioInput& throttleRadio
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Storage for uploaded backgrounds. Set before begin() so the saved
+    // background is on screen from the first frame.
+    void setBackgroundStore(
+        Backgrounds& store
+    );
+    #endif
 
     void requestRefresh();
 
@@ -103,12 +115,17 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System.
+    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System, and on
+    // the AMOLED a final Backgrounds page.
 
     uint8_t page = 0;
 
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    const uint8_t totalPages = 12;
+    #else
     const uint8_t totalPages = 11;
+    #endif
 
 
 
@@ -163,6 +180,33 @@ private:
         Settings& settings,
         bool touched
     );
+
+    // Uploaded backgrounds. The selected image is loaded into PSRAM once
+    // and read by the composition path in place of the flash image.
+    Backgrounds* backgroundStore = nullptr;
+
+    uint16_t* backgroundPixels = nullptr;
+
+    char appliedBackgroundName[Backgrounds::NAME_LENGTH] = {0};
+
+    uint32_t appliedBackgroundRevision = 0;
+
+    bool backgroundApplied = false;
+
+    uint8_t backgroundScroll = 0;
+
+    // Loads the background named in Settings when it differs from the one
+    // on screen, or when storage changed. Returns true when a redraw is
+    // needed.
+    bool applyBackground(
+        Settings& settings
+    );
+
+    void drawBackgroundsPage(
+        Settings& settings
+    );
+
+    bool isBackgroundsPage();
     #endif
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)

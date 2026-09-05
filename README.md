@@ -53,6 +53,8 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
   telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
+- Custom AMOLED backgrounds: upload any image from the web configurator, keep
+  up to 16 on the board, and pick one on the display or the web.
 
 ## Hardware Routing
 
@@ -337,6 +339,10 @@ The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% betwe
 
 The Display card also has an idle dim timeout. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default.
 
+### Backgrounds
+
+Lists the built-in background and every image uploaded from the web configurator, four rows at a time. Tap a row to use that background; swipe vertically to scroll a longer list. Uploading and deleting happen in the web configurator.
+
 ### Profiles
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
@@ -389,6 +395,7 @@ Current web settings:
 - WiFi auto-off timeout
 - Display brightness (AMOLED, 10-100%)
 - Idle dim timeout (AMOLED, seconds, 0 = never)
+- Backgrounds (AMOLED): upload an image, pick the active one, delete stored ones
 - Export of every setting, the endpoint calibration and all profiles as one JSON backup file
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
@@ -396,6 +403,8 @@ Current web settings:
 The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
 
 The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate or the WiFi network name; both only apply after a restart. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
+
+The **Backgrounds** card takes any JPG or PNG. Your browser scales and crops it to the panel's 456 x 280 pixels and converts it to the panel's pixel format before uploading, so the board never decodes an image and each background costs 250 KB of the otherwise unused 10 MB `ffat` flash partition. Give each image a name of letters, digits, `-` or `_`; the list holds 16, and uploading a name that already exists replaces that image. The firmware formats the partition once, on the first boot after this update, which adds a few seconds before the control task starts. Uploading and deleting write flash, so do it at the bench rather than while driving.
 
 **Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. There is no import yet; the keys match the form field names, so values can be typed back in.
 
@@ -524,6 +533,7 @@ Important folders:
 - `OpenDrift/lib/UI`: onboard touch UI.
 - `OpenDrift/lib/WebConfigurator`: web settings page.
 - `OpenDrift/lib/WIFIManager`: WiFi access point control.
+- `OpenDrift/lib/Backgrounds`: FFat storage for uploaded AMOLED backgrounds.
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.

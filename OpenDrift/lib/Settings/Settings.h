@@ -10,6 +10,7 @@ public:
     static constexpr uint8_t MAX_PROFILES = 12;
     static constexpr size_t PROFILE_NAME_LENGTH = 24;
     static constexpr size_t WIFI_SSID_LENGTH = 33;   // 32 characters + NUL
+    static constexpr size_t BACKGROUND_NAME_LENGTH = 24;   // 23 characters + NUL
 
     struct DrivingProfile
     {
@@ -130,6 +131,12 @@ public:
     uint16_t getDisplayDimTimeout();
     void setDisplayDimTimeout(int value);
 
+    // Name of the stored AMOLED background image, "" for the built-in
+    // one. Letters, digits, - and _ only; the returned pointer is stable.
+    const char* getBackgroundName();
+    void setBackgroundName(const String& value);
+    static String sanitizeBackgroundName(const String& value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -242,6 +249,8 @@ private:
     uint8_t displayBrightness = 100;
 
     uint16_t displayDimTimeout = 0;
+
+    char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
 
     int steeringMin = 1000;
 

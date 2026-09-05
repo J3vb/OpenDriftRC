@@ -1,6 +1,8 @@
 #include "UI.h"
 #include "../../include/Version.h"
 
+#include <esp_heap_caps.h>
+
 static constexpr uint16_t ROUND_CYAN = 0x07FF;
 static constexpr uint16_t ROUND_DIM = 0x3186;
 
@@ -15,6 +17,7 @@ static constexpr uint8_t PAGE_STEERING = 7;
 static constexpr uint8_t PAGE_STEERING_CAL = 8;
 static constexpr uint8_t PAGE_WIFI = 9;
 static constexpr uint8_t PAGE_SYSTEM = 10;
+static constexpr uint8_t PAGE_BACKGROUNDS = 11;
 
 
 static uint8_t radioSectionForPage(
@@ -71,11 +74,22 @@ static void drawUiBackground(
 }
 
 
+// Points at a background loaded from storage, or stays null for the image
+// compiled into the firmware. Every composition path reads through
+// readBackgroundPixel(), so this is the only switch needed.
+static const uint16_t* activeBackgroundPixels = nullptr;
+
+
 static uint16_t readBackgroundPixel(
     int x,
     int y
 )
 {
+    if(activeBackgroundPixels != nullptr)
+    {
+        return activeBackgroundPixels[(y * OD_BACKGROUND_WIDTH) + x];
+    }
+
     const uint16_t* pixels =
         reinterpret_cast<const uint16_t*>(background_map);
 
@@ -471,6 +485,10 @@ void UI::begin(
     // Boot counts as activity so the panel cannot dim during startup.
     lastTouchMs = millis();
 
+    applyBackground(
+        settings
+    );
+
     bool usePsram =
         psramFound();
 
@@ -809,6 +827,14 @@ void UI::drawPage(
                 settings
             );
             break;
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        case PAGE_BACKGROUNDS:
+            drawBackgroundsPage(
+                settings
+            );
+            break;
+        #endif
     }
 }
 
@@ -2503,6 +2529,227 @@ bool UI::isProfilesPage()
 {
     return page == PAGE_PROFILES;
 }
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+bool UI::isBackgroundsPage()
+{
+    return page == PAGE_BACKGROUNDS;
+}
+
+
+void UI::setBackgroundStore(
+    Backgrounds& store
+)
+{
+    backgroundStore = &store;
+}
+
+
+bool UI::applyBackground(
+    Settings& settings
+)
+{
+    const char* name =
+        settings.getBackgroundName();
+
+    uint32_t revision =
+        backgroundStore != nullptr
+        ? backgroundStore->getRevision()
+        : 0;
+
+    if(
+        backgroundApplied &&
+        revision == appliedBackgroundRevision &&
+        strcmp(name, appliedBackgroundName) == 0
+    )
+    {
+        return false;
+    }
+
+    backgroundApplied = true;
+
+    appliedBackgroundRevision = revision;
+
+    snprintf(
+        appliedBackgroundName,
+        sizeof(appliedBackgroundName),
+        "%s",
+        name
+    );
+
+    // Fall back to the flash image while loading; a failed or partial
+    // load then never shows on the panel.
+    activeBackgroundPixels = nullptr;
+
+    if(
+        name[0] != 0 &&
+        backgroundStore != nullptr &&
+        backgroundStore->isReady()
+    )
+    {
+        if(backgroundPixels == nullptr)
+        {
+            backgroundPixels =
+                static_cast<uint16_t*>(
+                    heap_caps_malloc(
+                        Backgrounds::PIXEL_BYTES,
+                        MALLOC_CAP_SPIRAM
+                    )
+                );
+        }
+
+        if(
+            backgroundPixels != nullptr &&
+            backgroundStore->load(
+                name,
+                backgroundPixels
+            )
+        )
+        {
+            activeBackgroundPixels = backgroundPixels;
+        }
+    }
+
+    return true;
+}
+
+
+void UI::drawBackgroundsPage(
+    Settings& settings
+)
+{
+    drawUiBackground(lcd);
+
+    drawAmoledHeader(
+        lcd,
+        "Backgrounds",
+        OD_MAGENTA
+    );
+
+    const uint8_t visibleRows = 4;
+    const int rowStart = 46;
+    const int rowHeight = 47;
+
+    bool storeReady =
+        backgroundStore != nullptr &&
+        backgroundStore->isReady();
+
+    uint8_t storedCount =
+        storeReady ? backgroundStore->getCount() : 0;
+
+    // Row 0 is always the built-in image.
+    uint8_t rowCount =
+        storedCount + 1;
+
+    uint8_t maxScroll =
+        rowCount > visibleRows
+        ?
+        rowCount - visibleRows
+        :
+        0;
+
+    backgroundScroll = min(
+        backgroundScroll,
+        maxScroll
+    );
+
+    const char* activeName =
+        settings.getBackgroundName();
+
+    for(uint8_t slot = 0; slot < visibleRows; slot++)
+    {
+        uint8_t index =
+            backgroundScroll + slot;
+
+        if(index >= rowCount)
+        {
+            break;
+        }
+
+        const char* name =
+            index == 0
+            ? "BUILT-IN"
+            : backgroundStore->getName(index - 1);
+
+        bool active =
+            index == 0
+            ? activeName[0] == 0
+            : strcmp(name, activeName) == 0;
+
+        int y =
+            rowStart + (slot * rowHeight);
+
+        uint16_t accent =
+            active ? OD_GREEN : OD_DIM;
+
+        lcd->drawRoundRect(
+            18,
+            y,
+            420,
+            41,
+            6,
+            accent
+        );
+
+        lcd->setTextSize(2);
+        lcd->setTextColor(
+            active ? OD_GREEN : OD_TEXT
+        );
+        lcd->drawString(
+            name,
+            30,
+            y + 10
+        );
+
+        if(active)
+        {
+            lcd->setTextSize(1);
+            lcd->setTextColor(OD_MUTED);
+            lcd->drawRightString(
+                "ACTIVE",
+                426,
+                y + 14
+            );
+        }
+    }
+
+    if(storedCount == 0)
+    {
+        lcd->setTextSize(1);
+        lcd->setTextColor(OD_MUTED);
+        lcd->drawCenterString(
+            storeReady
+            ? "Upload images in the web configurator"
+            : "Background storage unavailable",
+            UI_CENTER_X,
+            rowStart + rowHeight + 12
+        );
+    }
+
+    if(rowCount > visibleRows)
+    {
+        int trackHeight = 182;
+        int thumbHeight = max(
+            24,
+            (trackHeight * visibleRows) / rowCount
+        );
+
+        int thumbY =
+            47 +
+            (
+                (trackHeight - thumbHeight) *
+                backgroundScroll
+            ) /
+            max(1, (int)maxScroll);
+
+        lcd->drawFastVLine(446, 47, trackHeight, OD_DIM);
+        lcd->fillRect(443, thumbY, 7, thumbHeight, OD_MAGENTA);
+    }
+
+    drawPageDots();
+}
+#endif
 
 
 void UI::drawExperimentalPage(
@@ -5858,6 +6105,13 @@ void UI::update(
 
         return;
     }
+
+    // A background chosen on the web, or an upload replacing the active
+    // file, lands here on the next loop.
+    if(applyBackground(settings))
+    {
+        refreshRequested = true;
+    }
     #endif
 
     if(
@@ -6284,6 +6538,96 @@ void UI::update(
 
                 drawProfilesPage(settings);
             }
+            #if defined(OPENDRIFT_BOARD_AMOLED_164)
+            else if(
+                isBackgroundsPage() &&
+                abs(deltaY) > 34 &&
+                abs(deltaY) > abs(delta)
+            )
+            {
+                if(swipePreviewActive)
+                {
+                    finishSwipePreview(false);
+                }
+
+                uint8_t rowCount =
+                    backgroundStore != nullptr && backgroundStore->isReady()
+                    ? backgroundStore->getCount() + 1
+                    : 1;
+
+                uint8_t maxScroll =
+                    rowCount > 4
+                    ?
+                    rowCount - 4
+                    :
+                    0;
+
+                uint8_t steps = max(
+                    1,
+                    abs(deltaY) / 47
+                );
+
+                if(deltaY < 0)
+                {
+                    backgroundScroll = min(
+                        (int)maxScroll,
+                        (int)backgroundScroll + steps
+                    );
+                }
+                else
+                {
+                    backgroundScroll = max(
+                        0,
+                        (int)backgroundScroll - steps
+                    );
+                }
+
+                drawBackgroundsPage(settings);
+            }
+            else if(
+                isBackgroundsPage() &&
+                abs(delta) < 22 &&
+                abs(deltaY) < 22
+            )
+            {
+                if(swipePreviewActive)
+                {
+                    finishSwipePreview(false);
+                }
+
+                const int rowStart = 46;
+                const int rowHeight = 47;
+                const int rowEnd = rowStart + (4 * rowHeight);
+
+                if(
+                    touchStartY >= rowStart &&
+                    touchStartY < rowEnd
+                )
+                {
+                    uint8_t index =
+                        backgroundScroll +
+                        ((touchStartY - rowStart) / rowHeight);
+
+                    if(index == 0)
+                    {
+                        settings.setBackgroundName("");
+                    }
+                    else if(
+                        backgroundStore != nullptr &&
+                        index - 1 < backgroundStore->getCount()
+                    )
+                    {
+                        settings.setBackgroundName(
+                            backgroundStore->getName(index - 1)
+                        );
+                    }
+
+                    applyBackground(settings);
+                }
+
+                drawBackgroundsPage(settings);
+            }
+            #endif
             else
             {
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
