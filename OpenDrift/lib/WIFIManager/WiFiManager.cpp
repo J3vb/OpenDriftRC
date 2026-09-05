@@ -26,6 +26,11 @@ void WiFiManager::onWifiEvent(
                 info.wifi_ap_staconnected.mac[4],
                 info.wifi_ap_staconnected.mac[5]
             );
+
+            if(eventTarget != nullptr && eventTarget->eventStationCount < 16)
+            {
+                eventTarget->eventStationCount++;
+            }
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
@@ -38,6 +43,11 @@ void WiFiManager::onWifiEvent(
                 info.wifi_ap_stadisconnected.mac[4],
                 info.wifi_ap_stadisconnected.mac[5]
             );
+
+            if(eventTarget != nullptr && eventTarget->eventStationCount > 0)
+            {
+                eventTarget->eventStationCount--;
+            }
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
@@ -158,6 +168,7 @@ void WiFiManager::enable()
     noClientSince = millis();
     clientWasPresent = false;
     lastStationEventMs = 0;
+    eventStationCount = 0;
 
 
 
@@ -215,6 +226,7 @@ void WiFiManager::disable()
     noClientSince = 0;
     clientWasPresent = false;
     lastStationEventMs = 0;
+    eventStationCount = 0;
 
 
 
@@ -279,6 +291,14 @@ void WiFiManager::update()
 
 
 
+    // The WiFi page is where someone goes to connect. Do not switch off
+    // while it is on screen; the timer starts fresh once it is left.
+    if(autoOffHold)
+    {
+        noClientSince = now;
+        return;
+    }
+
     if(
         timeout > 0 &&
         now - noClientSince
@@ -298,19 +318,43 @@ void WiFiManager::update()
 
 bool WiFiManager::hasClient()
 {
-
-    return (
-        WiFi.softAPgetStationNum()
-        > 0
-    );
-
+    return getClientCount() > 0;
 }
 
 
 
 uint8_t WiFiManager::getClientCount()
 {
-    return enabled ? WiFi.softAPgetStationNum() : 0;
+    if(!enabled)
+    {
+        return 0;
+    }
+
+    uint8_t reported =
+        WiFi.softAPgetStationNum();
+
+    uint8_t counted =
+        getEventClientCount();
+
+    return counted > reported ? counted : reported;
+}
+
+
+
+uint8_t WiFiManager::getEventClientCount()
+{
+    int8_t count = eventStationCount;
+
+    return count > 0 ? (uint8_t)count : 0;
+}
+
+
+
+void WiFiManager::holdAutoOff(
+    bool hold
+)
+{
+    autoOffHold = hold;
 }
 
 

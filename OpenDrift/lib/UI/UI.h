@@ -143,6 +143,11 @@ private:
 
     int16_t lastDrawnGainHundredths = -1;
 
+    // WiFi page live refresh: redraw only when these change.
+    uint8_t lastDrawnWifiClients = 255;
+
+    bool lastDrawnWifiEnabled = false;
+
     unsigned long lastPageSwipe = 0;
 
     uint8_t radioSection = 0;

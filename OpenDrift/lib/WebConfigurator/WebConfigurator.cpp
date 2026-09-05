@@ -711,6 +711,9 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
+    html += F("<p class='sub'>Connected devices now: <strong id='wifiClients'>");
+    html += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
+    html += F("</strong></p>");
     html += input("Network name (SSID)", "wifiSsid", String(settings->getWifiSsid()), "text", "");
     html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. A new name applies after a restart, or the next time WiFi is switched on from the display.</p>");
 
@@ -927,7 +930,7 @@ void WebConfigurator::handleRoot()
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
@@ -985,6 +988,8 @@ void WebConfigurator::handleLiveStatus()
     json += steeringServo != nullptr
         ? String(steeringServo->getPosition())
         : String(0);
+    json += F(",\"clients\":");
+    json += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
     json += F("}");
 
     server.sendHeader(

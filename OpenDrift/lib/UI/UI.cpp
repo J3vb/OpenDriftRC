@@ -3280,6 +3280,9 @@ void UI::drawWifiPage(
     Settings& settings
 )
 {
+    lastDrawnWifiClients = wifi.getClientCount();
+    lastDrawnWifiEnabled = wifi.isEnabled();
+
     #if !defined(OPENDRIFT_BOARD_AMOLED_164)
     drawUiBackground(lcd);
 
@@ -3412,7 +3415,7 @@ void UI::drawWifiPage(
     );
 
     lcd->drawNumber(
-        wifi.isEnabled() ? WiFi.softAPgetStationNum() : 0,
+        wifi.getClientCount(),
         150,
         108
     );
@@ -3527,7 +3530,7 @@ void UI::drawWifiPage(
     if(wifi.isEnabled())
     {
         lcd->drawNumber(
-            WiFi.softAPgetStationNum(),
+            wifi.getClientCount(),
             140,
             110
         );
@@ -6325,6 +6328,10 @@ void UI::update(
     uint8_t gesture =
         touch.getGesture();
 
+    wifi.holdAutoOff(
+        page == PAGE_WIFI
+    );
+
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     if(
         updateDisplayBrightness(
@@ -6443,7 +6450,8 @@ void UI::update(
         (
             page == PAGE_DRIVE ||
             page == PAGE_RADIO ||
-            page == PAGE_STEERING
+            page == PAGE_STEERING ||
+            page == PAGE_WIFI
         ) &&
         !touched &&
         !lastTouchState &&
@@ -6463,6 +6471,20 @@ void UI::update(
             {
                 drawMainPage(
                     gyro,
+                    settings
+                );
+            }
+        }
+        else if(page == PAGE_WIFI)
+        {
+            // Client count and state change without a touch.
+            if(
+                wifi.getClientCount() != lastDrawnWifiClients ||
+                wifi.isEnabled() != lastDrawnWifiEnabled
+            )
+            {
+                drawWifiPage(
+                    wifi,
                     settings
                 );
             }

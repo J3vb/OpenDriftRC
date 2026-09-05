@@ -35,8 +35,21 @@ public:
 
     bool hasClient();
 
-    // Stations currently associated with the access point.
+    // Stations currently associated with the access point: the larger of
+    // the driver's station list and the count kept from connect and
+    // disconnect events, because the list has been seen to report zero
+    // for a connected client.
     uint8_t getClientCount();
+
+    // Count kept from the connect/disconnect events alone, for diagnostics.
+    uint8_t getEventClientCount();
+
+    // While held, the auto-off timer neither runs nor expires; it starts
+    // fresh when the hold is released. The UI holds it while the WiFi page
+    // is on screen, which is where someone goes to connect.
+    void holdAutoOff(
+        bool hold
+    );
 
     // Hostname without suffix, e.g. "opendrift".
     const char* getHostname();
@@ -95,6 +108,10 @@ private:
     static constexpr unsigned long STATION_GRACE_MS = 30000;
 
     volatile unsigned long lastStationEventMs = 0;
+
+    volatile int8_t eventStationCount = 0;
+
+    bool autoOffHold = false;
 
     static WiFiManager* eventTarget;
 

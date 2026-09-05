@@ -321,7 +321,7 @@ Physical endpoint calibration and steering travel are separate on purpose:
 
 ### WiFi
 
-Shows WiFi state, the active network name, and connected client count.
+Shows WiFi state, the active network name, and connected client count. The count and state refresh live while the page is open, and auto-off never fires while this page is on screen.
 
 - `WIFI ON/OFF`: toggles the access point.
 

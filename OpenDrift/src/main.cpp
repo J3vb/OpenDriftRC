@@ -1956,6 +1956,13 @@ void loop()
 
         Serial.println("OpenDrift heartbeat");
 
+        Serial.printf(
+            "WiFi %s: stations reported=%u events=%u\n",
+            wifi.isEnabled() ? "on" : "off",
+            (unsigned int)WiFi.softAPgetStationNum(),
+            (unsigned int)wifi.getEventClientCount()
+        );
+
         #if defined(OPENDRIFT_INPUT_CRSF)
         Serial.printf(
             "CRSF bytes=%lu frames=%lu channels=%lu crc=%lu age=%lu ms LQ=%u SNR=%d throttle=%s\n",
