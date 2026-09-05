@@ -615,7 +615,9 @@ void WebConfigurator::handleRoot()
         html += F("%</option>");
     }
 
-    html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p></div>");
+    html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
+    html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
+    html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p></div>");
     #endif
 
     html += F("<div class='card'><h2>Blackbox</h2>");
@@ -1015,6 +1017,13 @@ void WebConfigurator::handleSave()
         getIntArg(
             "displayBrightness",
             settings->getDisplayBrightness()
+        )
+    );
+
+    settings->setDisplayDimTimeout(
+        getIntArg(
+            "displayDimTimeout",
+            settings->getDisplayDimTimeout()
         )
     );
     #endif

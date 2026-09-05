@@ -126,6 +126,10 @@ public:
     uint8_t getDisplayBrightness();
     void setDisplayBrightness(int value);
 
+    // Seconds without a touch before the AMOLED dims. 0 = never.
+    uint16_t getDisplayDimTimeout();
+    void setDisplayDimTimeout(int value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -236,6 +240,8 @@ private:
     bool blackboxEnabled = false;
 
     uint8_t displayBrightness = 100;
+
+    uint16_t displayDimTimeout = 0;
 
     int steeringMin = 1000;
 

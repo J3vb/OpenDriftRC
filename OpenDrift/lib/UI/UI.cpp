@@ -468,6 +468,9 @@ void UI::begin(
     steeringServoOutput = &steeringServo;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Boot counts as activity so the panel cannot dim during startup.
+    lastTouchMs = millis();
+
     bool usePsram =
         psramFound();
 
@@ -5735,30 +5738,91 @@ bool UI::applyRepeatButton(
 
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
-void UI::updateDisplayBrightness(
-    Settings& settings
+bool UI::updateDisplayBrightness(
+    Settings& settings,
+    bool touched
 )
 {
-    if(display == nullptr)
+    unsigned long now =
+        millis();
+
+    uint16_t dimTimeoutSeconds =
+        settings.getDisplayDimTimeout();
+
+    uint8_t brightnessPercent =
+        settings.getDisplayBrightness();
+
+    // A new timeout counts from now, and a brightness change from the web
+    // or the System page counts as activity so its result is visible.
+    if(
+        dimTimeoutSeconds != lastDimTimeoutSeconds ||
+        brightnessPercent != lastBrightnessPercent
+    )
     {
-        return;
+        lastDimTimeoutSeconds = dimTimeoutSeconds;
+
+        lastBrightnessPercent = brightnessPercent;
+
+        lastTouchMs = now;
     }
+
+    if(touched)
+    {
+        if(displayDimmed)
+        {
+            // Wake-up touch: restore the panel and keep this press away
+            // from the buttons until the finger lifts.
+            swallowTouchUntilRelease = true;
+        }
+
+        lastTouchMs = now;
+    }
+
+    displayDimmed =
+        dimTimeoutSeconds > 0 &&
+        now - lastTouchMs >= (unsigned long)dimTimeoutSeconds * 1000UL;
 
     uint8_t level =
         opendriftBrightnessLevel(
-            settings.getDisplayBrightness()
+            brightnessPercent
         );
 
-    if(level == appliedBrightnessLevel)
+    if(displayDimmed)
     {
-        return;
+        // A tenth of the configured level, floored so the AMOLED never
+        // reads as switched off.
+        uint8_t dimmedLevel =
+            level / 10;
+
+        level =
+            dimmedLevel > DIM_FLOOR_LEVEL
+            ? dimmedLevel
+            : DIM_FLOOR_LEVEL;
     }
 
-    display->setBrightness(
-        level
-    );
+    if(
+        display != nullptr &&
+        level != appliedBrightnessLevel
+    )
+    {
+        display->setBrightness(
+            level
+        );
 
-    appliedBrightnessLevel = level;
+        appliedBrightnessLevel = level;
+    }
+
+    if(swallowTouchUntilRelease)
+    {
+        if(touched)
+        {
+            return true;
+        }
+
+        swallowTouchUntilRelease = false;
+    }
+
+    return false;
 }
 #endif
 
@@ -5782,9 +5846,18 @@ void UI::update(
         touch.getGesture();
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    updateDisplayBrightness(
-        settings
-    );
+    if(
+        updateDisplayBrightness(
+            settings,
+            touched
+        )
+    )
+    {
+        // Wake-up touch: the panel is back, nothing gets pressed.
+        lastTouchState = false;
+
+        return;
+    }
     #endif
 
     if(

@@ -335,6 +335,8 @@ Basic firmware/system information. Tap the GPIO 18 mode button to switch between
 
 The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
 
+The Display card also has an idle dim timeout. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default.
+
 ### Profiles
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
@@ -386,6 +388,7 @@ Current web settings:
 - WiFi network name (SSID), applied after a restart
 - WiFi auto-off timeout
 - Display brightness (AMOLED, 10-100%)
+- Idle dim timeout (AMOLED, seconds, 0 = never)
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
 

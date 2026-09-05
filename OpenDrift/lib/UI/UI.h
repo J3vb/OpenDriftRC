@@ -140,11 +140,28 @@ private:
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // The UI owns the panel brightness so a change from the web or from
-    // the System page lands here on the next update().
+    // the System page lands here on the next update(). The same routine
+    // dims the panel after the configured idle time and restores it on
+    // the next touch, which it swallows so it cannot press a button.
+    static constexpr uint8_t DIM_FLOOR_LEVEL = 8;
+
     uint8_t appliedBrightnessLevel = 0;
 
-    void updateDisplayBrightness(
-        Settings& settings
+    unsigned long lastTouchMs = 0;
+
+    uint16_t lastDimTimeoutSeconds = 0;
+
+    uint8_t lastBrightnessPercent = 0;
+
+    bool displayDimmed = false;
+
+    bool swallowTouchUntilRelease = false;
+
+    // Returns true while the current touch is a wake-up that the rest of
+    // update() must ignore.
+    bool updateDisplayBrightness(
+        Settings& settings,
+        bool touched
     );
     #endif
 

@@ -383,6 +383,15 @@ bool Settings::begin()
         100
     );
 
+    displayDimTimeout = constrain(
+        prefs.getUShort(
+            "dispDimS",
+            0
+        ),
+        0,
+        600
+    );
+
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
@@ -649,6 +658,11 @@ void Settings::save()
     prefs.putUChar(
         "dispBright",
         displayBrightness
+    );
+
+    prefs.putUShort(
+        "dispDimS",
+        displayDimTimeout
     );
 
     prefs.putBool("servoEndV1", true);
@@ -1132,6 +1146,23 @@ void Settings::setDisplayBrightness(int value)
             rounded,
             10,
             100
+        );
+
+    dirty = true;
+}
+
+uint16_t Settings::getDisplayDimTimeout()
+{
+    return displayDimTimeout;
+}
+
+void Settings::setDisplayDimTimeout(int value)
+{
+    displayDimTimeout =
+        constrain(
+            value,
+            0,
+            600
         );
 
     dirty = true;
