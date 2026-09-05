@@ -7,26 +7,18 @@
 WiFiManager* WiFiManager::eventTarget = nullptr;
 
 
-// Runs on the WiFi event task. It only stamps a timestamp and logs, so
-// nothing here touches the access point or the settings.
+// Runs on the WiFi event task. It only counts stations and stamps a
+// timestamp, so nothing here touches the access point or the settings.
 void WiFiManager::onWifiEvent(
     arduino_event_id_t event,
     arduino_event_info_t info
 )
 {
+    (void)info;
+
     switch(event)
     {
         case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
-            Serial.printf(
-                "WiFi station connected: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                info.wifi_ap_staconnected.mac[0],
-                info.wifi_ap_staconnected.mac[1],
-                info.wifi_ap_staconnected.mac[2],
-                info.wifi_ap_staconnected.mac[3],
-                info.wifi_ap_staconnected.mac[4],
-                info.wifi_ap_staconnected.mac[5]
-            );
-
             if(eventTarget != nullptr && eventTarget->eventStationCount < 16)
             {
                 eventTarget->eventStationCount++;
@@ -34,16 +26,6 @@ void WiFiManager::onWifiEvent(
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
-            Serial.printf(
-                "WiFi station disconnected: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                info.wifi_ap_stadisconnected.mac[0],
-                info.wifi_ap_stadisconnected.mac[1],
-                info.wifi_ap_stadisconnected.mac[2],
-                info.wifi_ap_stadisconnected.mac[3],
-                info.wifi_ap_stadisconnected.mac[4],
-                info.wifi_ap_stadisconnected.mac[5]
-            );
-
             if(eventTarget != nullptr && eventTarget->eventStationCount > 0)
             {
                 eventTarget->eventStationCount--;
@@ -51,9 +33,6 @@ void WiFiManager::onWifiEvent(
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
-            Serial.println(
-                "WiFi station received an IP address"
-            );
             break;
 
         default:
@@ -268,11 +247,6 @@ void WiFiManager::update()
 
     if(clientPresent)
     {
-        if(!clientWasPresent)
-        {
-            Serial.println("WiFi client connected; auto-off paused");
-        }
-
         clientWasPresent = true;
         noClientSince = 0;
         return;
@@ -280,7 +254,6 @@ void WiFiManager::update()
 
     if(clientWasPresent)
     {
-        Serial.println("WiFi client disconnected; auto-off timer started");
         clientWasPresent = false;
         noClientSince = now;
     }
