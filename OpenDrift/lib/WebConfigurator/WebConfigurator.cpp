@@ -45,6 +45,45 @@ namespace
 
         return quoted;
     }
+
+    const char* resetReasonText(
+        esp_reset_reason_t reason
+    )
+    {
+        switch(reason)
+        {
+            case ESP_RST_POWERON: return "power-on";
+            case ESP_RST_EXT: return "external reset";
+            case ESP_RST_SW: return "software restart";
+            case ESP_RST_PANIC: return "crash (panic)";
+            case ESP_RST_INT_WDT: return "interrupt watchdog";
+            case ESP_RST_TASK_WDT: return "task watchdog";
+            case ESP_RST_WDT: return "watchdog";
+            case ESP_RST_DEEPSLEEP: return "deep sleep";
+            case ESP_RST_BROWNOUT: return "brownout (power dip)";
+            case ESP_RST_SDIO: return "sdio";
+            default: return "unknown";
+        }
+    }
+
+    String uptimeText()
+    {
+        unsigned long seconds =
+            millis() / 1000UL;
+
+        char text[24];
+
+        snprintf(
+            text,
+            sizeof(text),
+            "%lu:%02lu:%02lu",
+            seconds / 3600UL,
+            (seconds / 60UL) % 60UL,
+            seconds % 60UL
+        );
+
+        return String(text);
+    }
 }
 
 WebConfigurator::WebConfigurator()
@@ -688,7 +727,7 @@ void WebConfigurator::handleRoot()
         html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     }
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
-    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
+    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off.</p>");
     html += F("</div>");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -848,7 +887,12 @@ void WebConfigurator::handleRoot()
     // The settings form above cannot contain another form, so the restart
     // form lives here and the restart buttons elsewhere on the page point
     // at it through their form attribute.
-    html += F("<div class='card'><h2>System</h2><p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
+    html += F("<div class='card'><h2>System</h2><p class='sub'>Last reset: <strong>");
+    html += resetReasonText(esp_reset_reason());
+    html += F("</strong> &middot; up ");
+    html += uptimeText();
+    html += F(". A crash or watchdog here means the board rebooted on its own; check the serial monitor for the backtrace.</p>");
+    html += F("<p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
     html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
     html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> before a factory reset to keep a copy of the tune and profiles.</p>");
     html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults.</p>");

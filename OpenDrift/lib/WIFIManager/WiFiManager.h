@@ -35,6 +35,9 @@ public:
 
     bool hasClient();
 
+    // Stations currently associated with the access point.
+    uint8_t getClientCount();
+
     // Hostname without suffix, e.g. "opendrift".
     const char* getHostname();
 
@@ -86,5 +89,17 @@ private:
     unsigned long timeout =
         40000;
 
+    // A station that connects, gets its address or drops off holds the
+    // auto-off timer for this long, so a slow handshake or a laptop that
+    // briefly reconnects cannot be cut off halfway.
+    static constexpr unsigned long STATION_GRACE_MS = 30000;
 
+    volatile unsigned long lastStationEventMs = 0;
+
+    static WiFiManager* eventTarget;
+
+    static void onWifiEvent(
+        arduino_event_id_t event,
+        arduino_event_info_t info
+    );
 };

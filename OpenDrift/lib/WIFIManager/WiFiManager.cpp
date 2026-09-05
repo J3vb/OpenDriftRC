@@ -4,6 +4,59 @@
 #include <string.h>
 
 
+WiFiManager* WiFiManager::eventTarget = nullptr;
+
+
+// Runs on the WiFi event task. It only stamps a timestamp and logs, so
+// nothing here touches the access point or the settings.
+void WiFiManager::onWifiEvent(
+    arduino_event_id_t event,
+    arduino_event_info_t info
+)
+{
+    switch(event)
+    {
+        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+            Serial.printf(
+                "WiFi station connected: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                info.wifi_ap_staconnected.mac[0],
+                info.wifi_ap_staconnected.mac[1],
+                info.wifi_ap_staconnected.mac[2],
+                info.wifi_ap_staconnected.mac[3],
+                info.wifi_ap_staconnected.mac[4],
+                info.wifi_ap_staconnected.mac[5]
+            );
+            break;
+
+        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+            Serial.printf(
+                "WiFi station disconnected: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                info.wifi_ap_stadisconnected.mac[0],
+                info.wifi_ap_stadisconnected.mac[1],
+                info.wifi_ap_stadisconnected.mac[2],
+                info.wifi_ap_stadisconnected.mac[3],
+                info.wifi_ap_stadisconnected.mac[4],
+                info.wifi_ap_stadisconnected.mac[5]
+            );
+            break;
+
+        case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
+            Serial.println(
+                "WiFi station received an IP address"
+            );
+            break;
+
+        default:
+            return;
+    }
+
+    if(eventTarget != nullptr)
+    {
+        eventTarget->lastStationEventMs = millis();
+    }
+}
+
+
 
 
 void WiFiManager::begin(
@@ -21,6 +74,12 @@ void WiFiManager::begin(
     wifiHostname = hostname;
 
     localName = String(hostname) + ".local";
+
+    eventTarget = this;
+
+    WiFi.onEvent(
+        onWifiEvent
+    );
 
 
     if(startEnabled)
@@ -98,6 +157,7 @@ void WiFiManager::enable()
 
     noClientSince = millis();
     clientWasPresent = false;
+    lastStationEventMs = 0;
 
 
 
@@ -154,6 +214,7 @@ void WiFiManager::disable()
     enabled = false;
     noClientSince = 0;
     clientWasPresent = false;
+    lastStationEventMs = 0;
 
 
 
@@ -179,7 +240,19 @@ void WiFiManager::update()
 
 
     unsigned long now = millis();
-    bool clientPresent = hasClient();
+
+    // A station that is still handshaking, fetching its address, or
+    // reconnecting after a brief drop is not in the station list yet, but
+    // its events are. Treat recent activity as presence.
+    unsigned long stationEventMs = lastStationEventMs;
+
+    bool stationActivity =
+        stationEventMs != 0 &&
+        now - stationEventMs < STATION_GRACE_MS;
+
+    bool clientPresent =
+        hasClient() ||
+        stationActivity;
 
     if(clientPresent)
     {
@@ -231,6 +304,13 @@ bool WiFiManager::hasClient()
         > 0
     );
 
+}
+
+
+
+uint8_t WiFiManager::getClientCount()
+{
+    return enabled ? WiFi.softAPgetStationNum() : 0;
 }
 
 

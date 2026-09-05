@@ -325,6 +325,8 @@ Shows WiFi state, the active network name, and connected client count.
 
 - `WIFI ON/OFF`: toggles the access point.
 
+The auto-off timeout counts only while nobody is connected. A connected device pauses it, and a device that is connecting, getting its address, or reconnecting after a brief drop holds it for another 30 seconds, so a slow laptop handshake cannot switch the network off halfway. Set the timeout to 0 in the web configurator to keep WiFi on permanently.
+
 When WiFi is enabled, connect to the board's network (`OpenDrift` by default; rename it in the web configurator) and open:
 
 `http://opendrift.local/`
