@@ -41,6 +41,15 @@ public:
     // Fully qualified local name, e.g. "opendrift.local".
     String getLocalName();
 
+    // Name the running access point was started with. Empty while
+    // disabled. The configured name can change while the AP is up; it
+    // only takes effect on the next enable().
+    const char* getActiveSsid();
+
+    // True while the AP is running under a different name than the one
+    // currently configured.
+    bool isSsidChangePending();
+
     void setTimeout(
         unsigned long timeoutMs
     );
@@ -60,6 +69,10 @@ private:
     DNSServer dnsServer;
 
     bool mdnsRunning = false;
+
+    static constexpr size_t SSID_LENGTH = 33;
+
+    char activeSsid[SSID_LENGTH] = {0};
 
 
     bool enabled = false;

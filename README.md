@@ -317,11 +317,11 @@ Physical endpoint calibration and steering travel are separate on purpose:
 
 ### WiFi
 
-Shows WiFi state and connected client count.
+Shows WiFi state, the active network name, and connected client count.
 
 - `WIFI ON/OFF`: toggles the access point.
 
-When WiFi is enabled, connect to the `OpenDrift` network and open:
+When WiFi is enabled, connect to the board's network (`OpenDrift` by default; rename it in the web configurator) and open:
 
 `http://opendrift.local/`
 
@@ -378,6 +378,7 @@ Current web settings:
 - Gain channel low / high
 - GPIO 18 gain-input or throttle-output mode
 - WiFi enabled on boot
+- WiFi network name (SSID), applied the next time WiFi starts
 - WiFi auto-off timeout
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
@@ -426,7 +427,7 @@ Log rows include:
 
 Suggested test workflow:
 
-1. Connect to the `OpenDrift` WiFi network.
+1. Connect to the board's WiFi network (`OpenDrift` by default).
 2. Open `http://opendrift.local/` (or `http://192.168.4.1/`).
 3. Enable onboard logging if it is off, then save settings.
 4. Tap `Clear RAM Log`.

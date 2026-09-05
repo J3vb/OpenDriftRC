@@ -9,6 +9,7 @@ public:
 
     static constexpr uint8_t MAX_PROFILES = 12;
     static constexpr size_t PROFILE_NAME_LENGTH = 24;
+    static constexpr size_t WIFI_SSID_LENGTH = 33;   // 32 characters + NUL
 
     struct DrivingProfile
     {
@@ -97,6 +98,14 @@ public:
 
     uint32_t getWifiTimeout();
     void setWifiTimeout(uint32_t value);
+
+    // Access point name. The returned pointer is stable for the life of
+    // the object and never empty: an unset or cleared value holds the
+    // default "OpenDrift". A new name takes effect the next time the
+    // access point starts.
+    const char* getWifiSsid();
+    void setWifiSsid(const String& value);
+    static String sanitizeWifiSsid(const String& value);
 
     // Blackbox
     bool getBlackboxEnabled();
@@ -207,6 +216,8 @@ private:
 
     uint32_t wifiTimeout = 40000;
 
+    char wifiSsid[WIFI_SSID_LENGTH] = {0};
+
     bool blackboxEnabled = false;
 
     int steeringMin = 1000;
@@ -248,4 +259,5 @@ private:
     void applyProfile(const DrivingProfile& profile);
     bool persistProfile(uint8_t index);
     String sanitizeProfileName(const String& name);
+    void applyWifiSsid(const String& value);
 };
