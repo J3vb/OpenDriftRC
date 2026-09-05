@@ -7,6 +7,46 @@
 #include "AuxChannelOutputs.h"
 #endif
 
+namespace
+{
+    // Hand-rolled JSON in the same style as /live-status. Values arrive
+    // already rendered so numbers, booleans and quoted strings share one
+    // path.
+    void appendJsonField(
+        String& json,
+        const char* key,
+        const String& rawValue
+    )
+    {
+        json += F(",\"");
+        json += key;
+        json += F("\":");
+        json += rawValue;
+    }
+
+    String jsonBool(
+        bool value
+    )
+    {
+        return value ? String(F("true")) : String(F("false"));
+    }
+
+    String jsonString(
+        const char* value
+    )
+    {
+        String quoted;
+
+        quoted.reserve(strlen(value) + 2);
+
+        quoted += '"';
+        quoted += value;
+        quoted += '"';
+
+        return quoted;
+    }
+}
+
 WebConfigurator::WebConfigurator()
 :
 server(80)
@@ -111,6 +151,15 @@ void WebConfigurator::begin(
         [this]()
         {
             handleLogDownload();
+        }
+    );
+
+    server.on(
+        "/settings.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleSettingsExport();
         }
     );
 
@@ -625,6 +674,7 @@ void WebConfigurator::handleRoot()
     html += F("</div>");
 
     html += F("<button type='submit'>Save Settings</button></form>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> downloads every setting, the endpoint calibration and all profiles as one backup file.</p>");
 
     // The capture and reset buttons live inside the settings form above,
     // which cannot nest another form, so they target these through their
@@ -687,7 +737,8 @@ void WebConfigurator::handleRoot()
     // at it through their form attribute.
     html += F("<div class='card'><h2>System</h2><p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
     html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
-    html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults. Export or note your tune first.</p>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> before a factory reset to keep a copy of the tune and profiles.</p>");
+    html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults.</p>");
     html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, and logging settings. OpenDrift restarts with defaults and the WiFi name ");
     html += Settings::defaultWifiSsid();
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
@@ -1315,6 +1366,174 @@ void WebConfigurator::handleLogClear()
 
     server.send(
         303
+    );
+}
+
+
+
+void WebConfigurator::handleSettingsExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Keys are the web form field names so a future import can post the
+    // same values straight back through /save. No escaping is needed: the
+    // WiFi name and profile names are sanitized to letters, digits, space
+    // and - _ . on the way in.
+    String json;
+
+    json.reserve(6144);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\"");
+
+    appendJsonField(json, "gain", String(settings->getGain(), 2));
+    appendJsonField(json, "deadband", String(settings->getDeadband(), 2));
+    appendJsonField(json, "gyroReverse", jsonBool(settings->getGyroReverse()));
+    appendJsonField(json, "gyroMax", String(settings->getGyroMaxCorrection()));
+    appendJsonField(json, "gyroSmoothing", String(settings->getGyroSmoothing(), 2));
+    appendJsonField(json, "gyroLpfMode", String((int)settings->getGyroLpfMode()));
+    appendJsonField(json, "predictionStrength", String(settings->getPredictionStrength()));
+    appendJsonField(json, "huntStrength", String(settings->getGyroHuntStrength()));
+    appendJsonField(json, "transitionSpeed", String(settings->getGyroTransitionSpeed()));
+    appendJsonField(json, "counterSteerAssist", String(settings->getGyroCounterSteerAssist()));
+    appendJsonField(json, "gyroHoldBoost", String(settings->getGyroHoldBoost()));
+    appendJsonField(json, "gyroIGain", String(settings->getGyroIntegralGain(), 2));
+    appendJsonField(json, "gyroILimit", String(settings->getGyroIntegralLimit()));
+
+    appendJsonField(json, "servoReverse", jsonBool(settings->getServoReverse()));
+    appendJsonField(json, "controlLoopHz", String((int)settings->getControlLoopHz()));
+    appendJsonField(json, "servoCenter", String(settings->getServoCenter()));
+    appendJsonField(json, "servoTravel", String(settings->getServoTravel()));
+    appendJsonField(json, "servoQuiet", String(settings->getServoQuiet()));
+
+    appendJsonField(json, "steeringMin", String(settings->getSteeringMin()));
+    appendJsonField(json, "steeringCenter", String(settings->getSteeringCenter()));
+    appendJsonField(json, "steeringMax", String(settings->getSteeringMax()));
+    appendJsonField(json, "radioSteeringTravel", String(settings->getRadioSteeringTravel()));
+
+    appendJsonField(json, "gainMin", String(settings->getGainMin()));
+    appendJsonField(json, "gainMax", String(settings->getGainMax()));
+    appendJsonField(json, "channel3GainMin", String(settings->getChannel3GainMin(), 2));
+    appendJsonField(json, "channel3GainMax", String(settings->getChannel3GainMax(), 2));
+    appendJsonField(json, "throttleOutputEnabled", jsonBool(settings->getThrottleOutputEnabled()));
+
+    // Emitted on every build so the file layout does not depend on the
+    // firmware variant that wrote it.
+    for(uint8_t gpio = 1; gpio <= 8; gpio++)
+    {
+        char key[12];
+
+        snprintf(
+            key,
+            sizeof(key),
+            "auxGpio%u",
+            gpio
+        );
+
+        appendJsonField(json, key, String((int)settings->getAuxChannelForGpio(gpio)));
+    }
+
+    appendJsonField(json, "wifiEnabled", jsonBool(settings->getWifiEnabled()));
+    appendJsonField(json, "wifiSsid", jsonString(settings->getWifiSsid()));
+    appendJsonField(json, "wifiTimeout", String(settings->getWifiTimeout()));
+    appendJsonField(json, "blackboxEnabled", jsonBool(settings->getBlackboxEnabled()));
+    appendJsonField(json, "displayBrightness", String((int)settings->getDisplayBrightness()));
+    appendJsonField(json, "displayDimTimeout", String((int)settings->getDisplayDimTimeout()));
+
+    json += F(",\"endpointCalibration\":{\"calibrated\":");
+    json += jsonBool(settings->isSteeringCalibrated());
+    json += F(",\"mask\":");
+    json += String((int)settings->getSteeringCalibrationMask());
+    json += F(",\"servoPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedPulse(point));
+    }
+
+    json += F("],\"inputPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedInputPulse(point));
+    }
+
+    json += F("]},\"profiles\":{\"active\":");
+    json += String((int)settings->getActiveProfileIndex());
+    json += F(",\"activeName\":");
+    json += jsonString(settings->getActiveProfileName());
+    json += F(",\"items\":[");
+
+    bool firstProfile = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!firstProfile)
+        {
+            json += ',';
+        }
+
+        firstProfile = false;
+
+        json += F("{\"name\":");
+        json += jsonString(profile->name);
+        appendJsonField(json, "gain", String(profile->gain, 2));
+        appendJsonField(json, "deadband", String(profile->deadband, 2));
+        appendJsonField(json, "gyroSmoothing", String(profile->gyroSmoothing, 2));
+        appendJsonField(json, "gyroIntegralGain", String(profile->gyroIntegralGain, 2));
+        appendJsonField(json, "gyroMaxCorrection", String((int)profile->gyroMaxCorrection));
+        appendJsonField(json, "gyroIntegralLimit", String((int)profile->gyroIntegralLimit));
+        appendJsonField(json, "gyroHoldBoost", String((int)profile->gyroHoldBoost));
+        appendJsonField(json, "predictionStrength", String((int)profile->predictionStrength));
+        appendJsonField(json, "radioSteeringTravel", String((int)profile->radioSteeringTravel));
+        appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
+        appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
+        appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
+        json += '}';
+    }
+
+    json += F("]}}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-settings-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
     );
 }
 

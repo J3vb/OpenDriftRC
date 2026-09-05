@@ -389,12 +389,15 @@ Current web settings:
 - WiFi auto-off timeout
 - Display brightness (AMOLED, 10-100%)
 - Idle dim timeout (AMOLED, seconds, 0 = never)
+- Export of every setting, the endpoint calibration and all profiles as one JSON backup file
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
 
 The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
 
 The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate or the WiFi network name; both only apply after a restart. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
+
+**Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. There is no import yet; the keys match the form field names, so values can be typed back in.
 
 The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
 

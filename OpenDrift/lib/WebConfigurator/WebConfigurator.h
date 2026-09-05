@@ -90,6 +90,8 @@ private:
 
     void handleLogClear();
 
+    void handleSettingsExport();
+
     void handleRestart();
 
     void handleFactoryReset();
