@@ -10,6 +10,7 @@
 #include "Settings.h"
 #include "RadioInput.h"
 #include "Servo.h"
+#include "BatteryCompensation.h"
 
 
 class UI
@@ -32,6 +33,10 @@ public:
     );
 
     void requestRefresh();
+
+    void setBatteryCompensation(
+        const BatteryCompensation& compensation
+    );
 
 
     void update(
@@ -68,6 +73,8 @@ private:
 
     ServoOutput* steeringServoOutput = nullptr;
 
+    const BatteryCompensation* batteryCompensation = nullptr;
+
     LGFX_Sprite canvas;
 
     LGFX_Sprite transitionCanvas;
@@ -103,12 +110,13 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System.
+    // Battery Compensation, Profiles, Radio, Steering, Physical Endpoints,
+    // WiFi, System.
 
     uint8_t page = 0;
 
 
-    const uint8_t totalPages = 11;
+    const uint8_t totalPages = 12;
 
 
 
@@ -137,6 +145,14 @@ private:
     unsigned long nextRepeatAt = 0;
 
     uint8_t profileScroll = 0;
+
+    uint8_t batteryScroll = 0;
+
+    int16_t lastDrawnBatteryHundredths = -1;
+
+    int16_t lastDrawnBatteryPercentTenths = -1;
+
+    uint8_t lastDrawnBatteryFault = 255;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     bool swipePreviewActive = false;
@@ -217,6 +233,16 @@ private:
     );
 
     bool isProfilesPage();
+
+    void drawBatteryPage(
+        Settings& settings
+    );
+
+    void drawBatteryReadout();
+
+    void updateBatteryReadout();
+
+    bool isBatteryPage();
 
 
 

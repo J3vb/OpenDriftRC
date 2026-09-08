@@ -1885,6 +1885,10 @@ void setup()
         steeringServo
     );
 
+    ui.setBatteryCompensation(
+        batteryComp
+    );
+
     #if defined(OPENDRIFT_INPUT_CRSF)
     ui.setThrottleRadio(
         throttleRadio

@@ -8,12 +8,223 @@ static constexpr uint8_t PAGE_CORE = 1;
 static constexpr uint8_t PAGE_RESPONSE = 2;
 static constexpr uint8_t PAGE_DRIFT_ASSIST = 3;
 static constexpr uint8_t PAGE_EXPERIMENTAL = 4;
-static constexpr uint8_t PAGE_PROFILES = 5;
-static constexpr uint8_t PAGE_RADIO = 6;
-static constexpr uint8_t PAGE_STEERING = 7;
-static constexpr uint8_t PAGE_STEERING_CAL = 8;
-static constexpr uint8_t PAGE_WIFI = 9;
-static constexpr uint8_t PAGE_SYSTEM = 10;
+static constexpr uint8_t PAGE_BATTERY = 5;
+static constexpr uint8_t PAGE_PROFILES = 6;
+static constexpr uint8_t PAGE_RADIO = 7;
+static constexpr uint8_t PAGE_STEERING = 8;
+static constexpr uint8_t PAGE_STEERING_CAL = 9;
+static constexpr uint8_t PAGE_WIFI = 10;
+static constexpr uint8_t PAGE_SYSTEM = 11;
+
+// Rows of the scrolling Battery Compensation page. ENABLED is always the
+// first row, so its wide toggle sits in the top slot whenever the list is
+// scrolled to the top; every other row uses the -/+ repeat buttons.
+enum BatteryRow : uint8_t
+{
+    BATTERY_ROW_ENABLED = 0,
+    BATTERY_ROW_START,
+    BATTERY_ROW_END,
+    BATTERY_ROW_STRENGTH,
+    BATTERY_ROW_CURVE,
+    BATTERY_ROW_KNEE,
+    BATTERY_ROW_FILTER,
+    BATTERY_ROW_DROP,
+    BATTERY_ROW_RECOVERY,
+    BATTERY_ROW_COUNT
+};
+
+static constexpr uint8_t BATTERY_VISIBLE_ROWS = 3;
+static constexpr int8_t BATTERY_FIRST_BUTTON = 35;
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+static constexpr int BATTERY_ROW_Y = 48;
+static constexpr int BATTERY_ROW_PITCH = 62;
+#else
+static constexpr int BATTERY_ROW_Y = 61;
+static constexpr int BATTERY_ROW_PITCH = 55;
+#endif
+
+
+static uint8_t batteryRows(
+    Settings& settings,
+    uint8_t* rows
+)
+{
+    uint8_t count = 0;
+
+    rows[count++] = BATTERY_ROW_ENABLED;
+    rows[count++] = BATTERY_ROW_START;
+    rows[count++] = BATTERY_ROW_END;
+    rows[count++] = BATTERY_ROW_STRENGTH;
+    rows[count++] = BATTERY_ROW_CURVE;
+
+    if(settings.getBatteryCompCurve() == BatteryCompensation::CURVE_CUSTOM)
+    {
+        rows[count++] = BATTERY_ROW_KNEE;
+    }
+
+    rows[count++] = BATTERY_ROW_FILTER;
+    rows[count++] = BATTERY_ROW_DROP;
+    rows[count++] = BATTERY_ROW_RECOVERY;
+
+    return count;
+}
+
+
+static const char* batteryRowLabel(
+    uint8_t row
+)
+{
+    switch(row)
+    {
+        case BATTERY_ROW_ENABLED: return "ENABLED";
+        case BATTERY_ROW_START: return "START V";
+        case BATTERY_ROW_END: return "END V";
+        case BATTERY_ROW_STRENGTH: return "STRENGTH";
+        case BATTERY_ROW_CURVE: return "CURVE";
+        case BATTERY_ROW_KNEE: return "KNEE";
+        case BATTERY_ROW_FILTER: return "FILTER";
+        case BATTERY_ROW_DROP: return "DROP RATE";
+        case BATTERY_ROW_RECOVERY: return "RECOVERY";
+    }
+
+    return "";
+}
+
+
+static String batterySecondsText(
+    int milliseconds
+)
+{
+    if(milliseconds % 1000 == 0)
+    {
+        return String(milliseconds / 1000) + " S";
+    }
+
+    return String(milliseconds / 1000.0f, 1) + " S";
+}
+
+
+static String batteryRowValue(
+    uint8_t row,
+    Settings& settings
+)
+{
+    switch(row)
+    {
+        case BATTERY_ROW_ENABLED:
+            return settings.getBatteryCompEnabled() ? "ON" : "OFF";
+
+        case BATTERY_ROW_START:
+            return String(settings.getBatteryCompStartVoltage(), 1) + " V";
+
+        case BATTERY_ROW_END:
+            return String(settings.getBatteryCompEndVoltage(), 1) + " V";
+
+        case BATTERY_ROW_STRENGTH:
+            return String(settings.getBatteryCompStrength()) + " %";
+
+        case BATTERY_ROW_CURVE:
+            switch(settings.getBatteryCompCurve())
+            {
+                case BatteryCompensation::CURVE_EXPO: return "EXPO";
+                case BatteryCompensation::CURVE_CUSTOM: return "CUSTOM";
+                default: return "LINEAR";
+            }
+
+        case BATTERY_ROW_KNEE:
+            return String(settings.getBatteryCompKnee()) + " %";
+
+        case BATTERY_ROW_FILTER:
+            return batterySecondsText(settings.getBatteryCompFilterMs());
+
+        case BATTERY_ROW_DROP:
+            return batterySecondsText(settings.getBatteryCompDropMs());
+
+        case BATTERY_ROW_RECOVERY:
+            return batterySecondsText(settings.getBatteryCompRecoveryMs());
+    }
+
+    return "";
+}
+
+
+static void adjustBatteryRow(
+    uint8_t row,
+    bool increase,
+    Settings& settings
+)
+{
+    int step = increase ? 1 : -1;
+
+    switch(row)
+    {
+        case BATTERY_ROW_ENABLED:
+            settings.setBatteryCompEnabled(!settings.getBatteryCompEnabled());
+            break;
+
+        case BATTERY_ROW_START:
+            settings.setBatteryCompStartVoltage(
+                settings.getBatteryCompStartVoltage() + 0.1f * step
+            );
+            break;
+
+        case BATTERY_ROW_END:
+            settings.setBatteryCompEndVoltage(
+                settings.getBatteryCompEndVoltage() + 0.1f * step
+            );
+            break;
+
+        case BATTERY_ROW_STRENGTH:
+            settings.setBatteryCompStrength(
+                settings.getBatteryCompStrength() + step
+            );
+            break;
+
+        case BATTERY_ROW_CURVE:
+            settings.setBatteryCompCurve(
+                (settings.getBatteryCompCurve() + (increase ? 1 : 2)) % 3
+            );
+            break;
+
+        case BATTERY_ROW_KNEE:
+            settings.setBatteryCompKnee(
+                settings.getBatteryCompKnee() + 5 * step
+            );
+            break;
+
+        case BATTERY_ROW_FILTER:
+        {
+            const int presets[] = {500, 1000, 2000, 5000, 10000};
+            int current = settings.getBatteryCompFilterMs();
+            int index = 2;
+
+            for(int i = 0; i < 5; i++)
+            {
+                if(presets[i] == current)
+                {
+                    index = i;
+                }
+            }
+
+            index = constrain(index + step, 0, 4);
+            settings.setBatteryCompFilterMs(presets[index]);
+            break;
+        }
+
+        case BATTERY_ROW_DROP:
+            settings.setBatteryCompDropMs(
+                settings.getBatteryCompDropMs() + 500 * step
+            );
+            break;
+
+        case BATTERY_ROW_RECOVERY:
+            settings.setBatteryCompRecoveryMs(
+                settings.getBatteryCompRecoveryMs() + 1000 * step
+            );
+            break;
+    }
+}
 
 
 static uint8_t radioSectionForPage(
@@ -757,6 +968,12 @@ void UI::drawPage(
             );
             break;
 
+        case PAGE_BATTERY:
+            drawBatteryPage(
+                settings
+            );
+            break;
+
         case PAGE_PROFILES:
             drawProfilesPage(
                 settings
@@ -814,6 +1031,14 @@ void UI::setThrottleRadio(
 )
 {
     throttleRadioInput = &throttleRadio;
+}
+
+
+void UI::setBatteryCompensation(
+    const BatteryCompensation& compensation
+)
+{
+    batteryCompensation = &compensation;
 }
 
 
@@ -2468,6 +2693,213 @@ void UI::drawDriftAssistPage(
 bool UI::isProfilesPage()
 {
     return page == PAGE_PROFILES;
+}
+
+
+bool UI::isBatteryPage()
+{
+    return page == PAGE_BATTERY;
+}
+
+
+void UI::drawBatteryReadout()
+{
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    lcd->fillRect(236, 8, 204, 30, TFT_BLACK);
+
+    String text;
+    uint16_t colour = OD_MUTED;
+
+    if(batteryCompensation != nullptr)
+    {
+        lastDrawnBatteryHundredths =
+            (int16_t)(batteryCompensation->getSourceVolts() * 100.0f + 0.5f);
+
+        lastDrawnBatteryPercentTenths =
+            (int16_t)(batteryCompensation->getCompensation() * 1000.0f + 0.5f);
+
+        lastDrawnBatteryFault =
+            (uint8_t)batteryCompensation->getFault();
+
+        if(batteryCompensation->getFault() != BatteryCompensation::FAULT_NONE)
+        {
+            text = batteryCompensation->getFaultText();
+            colour = OD_RED;
+        }
+        else
+        {
+            text =
+                String(batteryCompensation->getSourceVolts(), 2) + "V " +
+                String(batteryCompensation->getCompensation() * 100.0f, 1) + "%";
+
+            colour =
+                batteryCompensation->getConfig().enabled ? OD_GREEN : OD_MUTED;
+        }
+    }
+
+    lcd->setTextSize(2);
+    lcd->setTextColor(colour);
+    lcd->drawRightString(text.c_str(), 438, 16);
+    #endif
+}
+
+
+void UI::updateBatteryReadout()
+{
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(batteryCompensation == nullptr)
+    {
+        return;
+    }
+
+    int16_t hundredths =
+        (int16_t)(batteryCompensation->getSourceVolts() * 100.0f + 0.5f);
+
+    int16_t tenths =
+        (int16_t)(batteryCompensation->getCompensation() * 1000.0f + 0.5f);
+
+    uint8_t fault =
+        (uint8_t)batteryCompensation->getFault();
+
+    if(
+        hundredths == lastDrawnBatteryHundredths &&
+        tenths == lastDrawnBatteryPercentTenths &&
+        fault == lastDrawnBatteryFault
+    )
+    {
+        return;
+    }
+
+    drawBatteryReadout();
+
+    flushDisplay();
+    #endif
+}
+
+
+void UI::drawBatteryPage(
+    Settings& settings
+)
+{
+    drawUiBackground(lcd);
+
+    uint8_t rows[BATTERY_ROW_COUNT];
+
+    uint8_t count =
+        batteryRows(settings, rows);
+
+    uint8_t maxScroll =
+        count > BATTERY_VISIBLE_ROWS
+        ?
+        count - BATTERY_VISIBLE_ROWS
+        :
+        0;
+
+    batteryScroll = min(
+        batteryScroll,
+        maxScroll
+    );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    drawAmoledHeader(
+        lcd,
+        "Battery Comp",
+        OD_MAGENTA
+    );
+
+    drawBatteryReadout();
+
+    for(uint8_t slot = 0; slot < BATTERY_VISIBLE_ROWS; slot++)
+    {
+        uint8_t index =
+            batteryScroll + slot;
+
+        if(index >= count)
+        {
+            break;
+        }
+
+        uint8_t row = rows[index];
+
+        int y =
+            BATTERY_ROW_Y + (slot * BATTERY_ROW_PITCH);
+
+        lcd->setTextSize(2);
+        lcd->setTextColor(OD_MUTED);
+        lcd->drawString(batteryRowLabel(row), 22, y + 10);
+
+        lcd->setTextSize(3);
+        lcd->setTextColor(OD_TEXT);
+        lcd->drawString(batteryRowValue(row, settings).c_str(), 146, y);
+
+        if(row == BATTERY_ROW_ENABLED)
+        {
+            bool enabled =
+                settings.getBatteryCompEnabled();
+
+            drawAmoledButton(
+                lcd,
+                276,
+                y,
+                158,
+                48,
+                enabled ? "ON" : "OFF",
+                enabled ? OD_GREEN : OD_MAGENTA
+            );
+        }
+        else
+        {
+            drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_MAGENTA);
+            drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_MAGENTA);
+        }
+    }
+
+    if(count > BATTERY_VISIBLE_ROWS)
+    {
+        int trackHeight = 182;
+
+        int thumbHeight = max(
+            24,
+            (trackHeight * BATTERY_VISIBLE_ROWS) / count
+        );
+
+        int thumbY =
+            47 +
+            (
+                (trackHeight - thumbHeight) *
+                batteryScroll
+            ) /
+            max(1, (int)maxScroll);
+
+        lcd->drawFastVLine(446, 47, trackHeight, OD_DIM);
+        lcd->fillRect(443, thumbY, 7, thumbHeight, OD_CYAN);
+    }
+    #else
+    lcd->setTextSize(3);
+    lcd->setTextColor(TFT_MAGENTA);
+    lcd->drawCenterString("Battery", 120, 14);
+
+    for(uint8_t slot = 0; slot < BATTERY_VISIBLE_ROWS; slot++)
+    {
+        uint8_t index =
+            batteryScroll + slot;
+
+        if(index >= count)
+        {
+            break;
+        }
+
+        drawRoundAdjustRow(
+            lcd,
+            batteryRowLabel(rows[index]),
+            batteryRowValue(rows[index], settings),
+            slot,
+            TFT_MAGENTA
+        );
+    }
+    #endif
+
+    drawPageDots();
 }
 
 
@@ -4974,7 +5406,7 @@ void UI::drawFixedPageDots()
         return;
     }
 
-    const int spacing = 16;
+    const int spacing = 14;
 
     int startX =
         (UI_CANVAS_WIDTH / 2) -
@@ -5168,6 +5600,24 @@ int8_t UI::repeatButtonAt(
             return 30;
     }
 
+    if(page == PAGE_BATTERY)
+    {
+        for(uint8_t slot = 0; slot < BATTERY_VISIBLE_ROWS; slot++)
+        {
+            // The top slot holds the ENABLED toggle while unscrolled.
+            if(slot == 0 && batteryScroll == 0)
+                continue;
+
+            int by = BATTERY_ROW_Y + (slot * BATTERY_ROW_PITCH);
+
+            if(buttonPressed(x, y, 276, by, 70, 48))
+                return BATTERY_FIRST_BUTTON + (slot * 2);
+
+            if(buttonPressed(x, y, 364, by, 70, 48))
+                return BATTERY_FIRST_BUTTON + (slot * 2) + 1;
+        }
+    }
+
     return 0;
     #endif
 
@@ -5258,6 +5708,23 @@ int8_t UI::repeatButtonAt(
             return 34;
     }
 
+    if(page == PAGE_BATTERY)
+    {
+        for(uint8_t slot = 0; slot < BATTERY_VISIBLE_ROWS; slot++)
+        {
+            if(slot == 0 && batteryScroll == 0)
+                continue;
+
+            int by = BATTERY_ROW_Y + (slot * BATTERY_ROW_PITCH);
+
+            if(buttonPressed(x, y, 26, by, 44, 30))
+                return BATTERY_FIRST_BUTTON + (slot * 2);
+
+            if(buttonPressed(x, y, 170, by, 44, 30))
+                return BATTERY_FIRST_BUTTON + (slot * 2) + 1;
+        }
+    }
+
     return 0;
 }
 
@@ -5298,6 +5765,9 @@ bool UI::actionButtonAt(
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 296, 70, 130, 92);
 
+    if(page == PAGE_BATTERY)
+        return batteryScroll == 0 && buttonPressed(x, y, 276, BATTERY_ROW_Y, 158, 48);
+
     if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 54, 240, 38))
         return true;
 
@@ -5333,6 +5803,9 @@ bool UI::actionButtonAt(
 
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 50, 145, 140, 42);
+
+    if(page == PAGE_BATTERY)
+        return batteryScroll == 0 && buttonPressed(x, y, 26, BATTERY_ROW_Y, 188, 30);
 
     if(
         page == PAGE_SYSTEM
@@ -5596,6 +6069,29 @@ bool UI::applyRepeatButton(
             settings.setControlLoopHz(333);
             break;
 
+        case BATTERY_FIRST_BUTTON:
+        case BATTERY_FIRST_BUTTON + 1:
+        case BATTERY_FIRST_BUTTON + 2:
+        case BATTERY_FIRST_BUTTON + 3:
+        case BATTERY_FIRST_BUTTON + 4:
+        case BATTERY_FIRST_BUTTON + 5:
+        {
+            uint8_t rows[BATTERY_ROW_COUNT];
+            uint8_t count = batteryRows(settings, rows);
+            uint8_t offset = button - BATTERY_FIRST_BUTTON;
+            uint8_t index = batteryScroll + (offset / 2);
+
+            if(index < count)
+            {
+                adjustBatteryRow(
+                    rows[index],
+                    (offset % 2) == 1,
+                    settings
+                );
+            }
+            break;
+        }
+
         default:
             return false;
     }
@@ -5616,6 +6112,12 @@ bool UI::applyRepeatButton(
     else if(page == PAGE_EXPERIMENTAL)
     {
         drawExperimentalPage(
+            settings
+        );
+    }
+    else if(page == PAGE_BATTERY)
+    {
+        drawBatteryPage(
             settings
         );
     }
@@ -5745,7 +6247,8 @@ void UI::update(
         (
             page == PAGE_DRIVE ||
             page == PAGE_RADIO ||
-            page == PAGE_STEERING
+            page == PAGE_STEERING ||
+            page == PAGE_BATTERY
         ) &&
         !touched &&
         !lastTouchState &&
@@ -5768,6 +6271,10 @@ void UI::update(
                     settings
                 );
             }
+        }
+        else if(page == PAGE_BATTERY)
+        {
+            updateBatteryReadout();
         }
         else
         {
@@ -5977,6 +6484,53 @@ void UI::update(
         if(trackingSwipe)
         {
             if(
+                isBatteryPage() &&
+                abs(deltaY) > 34 &&
+                abs(deltaY) > abs(delta)
+            )
+            {
+                #if defined(OPENDRIFT_BOARD_AMOLED_164)
+                if(swipePreviewActive)
+                {
+                    finishSwipePreview(false);
+                }
+                #endif
+
+                uint8_t rows[BATTERY_ROW_COUNT];
+
+                uint8_t count =
+                    batteryRows(settings, rows);
+
+                uint8_t maxScroll =
+                    count > BATTERY_VISIBLE_ROWS
+                    ?
+                    count - BATTERY_VISIBLE_ROWS
+                    :
+                    0;
+
+                uint8_t steps = max(
+                    1,
+                    abs(deltaY) / BATTERY_ROW_PITCH
+                );
+
+                if(deltaY < 0)
+                {
+                    batteryScroll = min(
+                        (int)maxScroll,
+                        (int)batteryScroll + steps
+                    );
+                }
+                else
+                {
+                    batteryScroll = max(
+                        0,
+                        (int)batteryScroll - steps
+                    );
+                }
+
+                drawBatteryPage(settings);
+            }
+            else if(
                 isProfilesPage() &&
                 abs(deltaY) > 34 &&
                 abs(deltaY) > abs(delta)
@@ -6421,6 +6975,33 @@ void UI::update(
             return;
         }
 
+        if(
+            page == PAGE_BATTERY &&
+            batteryScroll == 0 &&
+            buttonPressed(
+                x,
+                y,
+                276,
+                BATTERY_ROW_Y,
+                158,
+                48
+            )
+        )
+        {
+            settings.setBatteryCompEnabled(
+                !settings.getBatteryCompEnabled()
+            );
+
+            drawBatteryPage(
+                settings
+            );
+
+            lastTouchState =
+                touched;
+
+            return;
+        }
+
         lastTouchState =
             touched;
 
@@ -6429,6 +7010,26 @@ void UI::update(
 
 
 
+
+        if(page == PAGE_BATTERY)
+        {
+            if(
+                batteryScroll == 0 &&
+                buttonPressed(x, y, 26, BATTERY_ROW_Y, 188, 30)
+            )
+            {
+                settings.setBatteryCompEnabled(
+                    !settings.getBatteryCompEnabled()
+                );
+            }
+
+            drawBatteryPage(settings);
+
+            lastTouchState =
+                touched;
+
+            return;
+        }
 
         // MAIN PAGE BUTTONS
 
