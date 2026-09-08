@@ -1845,7 +1845,9 @@ void setup()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            batteryComp,
+            batterySense
         );
 
         bootConsole.log(
@@ -2031,7 +2033,9 @@ void loop()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            batteryComp,
+            batterySense
         );
     }
 

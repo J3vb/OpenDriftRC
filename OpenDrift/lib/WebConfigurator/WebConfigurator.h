@@ -7,6 +7,8 @@
 #include "GyroController.h"
 #include "RadioInput.h"
 #include "BlackboxLogger.h"
+#include "BatteryCompensation.h"
+#include "BatterySense.h"
 
 
 class WebConfigurator
@@ -21,7 +23,9 @@ public:
         RadioInput& steeringRadio,
         RadioInput& gainRadio,
         RadioInput& throttleRadio,
-        BlackboxLogger& blackbox
+        BlackboxLogger& blackbox,
+        BatteryCompensation& batteryComp,
+        BatterySense& batterySense
     );
 
     void update();
@@ -45,11 +49,17 @@ private:
 
     BlackboxLogger* blackbox = nullptr;
 
+    BatteryCompensation* batteryComp = nullptr;
+
+    BatterySense* batterySense = nullptr;
+
     bool running = false;
 
     void handleRoot();
 
     void handleLiveStatus();
+
+    void handleBatteryScript();
 
     void handleSave();
 
