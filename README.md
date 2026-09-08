@@ -48,6 +48,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Persistent settings stored in ESP32 preferences.
 - Transition Speed adjustment centered at the neutral baseline of `50`.
 - Phase-aware Anti Wobble notch with a track-tested default of `50`.
+- Battery Voltage Compensation: voltage- and throttle-dependent ESC output scaling driven by a resting-voltage estimate, stored per profile, with a touch page, live web graphs, and blackbox columns. Needs a sense divider on GPIO 5-8; see [Hardware.md](OpenDrift/docs/Hardware.md).
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
   telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
@@ -80,6 +81,8 @@ signal to GPIO 16 and the ESC rather than plugging the ESC into OpenDrift.
 Make sure the receiver, ESP32 board, and servo power system share ground.
 
 AMOLED V2 keeps receiver steering on GPIO 15 and throttle on GPIO 16, but moves steering output to GPIO 1 and the switchable gain/throttle connection to GPIO 2. Do not use GPIO 17/18 for OpenDrift signals on V2; Waveshare connects those pins to IMU_INT2 and TP_INT.
+
+Battery Voltage Compensation reads the pack through an optional resistor divider on GPIO 5, 6, 7, or 8 (GPIO 8 recommended). Sensing is off until the pin is selected in the web configurator. It only changes the ESC signal when OpenDrift drives the ESC: always on CRSF builds, and on PWM builds only in throttle-output mode. Wiring and calibration are in [Hardware.md](OpenDrift/docs/Hardware.md).
 
 CRSF targets repurpose the receiver pins:
 
@@ -252,6 +255,20 @@ Tune symptoms:
 | Mid-drift wheel oscillation | Lower gain first; verify servo and chassis |
 | Feels slow or lazy | Lower smoothing slightly or raise gain |
 
+### Battery Compensation
+
+One scrolling page with the Battery Voltage Compensation settings of the active profile. The header shows the live pack voltage and the compensation currently available, or the fault (`NO SENSOR`, `OUT OF RANGE`). Swipe up or down to scroll through the rows; three are visible at a time:
+
+- `ENABLED`: ON/OFF for the active profile.
+- `START V`: voltage at which compensation is strongest, default `8.4`.
+- `END V`: voltage the car should feel like; no compensation at or below it, default `7.4`.
+- `STRENGTH`: percentage of the physically correct amount, `100` makes a full pack feel exactly like the end voltage.
+- `CURVE`: `LINEAR`, `EXPO`, or `CUSTOM`; `KNEE` appears for `CUSTOM` and sets the throttle up to which compensation stays full.
+- `FILTER`: resting-voltage time constant, `0.5` to `10 S`.
+- `DROP RATE` and `RECOVERY`: how fast the filtered voltage follows a falling or rising pack.
+
+Full stick always gives full ESC output, and neutral, brake, and reverse are never touched. The sense pin, voltage calibration, and throttle direction are hardware settings on the web configurator.
+
 ### Radio
 
 Live receiver monitor:
@@ -333,7 +350,7 @@ Basic firmware/system information. Tap the GPIO 18 mode button to switch between
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
 
-Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
+Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, radio steering travel, and every Battery Compensation setting. Trackside adjustments automatically save back to the active profile.
 
 Hardware and installation settings remain global, including gyro/servo direction, physical steering endpoints, servo center and travel, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
@@ -377,6 +394,8 @@ Current web settings:
 - WiFi auto-off timeout
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
+- Battery Compensation: enable, start and end voltage, strength, curve and knee, voltage filter, drop and recovery rates, resting-voltage source, with live graphs of compensation against pack voltage and throttle in against ESC out
+- Battery sense pin, voltage scale with one-step multimeter calibration, and throttle direction
 
 The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
 

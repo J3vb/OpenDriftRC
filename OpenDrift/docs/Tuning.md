@@ -83,6 +83,7 @@ the car quickly. They do not disable the fast direct damping path.
 | Steering Travel | Scales driver steering only; it does not reduce gyro authority |
 | Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
+| Battery Compensation | Voltage- and throttle-dependent ESC output scaling so a fresh pack feels like a partly used one; full stick always passes through |
 
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general
@@ -109,6 +110,47 @@ higher values reduce damping for faster rotation. It never changes the hard
 Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
+
+### Battery Compensation
+
+A fresh 2S pack at 8.4 V makes the car sharper at low and mid throttle than the same
+car at 7.8 V. Battery Compensation scales forward throttle below full stick by an
+amount that depends on the pack voltage and on the throttle position, so the car
+feels the same across the pack. Full stick, neutral, brake, and reverse are never
+changed, so turbo, boost, top speed, and initiations are unaffected.
+
+The physical anchor is motor speed and torque scaling with duty times voltage: at
+`Strength 100` a pack at the Start Voltage feels like a pack at the End Voltage. The
+reduction is largest at low throttle and fades to zero at full stick with the
+selected curve:
+
+- `Linear` fades evenly. The top quarter of the stick is at most about 12 % steeper
+  than uncompensated, which is not noticeable in practice.
+- `Expo` fades early and keeps the slope at full stick unchanged, at the cost of only a
+  quarter of the compensation remaining at mid throttle.
+- `Custom` keeps the full compensation up to the `Knee` percentage of throttle and
+  then fades to zero.
+
+Compensation is driven by the resting voltage by default: the pack voltage is only
+sampled into the estimate after the throttle has been within 50 us of neutral for
+0.25 s, so the sag of a throttle burst cannot change the feel mid-corner. The
+`Voltage Filter` preset is that estimate's time constant. `Drop Rate` and `Recovery
+Rate` shape the always-visible filtered voltage, which becomes the source when the
+resting toggle is off. Any fault (no sensor, no sample, reading outside 5.5-9.2 V, or
+End Voltage within 0.2 V of Start Voltage) fades compensation out over one second.
+
+First test:
+
+1. Fit the sense divider and calibrate the scale as described in Hardware.md; confirm
+   the live voltage on the web page matches a multimeter at rest.
+2. Enable compensation on one profile with the defaults (`8.4`, `7.4`, `100`, `Linear`).
+3. With a fresh pack, drive the entries and transitions you know. Compare with the same
+   profile compensation off; the car should feel like it does late in a run.
+4. Lower `Strength` if the pack feels too tame, or raise `End Voltage` toward `7.8` to
+   compensate less overall. Try `Expo` if the top of the stick feels too abrupt.
+5. Check the blackbox: `battery_resting_v` should stay steady through bursts while
+   `battery_raw_v` sags, `battery_comp_pct` should track throttle position, and
+   `throttle_out_us` should equal `throttle_raw_us` at full stick and below neutral.
 
 ## Safe first test
 
