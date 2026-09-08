@@ -166,6 +166,63 @@ namespace
         int32_t gyroHuntSensitivity;
         int32_t gyroHuntStrength;
     };
+
+    // Layout used by profile versions 8, 9 and 10 (and, by size, version 6).
+    struct DrivingProfileV10
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+        int32_t gyroHuntStrength;
+    };
+
+    // loadProfiles() dispatches on the stored blob size, so the current
+    // layout must not share a size with any layout it migrates from.
+    static_assert(sizeof(Settings::DrivingProfile) == 116, "DrivingProfile layout changed");
+    static_assert(sizeof(DrivingProfileV10) == 76, "DrivingProfileV10 layout changed");
+    static_assert(
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV10) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV7) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV6) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV5) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV4) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV3) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV2) &&
+        sizeof(Settings::DrivingProfile) != sizeof(DrivingProfileV1),
+        "DrivingProfile size collides with a legacy layout"
+    );
+
+    float clampBatteryVoltage(float value)
+    {
+        float clamped = constrain(value, 7.0f, 8.4f);
+        return roundf(clamped * 10.0f) / 10.0f;
+    }
+
+    int snapBatteryFilterMs(int value)
+    {
+        const int presets[] = {500, 1000, 2000, 5000, 10000};
+        int best = presets[0];
+
+        for(int preset : presets)
+        {
+            if(abs(preset - value) < abs(best - value))
+            {
+                best = preset;
+            }
+        }
+
+        return best;
+    }
 }
 
 bool Settings::begin()
@@ -312,6 +369,27 @@ bool Settings::begin()
         0,
         100
     );
+
+    batteryCompEnabled = prefs.getBool("batEnabled", false);
+    batteryCompStartVoltage = clampBatteryVoltage(prefs.getFloat("batStartV", 8.4f));
+    batteryCompEndVoltage = clampBatteryVoltage(prefs.getFloat("batEndV", 7.4f));
+    batteryCompStrength = constrain(prefs.getInt("batStrength", 100), 0, 100);
+    batteryCompCurve = constrain(prefs.getUChar("batCurve", 0), 0, 2);
+    batteryCompKnee = constrain(prefs.getInt("batKnee", 50), 0, 90);
+    batteryCompFilterMs = snapBatteryFilterMs(prefs.getInt("batFilterMs", 2000));
+    batteryCompDropMs = constrain(prefs.getInt("batDropMs", 1000), 500, 10000);
+    batteryCompRecoveryMs = constrain(prefs.getInt("batRiseMs", 10000), 1000, 30000);
+    batteryCompUseResting = prefs.getBool("batResting", true);
+
+    batterySensePin = prefs.getUChar("batPin", 0);
+
+    if(!isBatterySensePinAllowed(batterySensePin))
+    {
+        batterySensePin = 0;
+    }
+
+    batteryVoltageScale = constrain(prefs.getFloat("batScale", 4.133f), 1.0f, 10.0f);
+    batteryThrottleReversed = prefs.getBool("batThrRev", false);
 
     const char* retiredKeys[] = {
         "gyroAttack", "gyroReturn", "gyroWob", "gyroHunt",
@@ -561,6 +639,20 @@ void Settings::save()
         "huntStrength",
         gyroHuntStrength
     );
+
+    prefs.putBool("batEnabled", batteryCompEnabled);
+    prefs.putFloat("batStartV", batteryCompStartVoltage);
+    prefs.putFloat("batEndV", batteryCompEndVoltage);
+    prefs.putInt("batStrength", batteryCompStrength);
+    prefs.putUChar("batCurve", batteryCompCurve);
+    prefs.putInt("batKnee", batteryCompKnee);
+    prefs.putInt("batFilterMs", batteryCompFilterMs);
+    prefs.putInt("batDropMs", batteryCompDropMs);
+    prefs.putInt("batRiseMs", batteryCompRecoveryMs);
+    prefs.putBool("batResting", batteryCompUseResting);
+    prefs.putUChar("batPin", batterySensePin);
+    prefs.putFloat("batScale", batteryVoltageScale);
+    prefs.putBool("batThrRev", batteryThrottleReversed);
 
     prefs.putInt(
         "center",
@@ -867,6 +959,170 @@ int Settings::getGyroHuntStrength()
 void Settings::setGyroHuntStrength(int value)
 {
     gyroHuntStrength = constrain(value, 0, 100);
+    dirty = true;
+}
+
+
+// --------------------
+// Battery compensation
+// --------------------
+
+bool Settings::getBatteryCompEnabled()
+{
+    return batteryCompEnabled;
+}
+
+void Settings::setBatteryCompEnabled(bool value)
+{
+    batteryCompEnabled = value;
+    dirty = true;
+}
+
+float Settings::getBatteryCompStartVoltage()
+{
+    return batteryCompStartVoltage;
+}
+
+void Settings::setBatteryCompStartVoltage(float value)
+{
+    batteryCompStartVoltage = clampBatteryVoltage(value);
+    dirty = true;
+}
+
+float Settings::getBatteryCompEndVoltage()
+{
+    return batteryCompEndVoltage;
+}
+
+void Settings::setBatteryCompEndVoltage(float value)
+{
+    batteryCompEndVoltage = clampBatteryVoltage(value);
+    dirty = true;
+}
+
+int Settings::getBatteryCompStrength()
+{
+    return batteryCompStrength;
+}
+
+void Settings::setBatteryCompStrength(int value)
+{
+    batteryCompStrength = constrain(value, 0, 100);
+    dirty = true;
+}
+
+uint8_t Settings::getBatteryCompCurve()
+{
+    return batteryCompCurve;
+}
+
+void Settings::setBatteryCompCurve(uint8_t value)
+{
+    batteryCompCurve = value > 2 ? 2 : value;
+    dirty = true;
+}
+
+int Settings::getBatteryCompKnee()
+{
+    return batteryCompKnee;
+}
+
+void Settings::setBatteryCompKnee(int value)
+{
+    batteryCompKnee = constrain(value, 0, 90);
+    dirty = true;
+}
+
+int Settings::getBatteryCompFilterMs()
+{
+    return batteryCompFilterMs;
+}
+
+void Settings::setBatteryCompFilterMs(int value)
+{
+    batteryCompFilterMs = snapBatteryFilterMs(value);
+    dirty = true;
+}
+
+int Settings::getBatteryCompDropMs()
+{
+    return batteryCompDropMs;
+}
+
+void Settings::setBatteryCompDropMs(int value)
+{
+    batteryCompDropMs = constrain(value, 500, 10000);
+    dirty = true;
+}
+
+int Settings::getBatteryCompRecoveryMs()
+{
+    return batteryCompRecoveryMs;
+}
+
+void Settings::setBatteryCompRecoveryMs(int value)
+{
+    batteryCompRecoveryMs = constrain(value, 1000, 30000);
+    dirty = true;
+}
+
+bool Settings::getBatteryCompUseResting()
+{
+    return batteryCompUseResting;
+}
+
+void Settings::setBatteryCompUseResting(bool value)
+{
+    batteryCompUseResting = value;
+    dirty = true;
+}
+
+uint8_t Settings::getBatterySensePin()
+{
+    return batterySensePin;
+}
+
+void Settings::setBatterySensePin(uint8_t gpio)
+{
+    batterySensePin = isBatterySensePinAllowed(gpio) ? gpio : 0;
+    dirty = true;
+}
+
+bool Settings::isBatterySensePinAllowed(uint8_t gpio)
+{
+    if(gpio == 0)
+    {
+        return true;
+    }
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // ADC1 pins that are free on both AMOLED revisions and every build.
+    return gpio >= 5 && gpio <= 8;
+    #else
+    // The round board uses GPIO 5-8 for touch, I2C and the display.
+    return false;
+    #endif
+}
+
+float Settings::getBatteryVoltageScale()
+{
+    return batteryVoltageScale;
+}
+
+void Settings::setBatteryVoltageScale(float value)
+{
+    batteryVoltageScale = constrain(value, 1.0f, 10.0f);
+    dirty = true;
+}
+
+bool Settings::getBatteryThrottleReversed()
+{
+    return batteryThrottleReversed;
+}
+
+void Settings::setBatteryThrottleReversed(bool value)
+{
+    batteryThrottleReversed = value;
     dirty = true;
 }
 
@@ -1517,28 +1773,69 @@ void Settings::loadProfiles()
             if(
                 prefs.getBytes(key, &stored, sizeof(stored)) == sizeof(stored) &&
                 stored.name[0] != '\0' &&
-                (stored.version == 8 || stored.version == 9 || stored.version == 10)
+                stored.version == 11
             )
             {
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = stored;
-                profile.version = 10;
+                profile.version = 11;
                 profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                loadedCount++;
+            }
+        }
+        else if(storedSize == sizeof(DrivingProfileV10))
+        {
+            DrivingProfileV10 legacy = {};
 
-                if(stored.version == 9)
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.name[0] != '\0' &&
+                (
+                    legacy.version == 6 ||
+                    legacy.version == 8 ||
+                    legacy.version == 9 ||
+                    legacy.version == 10
+                )
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+
+                if(legacy.version == 10)
+                {
+                    profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                }
+                else if(legacy.version == 9)
                 {
                     profile.gyroMaxCorrection =
                         centerSpanPercentToFullSpanPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
-                else if(stored.version == 8)
+                else
                 {
                     profile.gyroMaxCorrection =
                         legacyMaxCorrectionToPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
+
+                // Version 6 shares this size; its last field was the retired
+                // hunt sensitivity, so Anti Wobble takes its default.
+                profile.gyroHuntStrength =
+                    legacy.version == 6 ? 50 : legacy.gyroHuntStrength;
 
                 loadedCount++;
             }
@@ -1770,7 +2067,7 @@ void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 10;
+    profile.version = 11;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;
@@ -1783,6 +2080,16 @@ void Settings::captureProfile(
     profile.gyroCounterSteerAssist = gyroCounterSteerAssist;
     profile.gyroTransitionSpeed = gyroTransitionSpeed;
     profile.gyroHuntStrength = gyroHuntStrength;
+    profile.batteryCompEnabled = batteryCompEnabled ? 1 : 0;
+    profile.batteryCompStartVoltage = batteryCompStartVoltage;
+    profile.batteryCompEndVoltage = batteryCompEndVoltage;
+    profile.batteryCompStrength = batteryCompStrength;
+    profile.batteryCompCurve = batteryCompCurve;
+    profile.batteryCompKnee = batteryCompKnee;
+    profile.batteryCompFilterMs = batteryCompFilterMs;
+    profile.batteryCompDropMs = batteryCompDropMs;
+    profile.batteryCompRecoveryMs = batteryCompRecoveryMs;
+    profile.batteryCompUseResting = batteryCompUseResting ? 1 : 0;
 }
 
 void Settings::applyProfile(
@@ -1801,6 +2108,16 @@ void Settings::applyProfile(
     gyroCounterSteerAssist = profile.gyroCounterSteerAssist;
     gyroTransitionSpeed = profile.gyroTransitionSpeed;
     gyroHuntStrength = profile.gyroHuntStrength;
+    batteryCompEnabled = profile.batteryCompEnabled != 0;
+    batteryCompStartVoltage = clampBatteryVoltage(profile.batteryCompStartVoltage);
+    batteryCompEndVoltage = clampBatteryVoltage(profile.batteryCompEndVoltage);
+    batteryCompStrength = constrain(profile.batteryCompStrength, 0, 100);
+    batteryCompCurve = constrain(profile.batteryCompCurve, 0, 2);
+    batteryCompKnee = constrain(profile.batteryCompKnee, 0, 90);
+    batteryCompFilterMs = snapBatteryFilterMs(profile.batteryCompFilterMs);
+    batteryCompDropMs = constrain(profile.batteryCompDropMs, 500, 10000);
+    batteryCompRecoveryMs = constrain(profile.batteryCompRecoveryMs, 1000, 30000);
+    batteryCompUseResting = profile.batteryCompUseResting != 0;
 }
 
 bool Settings::persistProfile(

@@ -220,7 +220,8 @@ namespace
         std::printf("sample points (8.3 V, defaults) for web preview cross-check:\n");
         for(int input = 1500; input <= 2000; input += 50)
         {
-            std::printf("  in=%d out=%d comp=%.2f%%\n", input, compensation.apply(input), (double)compensation.getCompensationPercent());
+            int output = compensation.apply(input);
+            std::printf("  in=%d out=%d comp=%.2f%%\n", input, output, (double)compensation.getCompensationPercent());
         }
         std::printf("shape weights at t=0.5: linear %.4f expo %.4f custom50 %.4f custom90 %.4f\n",
             (double)BatteryCompensation::shapeWeight(0.5f, BatteryCompensation::CURVE_LINEAR, 0),

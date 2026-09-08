@@ -12,7 +12,7 @@ public:
 
     struct DrivingProfile
     {
-        uint32_t version = 10;
+        uint32_t version = 11;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -28,6 +28,17 @@ public:
         int32_t gyroCounterSteerAssist = 0;
         int32_t gyroTransitionSpeed = 50;
         int32_t gyroHuntStrength = 50;
+
+        int32_t batteryCompEnabled = 0;
+        float batteryCompStartVoltage = 8.4f;
+        float batteryCompEndVoltage = 7.4f;
+        int32_t batteryCompStrength = 100;
+        int32_t batteryCompCurve = 0;
+        int32_t batteryCompKnee = 50;
+        int32_t batteryCompFilterMs = 2000;
+        int32_t batteryCompDropMs = 1000;
+        int32_t batteryCompRecoveryMs = 10000;
+        int32_t batteryCompUseResting = 1;
     };
 
     bool begin();
@@ -74,6 +85,51 @@ public:
 
     int getGyroHuntStrength();
     void setGyroHuntStrength(int value);
+
+    // Battery compensation. Stored per profile like the gyro tune.
+    bool getBatteryCompEnabled();
+    void setBatteryCompEnabled(bool value);
+
+    float getBatteryCompStartVoltage();
+    void setBatteryCompStartVoltage(float value);
+
+    float getBatteryCompEndVoltage();
+    void setBatteryCompEndVoltage(float value);
+
+    int getBatteryCompStrength();
+    void setBatteryCompStrength(int value);
+
+    // 0 = linear, 1 = expo, 2 = custom knee.
+    uint8_t getBatteryCompCurve();
+    void setBatteryCompCurve(uint8_t value);
+
+    int getBatteryCompKnee();
+    void setBatteryCompKnee(int value);
+
+    // Resting-voltage estimator time constant: 500/1000/2000/5000/10000 ms.
+    int getBatteryCompFilterMs();
+    void setBatteryCompFilterMs(int value);
+
+    int getBatteryCompDropMs();
+    void setBatteryCompDropMs(int value);
+
+    int getBatteryCompRecoveryMs();
+    void setBatteryCompRecoveryMs(int value);
+
+    bool getBatteryCompUseResting();
+    void setBatteryCompUseResting(bool value);
+
+    // Battery sense hardware. Global because it describes the car, not the
+    // surface. Pin 0 disables sensing.
+    uint8_t getBatterySensePin();
+    void setBatterySensePin(uint8_t gpio);
+    static bool isBatterySensePinAllowed(uint8_t gpio);
+
+    float getBatteryVoltageScale();
+    void setBatteryVoltageScale(float value);
+
+    bool getBatteryThrottleReversed();
+    void setBatteryThrottleReversed(bool value);
 
     // Servo
     int getServoCenter();
@@ -234,6 +290,32 @@ private:
     bool throttleOutputEnabled = false;
 
     uint8_t auxChannels[8] = {0};
+
+    bool batteryCompEnabled = false;
+
+    float batteryCompStartVoltage = 8.4f;
+
+    float batteryCompEndVoltage = 7.4f;
+
+    int batteryCompStrength = 100;
+
+    uint8_t batteryCompCurve = 0;
+
+    int batteryCompKnee = 50;
+
+    int batteryCompFilterMs = 2000;
+
+    int batteryCompDropMs = 1000;
+
+    int batteryCompRecoveryMs = 10000;
+
+    bool batteryCompUseResting = true;
+
+    uint8_t batterySensePin = 0;
+
+    float batteryVoltageScale = 4.133f;
+
+    bool batteryThrottleReversed = false;
 
     DrivingProfile profiles[MAX_PROFILES];
 
