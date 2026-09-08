@@ -30,6 +30,9 @@ public:
 
     bool isActive() const;
 
+    // Last pulse written to the hardware, in microseconds.
+    int getPulse() const;
+
 
 private:
 

@@ -28,8 +28,18 @@ public:
         uint8_t gpio
     );
 
+    // A GPIO claimed by another feature (battery sense) is never driven.
+    // Zero clears the reservation.
+    static void setReservedPin(
+        uint8_t gpio
+    );
+
+    static uint8_t getReservedPin();
+
 
 private:
+
+    static uint8_t reservedPin;
 
     bool attached[OUTPUT_COUNT] = {false};
     uint16_t lastPulse[OUTPUT_COUNT] = {0};

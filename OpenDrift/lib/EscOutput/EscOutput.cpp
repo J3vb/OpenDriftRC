@@ -135,3 +135,9 @@ bool EscOutput::isActive() const
 {
     return active;
 }
+
+
+int EscOutput::getPulse() const
+{
+    return currentPulse;
+}

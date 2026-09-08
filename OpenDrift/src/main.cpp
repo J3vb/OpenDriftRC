@@ -24,6 +24,8 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#include "BatterySense.h"
+#include "BatteryCompensation.h"
 
 LGFX lcd;
 
@@ -60,6 +62,12 @@ AuxChannelOutputs auxChannelOutputs;
 #endif
 
 BlackboxLogger blackbox;
+
+BatterySense batterySense;
+
+BatteryCompensation batteryComp;
+
+static uint32_t lastBatteryUpdateMicros = 0;
 
 unsigned long lastBlackboxLog = 0;
 
@@ -674,14 +682,70 @@ void updateCrsfThrottleOutput(
     }
 
     throttleOutput.writeMicroseconds(
-        constrain(
-            throttlePulse,
-            1000,
-            2000
+        batteryComp.apply(
+            constrain(
+                throttlePulse,
+                1000,
+                2000
+            )
         )
     );
 }
 #endif
+
+// Samples the pack voltage and refreshes the compensation from the current
+// profile. Runs in loop() ahead of the throttle output writes. The driver's
+// raw throttle pulse is used only to detect lifts for the resting estimate.
+void updateBatteryCompensation(
+    int throttleInputUs
+)
+{
+    uint8_t sensePin = settings.getBatterySensePin();
+
+    #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
+    AuxChannelOutputs::setReservedPin(sensePin);
+    #endif
+
+    if(batterySense.configure(sensePin, settings.getBatteryVoltageScale()))
+    {
+        batteryComp.reset();
+    }
+
+    batterySense.update();
+
+    BatteryCompensation::Config config;
+
+    config.enabled = settings.getBatteryCompEnabled();
+    config.startVoltage = settings.getBatteryCompStartVoltage();
+    config.endVoltage = settings.getBatteryCompEndVoltage();
+    config.strengthPercent = settings.getBatteryCompStrength();
+    config.curve = settings.getBatteryCompCurve();
+    config.kneePercent = settings.getBatteryCompKnee();
+    config.filterSeconds = settings.getBatteryCompFilterMs() / 1000.0f;
+    config.dropSeconds = settings.getBatteryCompDropMs() / 1000.0f;
+    config.recoverySeconds = settings.getBatteryCompRecoveryMs() / 1000.0f;
+    config.useResting = settings.getBatteryCompUseResting();
+    config.sensorEnabled = batterySense.isEnabled();
+    config.throttleReversed = settings.getBatteryThrottleReversed();
+
+    batteryComp.configure(config);
+
+    uint32_t now = micros();
+
+    float dt =
+        lastBatteryUpdateMicros == 0
+        ? 0.0f
+        : (float)(now - lastBatteryUpdateMicros) / 1000000.0f;
+
+    lastBatteryUpdateMicros = now == 0 ? 1 : now;
+
+    batteryComp.update(
+        batterySense.getVolts(),
+        batterySense.hasSample(),
+        throttleInputUs,
+        dt
+    );
+}
 
 int mapSteeringPulse(
     int pulse,
@@ -1484,6 +1548,10 @@ void setup()
     bool throttleOutputOk = throttleOutputActive;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    AuxChannelOutputs::setReservedPin(
+        settings.getBatterySensePin()
+    );
+
     bool auxOutputsOk =
         auxChannelOutputs.begin(settings);
     #endif
@@ -1694,6 +1762,43 @@ void setup()
 
         bootConsole.log(
             "psram: blackbox recorder disabled",
+            "[SKIP]",
+            0x8410
+        );
+    }
+
+    //-------------------
+    // BATTERY SENSE
+    //-------------------
+
+    batterySense.configure(
+        settings.getBatterySensePin(),
+        settings.getBatteryVoltageScale()
+    );
+
+    if(batterySense.isEnabled())
+    {
+        char batteryMessage[48];
+
+        snprintf(
+            batteryMessage,
+            sizeof(batteryMessage),
+            "adc: battery sense on GPIO %u",
+            batterySense.getPin()
+        );
+
+        Serial.println(batteryMessage);
+
+        bootConsole.log(
+            batteryMessage
+        );
+    }
+    else
+    {
+        Serial.println("Battery sense disabled");
+
+        bootConsole.log(
+            "adc: battery sense disabled",
             "[SKIP]",
             0x8410
         );
@@ -1944,6 +2049,10 @@ void loop()
     int crsfThrottlePulse =
         crsfThrottlePulseSnapshot;
 
+    updateBatteryCompensation(
+        crsfThrottleSignal ? crsfThrottlePulse : 1500
+    );
+
     updateCrsfThrottleOutput(
         crsfThrottlePulse,
         crsfThrottleSignal
@@ -1957,6 +2066,10 @@ void loop()
     );
     #endif
     #else
+    updateBatteryCompensation(
+        throttleRadio.hasSignal() ? throttleRadio.getPulseWidth() : 1500
+    );
+
     if(
         pin18ThrottleOutputMode &&
         throttleRadio.hasSignal()
@@ -1980,7 +2093,9 @@ void loop()
         if(throttleOutputActive)
         {
             throttleOutput.writeMicroseconds(
-                throttleRadio.getPulseWidth()
+                batteryComp.apply(
+                    throttleRadio.getPulseWidth()
+                )
             );
         }
     }

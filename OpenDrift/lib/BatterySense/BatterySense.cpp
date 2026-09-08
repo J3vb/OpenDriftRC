@@ -1,0 +1,95 @@
+#include "BatterySense.h"
+
+
+bool BatterySense::configure(
+    uint8_t gpio,
+    float newScale
+)
+{
+    scale = newScale;
+
+    if(gpio == pin)
+    {
+        return false;
+    }
+
+    pin = gpio;
+    sampleValid = false;
+    volts = 0.0f;
+    pinMillivolts = 0;
+    settleRemaining = SETTLE_SAMPLES;
+    lastSampleMs = 0;
+
+    if(pin != 0)
+    {
+        pinMode(pin, INPUT);
+        analogSetPinAttenuation(pin, ADC_11db);
+    }
+
+    return true;
+}
+
+
+bool BatterySense::update()
+{
+    if(pin == 0)
+    {
+        sampleValid = false;
+        return false;
+    }
+
+    uint32_t now = millis();
+
+    if(lastSampleMs != 0 && now - lastSampleMs < SAMPLE_INTERVAL_MS)
+    {
+        return false;
+    }
+
+    lastSampleMs = now == 0 ? 1 : now;
+
+    if(settleRemaining > 0)
+    {
+        // Clear any pull left behind by a previous owner of the pin before
+        // trusting a reading.
+        pinMode(pin, INPUT);
+        analogReadMilliVolts(pin);
+        settleRemaining--;
+        return false;
+    }
+
+    pinMillivolts = analogReadMilliVolts(pin);
+    volts = (float)pinMillivolts * scale / 1000.0f;
+    sampleValid = true;
+
+    return true;
+}
+
+
+bool BatterySense::isEnabled() const
+{
+    return pin != 0;
+}
+
+
+bool BatterySense::hasSample() const
+{
+    return sampleValid;
+}
+
+
+float BatterySense::getVolts() const
+{
+    return volts;
+}
+
+
+uint32_t BatterySense::getPinMillivolts() const
+{
+    return pinMillivolts;
+}
+
+
+uint8_t BatterySense::getPin() const
+{
+    return pin;
+}

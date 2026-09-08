@@ -13,10 +13,34 @@
 #define abs(x) ((x) > 0 ? (x) : -(x))
 
 extern unsigned long fakeMillis;
+extern uint32_t fakeAdcMillivolts;
+extern int fakePinModeCalls;
+
+#define INPUT 0x01
+#define ADC_11db 3
 
 inline unsigned long millis()
 {
     return fakeMillis;
+}
+
+inline void pinMode(uint8_t pin, uint8_t mode)
+{
+    (void)pin;
+    (void)mode;
+    fakePinModeCalls++;
+}
+
+inline void analogSetPinAttenuation(uint8_t pin, int attenuation)
+{
+    (void)pin;
+    (void)attenuation;
+}
+
+inline uint32_t analogReadMilliVolts(uint8_t pin)
+{
+    (void)pin;
+    return fakeAdcMillivolts;
 }
 
 inline bool isAlphaNumeric(char value)

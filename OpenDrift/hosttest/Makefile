@@ -10,8 +10,10 @@ INCLUDES := -I$(MODULE_DIR)
 
 TEST_SOURCES := test_battery_compensation.cpp test_macro_clash.cpp $(MODULE_DIR)/BatteryCompensation.cpp
 SETTINGS_SOURCES := test_settings_migration.cpp $(SETTINGS_DIR)/Settings.cpp
+SENSE_DIR := ../lib/BatterySense
+SENSE_SOURCES := test_battery_sense.cpp $(SENSE_DIR)/BatterySense.cpp
 
-all: $(BUILD)/battery_tests $(BUILD)/settings_tests
+all: $(BUILD)/battery_tests $(BUILD)/settings_tests $(BUILD)/sense_tests
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -29,9 +31,13 @@ strict-float: | $(BUILD)
 $(BUILD)/settings_tests: $(SETTINGS_SOURCES) $(SETTINGS_DIR)/Settings.h shim/Arduino.h shim/Preferences.h | $(BUILD)
 	$(CXX) $(CXXFLAGS) -DOPENDRIFT_BOARD_AMOLED_164 -Ishim -I$(SETTINGS_DIR) $(SETTINGS_SOURCES) -o $@
 
-test: $(BUILD)/battery_tests $(BUILD)/settings_tests strict-float
+$(BUILD)/sense_tests: $(SENSE_SOURCES) $(SENSE_DIR)/BatterySense.h shim/Arduino.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -DOPENDRIFT_BOARD_AMOLED_164 -Ishim -I$(SENSE_DIR) $(SENSE_SOURCES) -o $@
+
+test: $(BUILD)/battery_tests $(BUILD)/settings_tests $(BUILD)/sense_tests strict-float
 	./$(BUILD)/battery_tests
 	./$(BUILD)/settings_tests
+	./$(BUILD)/sense_tests
 
 clean:
 	rm -rf $(BUILD)
