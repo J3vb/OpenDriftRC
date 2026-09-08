@@ -419,6 +419,7 @@ Log rows include:
 - Controller phase (`0` idle, `1` entry, `2` settled, `3` transition) and reference-lock blend
 - Anti Wobble notch depth, isolated residual, tracked notch frequency, transition-authority blend, and throttle-lift blend
 - Steering/throttle/gain signal state and GPIO 18 mode
+- Battery raw, filtered, and resting voltage, applied compensation percent, and the ESC pulse after compensation
 
 Suggested test workflow:
 

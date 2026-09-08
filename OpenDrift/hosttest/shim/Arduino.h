@@ -12,6 +12,13 @@
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #define abs(x) ((x) > 0 ? (x) : -(x))
 
+// Arduino provides these as macros; functions keep the C++ headers usable.
+template<typename T>
+inline T min(T a, T b) { return a < b ? a : b; }
+
+template<typename T>
+inline T max(T a, T b) { return a > b ? a : b; }
+
 extern unsigned long fakeMillis;
 extern uint32_t fakeAdcMillivolts;
 extern int fakePinModeCalls;

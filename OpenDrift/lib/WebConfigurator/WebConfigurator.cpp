@@ -970,7 +970,7 @@ void WebConfigurator::handleLogDownload()
     size_t recordCount =
         blackbox->getRecordCount();
 
-    char line[672];
+    char line[800];
     String chunk;
     chunk.reserve(8192);
 

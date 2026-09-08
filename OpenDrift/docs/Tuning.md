@@ -202,11 +202,16 @@ the retired alpha-era tuning fields:
 | `hunt_consistent_half_cycles` | Number of consecutive frequency-consistent half-cycles observed |
 | `hunt_latch` | Confirmed-event hold from 0 to 1; transitions clear it immediately |
 | `anti_wobble` | Saved Anti Wobble notch-depth setting from 0-100; default `50` |
+| `battery_raw_v` | Pack voltage from the sense divider, unfiltered; `0` when sensing is off |
+| `battery_filtered_v` | Asymmetric drop/recovery filtered pack voltage |
+| `battery_resting_v` | Resting-voltage estimate sampled while the throttle is lifted; drives compensation by default |
+| `battery_comp_pct` | Throttle reduction applied at the last ESC write, in percent of the pulse above neutral |
+| `throttle_out_us` | ESC pulse actually written after Battery Compensation; `0` when no throttle output is active. `throttle_raw_us` is the driver's input |
 
 The stage-one onboard logger stores fixed-size binary records entirely in a
 4 MB circular PSRAM buffer. It performs no internal-flash or filesystem writes
-while driving. At the current 20 Hz sample rate, the complete telemetry set
-retains approximately the newest 18 minutes of a run. Once full, the oldest
+while driving. At the current 20 Hz sample rate, the 264-byte record
+retains approximately the newest 13 minutes of a run in a 4 MB buffer. Once full, the oldest
 records are overwritten so the most recent behavior remains available.
 
 Use **Download CSV** in the web configurator before removing power. CSV text is

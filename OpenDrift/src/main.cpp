@@ -2222,7 +2222,12 @@ void loop()
             gyro.getHuntLatch(),
             settings.getGyroHuntStrength(),
             gyro.getHuntResidualEnvelope(),
-            gyro.getHuntNotchCenter()
+            gyro.getHuntNotchCenter(),
+            batteryComp.getRawVolts(),
+            batteryComp.getFilteredVolts(),
+            batteryComp.getRestingVolts(),
+            batteryComp.getCompensationPercent(),
+            throttleOutput.isActive() ? throttleOutput.getPulse() : 0
         );
     }
 

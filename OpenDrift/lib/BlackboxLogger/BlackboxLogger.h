@@ -74,7 +74,12 @@ public:
         float huntLatch,
         int huntStrength,
         float huntResidualEnvelope,
-        float huntNotchCenter
+        float huntNotchCenter,
+        float batteryRawVolts,
+        float batteryFilteredVolts,
+        float batteryRestingVolts,
+        float batteryCompensationPercent,
+        int throttleOutputUs
     );
 
     void clear();
@@ -166,7 +171,16 @@ private:
         int32_t huntStrength;
         float huntResidualEnvelope;
         float huntNotchCenter;
+        float batteryRawVolts;
+        float batteryFilteredVolts;
+        float batteryRestingVolts;
+        float batteryCompensationPercent;
+        int32_t throttleOutputUs;
     };
+
+    // Every field is four bytes so the ring buffer holds exactly this many
+    // bytes per sample; the CSV formatter depends on the same layout.
+    static_assert(sizeof(Record) == 264, "Blackbox record layout changed");
 
     static const size_t preferredBufferBytes =
         4UL * 1024UL * 1024UL;
