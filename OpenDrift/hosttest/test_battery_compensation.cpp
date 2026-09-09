@@ -199,7 +199,12 @@ namespace
         CHECK(compensation.apply(1500) == 1500, "neutral -> %d", compensation.apply(1500));
         CHECK(compensation.apply(1200) == 1200, "brake -> %d", compensation.apply(1200));
         CHECK(compensation.apply(2012) == 2000, "CRSF 2012 clamps to %d", compensation.apply(2012));
-        CHECK(compensation.apply(988) == 988 || compensation.apply(988) == 1000, "CRSF 988 -> %d", compensation.apply(988));
+        CHECK(compensation.apply(988) == 1000, "CRSF 988 clamps to %d", compensation.apply(988));
+
+        compensation.apply(1750);
+        CHECK(compensation.getCompensationPercent() > 5.0f, "applied percent %.2f", (double)compensation.getCompensationPercent());
+        compensation.clearApplied();
+        CHECK(compensation.getCompensationPercent() == 0.0f && compensation.getLastOutputUs() == 1500, "clearApplied left %.2f %% / %d us", (double)compensation.getCompensationPercent(), compensation.getLastOutputUs());
 
         BatteryCompensation reversed;
         BatteryCompensation::Config config = baseConfig();
@@ -397,6 +402,205 @@ namespace
         run(lift, 7.9f, true, 1540, 3.0f);
         CHECK(lift.getRestingVolts() < 8.1f, "resting did not follow after settle: %.3f", (double)lift.getRestingVolts());
     }
+    void testLearnedNeutral()
+    {
+        for(const CurveVariant& variant : CURVES)
+        {
+            // A trimmed radio: neutral 1560, forward 1560..2000.
+            BatteryCompensation trimmed;
+            BatteryCompensation::Config config = baseConfig();
+            config.curve = variant.curve;
+            config.kneePercent = variant.knee;
+            trimmed.configure(config);
+
+            run(trimmed, 8.3f, true, 1560, 0.8f);
+            CHECK(trimmed.getNeutralUs() == 1500 && !trimmed.isNeutralLearned(), "%s: neutral learned before 1 s: %d", variant.name, trimmed.getNeutralUs());
+            run(trimmed, 8.3f, true, 1560, 2.2f);
+            CHECK(trimmed.getNeutralUs() == 1560 && trimmed.isNeutralLearned(), "%s: neutral not learned: %d", variant.name, trimmed.getNeutralUs());
+            CHECK(trimmed.isLifted(), "%s: trimmed neutral not seen as a lift", variant.name);
+            CHECK(std::fabs(trimmed.getRestingVolts() - 8.3f) < 1e-4f, "%s: resting %.4f", variant.name, (double)trimmed.getRestingVolts());
+            CHECK(std::fabs(trimmed.getHealth() - 1.0f) < 1e-5f, "%s: health %.4f", variant.name, (double)trimmed.getHealth());
+            CHECK(trimmed.apply(2000) == 2000, "%s: full stick -> %d", variant.name, trimmed.apply(2000));
+            CHECK(trimmed.apply(1560) == 1560, "%s: neutral -> %d", variant.name, trimmed.apply(1560));
+            CHECK(trimmed.apply(1540) == 1540, "%s: brake -> %d", variant.name, trimmed.apply(1540));
+            CHECK(trimmed.apply(1000) == 1000, "%s: full brake -> %d", variant.name, trimmed.apply(1000));
+
+            if(variant.curve == BatteryCompensation::CURVE_LINEAR)
+            {
+                CHECK(trimmed.apply(1780) == 1768, "half stick from 1560 -> %d", trimmed.apply(1780));
+            }
+
+            int previous = -1;
+
+            for(int input = 1000; input <= 2000; input++)
+            {
+                int output = trimmed.apply(input);
+
+                CHECK(output >= previous, "%s: non-monotonic at %d: %d after %d", variant.name, input, output, previous);
+                CHECK(output <= input, "%s: output above input at %d: %d", variant.name, input, output);
+
+                if(input <= 1560)
+                {
+                    CHECK(output == input, "%s: brake side changed at %d: %d", variant.name, input, output);
+                }
+
+                previous = output;
+            }
+
+            // The mirror image: neutral 1440 with a reversed channel.
+            BatteryCompensation reversed;
+            config.throttleReversed = true;
+            reversed.configure(config);
+            run(reversed, 8.3f, true, 1440, 3.0f);
+
+            CHECK(reversed.getNeutralUs() == 1440, "%s: reversed neutral %d", variant.name, reversed.getNeutralUs());
+            CHECK(reversed.apply(1000) == 1000, "%s: reversed full stick -> %d", variant.name, reversed.apply(1000));
+            CHECK(reversed.apply(2000) == 2000, "%s: reversed full brake -> %d", variant.name, reversed.apply(2000));
+
+            for(int k = 0; k <= 440; k += 20)
+            {
+                CHECK(reversed.apply(1440 - k) == 3000 - trimmed.apply(1560 + k), "%s: reversed mirror at k=%d: %d vs %d", variant.name, k, reversed.apply(1440 - k), trimmed.apply(1560 + k));
+                CHECK(reversed.apply(1440 + k) == 1440 + k, "%s: reversed brake side changed at %d", variant.name, 1440 + k);
+            }
+        }
+    }
+
+    void testNeutralRelearn()
+    {
+        BatteryCompensation compensation;
+        compensation.configure(baseConfig());
+        run(compensation, 8.4f, true, 1500, 2.0f);
+        CHECK(compensation.getNeutralUs() == 1500 && compensation.isNeutralLearned(), "1500 not learned");
+
+        run(compensation, 8.4f, true, 1580, 3.0f);
+        CHECK(compensation.getNeutralUs() == 1500, "steady throttle relearned the neutral after 3 s: %d", compensation.getNeutralUs());
+        run(compensation, 8.4f, true, 1580, 2.5f);
+        CHECK(compensation.getNeutralUs() == 1580, "no relearn after 5.5 s steady: %d", compensation.getNeutralUs());
+
+        run(compensation, 8.4f, true, 1700, 10.0f);
+        CHECK(compensation.getNeutralUs() == 1580, "learned a neutral above the window: %d", compensation.getNeutralUs());
+        run(compensation, 8.4f, true, 1350, 10.0f);
+        CHECK(compensation.getNeutralUs() == 1580, "learned a neutral below the window: %d", compensation.getNeutralUs());
+
+        BatteryCompensation jitter;
+        jitter.configure(baseConfig());
+        for(int i = 0; i < 60; i++)
+        {
+            jitter.update(8.4f, true, (i & 1) ? 1562 : 1558, DT);
+        }
+        CHECK(jitter.isNeutralLearned() && jitter.getNeutralUs() >= 1558 && jitter.getNeutralUs() <= 1562, "jitter inside the band broke learning: %d", jitter.getNeutralUs());
+
+        BatteryCompensation moving;
+        moving.configure(baseConfig());
+        for(int i = 0; i < 200; i++)
+        {
+            moving.update(8.4f, true, 1500 + (i % 4) * 20, DT);
+        }
+        CHECK(!moving.isNeutralLearned() && moving.getNeutralUs() == 1500, "a moving stick learned a neutral: %d", moving.getNeutralUs());
+
+        // No radio link: counts as a lift, learns nothing, and a gap resets
+        // the stability timer.
+        BatteryCompensation noLink;
+        noLink.configure(baseConfig());
+        for(int i = 0; i < 150; i++)
+        {
+            noLink.update(8.4f, true, 1500, DT, false);
+        }
+        CHECK(!noLink.isNeutralLearned() && noLink.isLifted(), "link down: learned=%d lifted=%d", noLink.isNeutralLearned(), noLink.isLifted());
+        CHECK(std::fabs(noLink.getRestingVolts() - 8.4f) < 1e-4f && std::fabs(noLink.getHealth() - 1.0f) < 1e-5f, "link down did not rest: %.3f V health %.3f", (double)noLink.getRestingVolts(), (double)noLink.getHealth());
+
+        run(noLink, 8.4f, true, 1560, 0.6f);
+        for(int i = 0; i < 30; i++)
+        {
+            noLink.update(8.4f, true, 1560, DT, false);
+        }
+        run(noLink, 8.4f, true, 1560, 0.6f);
+        CHECK(!noLink.isNeutralLearned(), "interrupted hold learned a neutral");
+        run(noLink, 8.4f, true, 1560, 0.6f);
+        CHECK(noLink.isNeutralLearned() && noLink.getNeutralUs() == 1560, "neutral after uninterrupted hold: %d", noLink.getNeutralUs());
+
+        noLink.reset();
+        CHECK(noLink.getNeutralUs() == 1560 && noLink.isNeutralLearned(), "reset forgot the neutral: %d", noLink.getNeutralUs());
+    }
+
+    void testBadSettingsFade()
+    {
+        BatteryCompensation compensation;
+        compensation.configure(baseConfig());
+        run(compensation, 8.4f, true, 1500, 3.0f);
+
+        float before = compensation.getCompensation();
+        CHECK(before > 0.1f, "compensation at 8.4 V %.4f", (double)before);
+
+        BatteryCompensation::Config config = baseConfig();
+        config.startVoltage = 7.5f;
+        config.endVoltage = 7.4f;
+        compensation.configure(config);
+        CHECK(compensation.getCompensation() == before, "bad settings stepped on configure: %.4f -> %.4f", (double)before, (double)compensation.getCompensation());
+
+        compensation.update(8.4f, true, 1500, DT);
+        CHECK(compensation.getFault() == BatteryCompensation::FAULT_BAD_SETTINGS, "fault %s", compensation.getFaultText());
+        CHECK(compensation.getCompensation() < before && before - compensation.getCompensation() <= before * DT + 1e-6f, "bad settings stepped: %.5f -> %.5f", (double)before, (double)compensation.getCompensation());
+
+        run(compensation, 8.4f, true, 1500, 1.5f);
+        CHECK(compensation.getCompensation() == 0.0f && compensation.apply(1750) == 1750, "bad settings did not fade out: %.5f", (double)compensation.getCompensation());
+
+        compensation.configure(baseConfig());
+        compensation.update(8.4f, true, 1500, DT);
+        CHECK(compensation.getCompensation() <= before * DT + 1e-6f, "valid settings stepped back in: %.5f", (double)compensation.getCompensation());
+        run(compensation, 8.4f, true, 1500, 1.5f);
+        CHECK(std::fabs(compensation.getCompensation() - before) < 1e-5f, "compensation after recovery %.5f", (double)compensation.getCompensation());
+    }
+
+    void testResetFades()
+    {
+        BatteryCompensation compensation;
+        compensation.configure(baseConfig());
+        run(compensation, 8.4f, true, 1500, 3.0f);
+
+        float before = compensation.getCompensation();
+
+        compensation.reset();
+        CHECK(!compensation.isInitialised(), "initialised after reset");
+        CHECK(compensation.getCompensation() == before, "reset stepped compensation to %.4f", (double)compensation.getCompensation());
+        CHECK(compensation.getFault() == BatteryCompensation::FAULT_NO_SAMPLE, "fault after reset %s", compensation.getFaultText());
+
+        // The new sensor reads 7.6 V: the old value fades out, the new one
+        // ramps in, never more than one health step per update.
+        float previous = before;
+
+        for(int i = 0; i < 150; i++)
+        {
+            compensation.update(7.6f, true, 1500, DT);
+            float now = compensation.getCompensation();
+            CHECK(std::fabs(now - previous) <= before * DT + 1e-6f, "reset transition step %d: %.5f -> %.5f", i, (double)previous, (double)now);
+            previous = now;
+        }
+
+        CHECK(compensation.isInitialised(), "not re-initialised after reset");
+        CHECK(std::fabs(compensation.getRestingVolts() - 7.6f) < 1e-4f, "resting after reset %.4f", (double)compensation.getRestingVolts());
+        CHECK(std::fabs(previous - 0.02381f) < 1e-3f, "compensation at 7.6 V after reset %.5f", (double)previous);
+        CHECK(compensation.getFault() == BatteryCompensation::FAULT_NONE, "fault after reset transition %s", compensation.getFaultText());
+    }
+
+    void testStaleRestingFallback()
+    {
+        BatteryCompensation compensation;
+        compensation.configure(baseConfig());
+        run(compensation, 8.4f, true, 1500, 3.0f);
+
+        // No lift for a minute while the pack has really dropped.
+        run(compensation, 7.6f, true, 1700, 58.0f);
+        CHECK(std::fabs(compensation.getRestingVolts() - 8.4f) < 1e-4f, "resting moved before the stale timeout: %.3f", (double)compensation.getRestingVolts());
+        CHECK(std::fabs(compensation.getFilteredVolts() - 7.6f) < 1e-3f, "filtered %.3f", (double)compensation.getFilteredVolts());
+
+        run(compensation, 7.6f, true, 1700, 8.0f);
+        CHECK(compensation.getRestingVolts() < 7.8f, "stale resting did not follow the filtered trend: %.3f", (double)compensation.getRestingVolts());
+        CHECK(compensation.getNeutralUs() == 1500, "steady 1700 learned as neutral");
+
+        run(compensation, 7.9f, true, 1500, 6.0f);
+        CHECK(std::fabs(compensation.getRestingVolts() - 7.9f) < 0.03f, "lift did not refresh resting: %.3f", (double)compensation.getRestingVolts());
+    }
 }
 
 
@@ -408,6 +612,11 @@ int main()
     testHealthRamps();
     testBurstSag();
     testRejections();
+    testLearnedNeutral();
+    testNeutralRelearn();
+    testBadSettingsFade();
+    testResetFades();
+    testStaleRestingFallback();
 
     CHECK(macroClashProbe() < 1750 && macroClashProbe() > 1700, "macro clash probe %d", macroClashProbe());
 

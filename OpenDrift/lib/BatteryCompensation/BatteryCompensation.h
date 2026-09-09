@@ -48,24 +48,44 @@ public:
     static constexpr float LIFT_SETTLE_SECONDS = 0.25f;
     static constexpr int LIFT_BAND_US = 50;
 
+    // Without a lift for this long the resting estimate follows the
+    // filtered voltage instead of staying frozen.
+    static constexpr float STALE_RESTING_SECONDS = 60.0f;
+
+    // The throttle neutral is learned from the radio: a pulse inside this
+    // window that holds still (within the band) for the learn time.
+    static constexpr int NEUTRAL_MIN_US = 1400;
+    static constexpr int NEUTRAL_MAX_US = 1600;
+    static constexpr int NEUTRAL_STABLE_BAND_US = 15;
+    static constexpr float NEUTRAL_LEARN_SECONDS = 1.0f;
+    static constexpr float NEUTRAL_RELEARN_SECONDS = 5.0f;
+
     void configure(const Config& newConfig);
 
     const Config& getConfig() const;
 
-    // Forget filter state, e.g. after the sense pin changes.
+    // Forget the voltage filters, e.g. after the sense pin changes. The
+    // active compensation fades out first and the learned neutral is kept.
     void reset();
 
     // volts: pack voltage in volts. rawValid: false when no reading exists.
-    // throttleInUs: the driver's raw throttle pulse. dtSeconds is clamped.
+    // throttleInUs: the driver's raw throttle pulse. throttleValid: false
+    // while the radio link is down, which counts as a lift and pauses
+    // neutral learning. dtSeconds is clamped.
     void update(
         float volts,
         bool rawValid,
         int throttleInUs,
-        float dtSeconds
+        float dtSeconds,
+        bool throttleValid = true
     );
 
     // Maps the driver's throttle pulse to the ESC pulse, both in microseconds.
     int apply(int throttleInUs);
+
+    // Call instead of apply() whenever the ESC write is bypassed (failsafe,
+    // not armed, output inactive) so the reported values are not stale.
+    void clearApplied();
 
     // Fraction of the compensation that applies at a throttle position
     // (0..1). Shared by the host tests and mirrored by the web preview.
@@ -84,6 +104,8 @@ public:
     float getHealth() const;
     int getLastInputUs() const;
     int getLastOutputUs() const;
+    int getNeutralUs() const;
+    bool isNeutralLearned() const;
     Fault getFault() const;
     const char* getFaultText() const;
     bool isInitialised() const;
@@ -98,14 +120,21 @@ private:
     float restingVolts = 0.0f;
     float health = 0.0f;
     float liftTimer = 0.0f;
+    float sinceRestingSeconds = 0.0f;
+    float compensationBase = 0.0f;
     float compensation = 0.0f;
     float lastCompensationPercent = 0.0f;
+    float neutralStableSeconds = 0.0f;
     bool initialised = false;
     bool lifted = false;
+    bool neutralLearned = false;
     int lastInputUs = 1500;
     int lastOutputUs = 1500;
+    int neutralUs = 1500;
+    int neutralCandidateUs = 1500;
     Fault fault = FAULT_SENSOR_OFF;
 
     bool settingsValid() const;
+    void learnNeutral(int input, float dt);
     void updateCompensation();
 };

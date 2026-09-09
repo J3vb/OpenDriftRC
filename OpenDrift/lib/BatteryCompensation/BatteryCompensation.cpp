@@ -51,8 +51,8 @@ void BatteryCompensation::reset()
     rawVolts = 0.0f;
     filteredVolts = 0.0f;
     restingVolts = 0.0f;
-    health = 0.0f;
     liftTimer = 0.0f;
+    sinceRestingSeconds = 0.0f;
     initialised = false;
     lifted = false;
     fault = config.sensorEnabled ? FAULT_NO_SAMPLE : FAULT_SENSOR_OFF;
@@ -65,7 +65,8 @@ void BatteryCompensation::update(
     float volts,
     bool rawValid,
     int throttleInUs,
-    float dtSeconds
+    float dtSeconds,
+    bool throttleValid
 )
 {
     float dt = clampFloat(dtSeconds, 0.0f, MAX_DT_SECONDS);
@@ -79,14 +80,17 @@ void BatteryCompensation::update(
 
     bool valid = config.sensorEnabled && inRange;
 
-    if(valid && !initialised)
+    // A (re)start waits until any earlier compensation has faded out, so a
+    // reading that differs from the previous sensor never steps the ESC.
+    if(valid && !initialised && health <= 0.0f)
     {
         filteredVolts = volts;
         restingVolts = volts;
+        sinceRestingSeconds = 0.0f;
         initialised = true;
     }
 
-    if(valid)
+    if(valid && initialised)
     {
         float tau =
             volts < filteredVolts
@@ -96,15 +100,48 @@ void BatteryCompensation::update(
         filteredVolts += (volts - filteredVolts) * alphaFor(dt, tau);
     }
 
-    int offset = throttleInUs - 1500;
+    int input =
+        throttleValid
+        ? clampInt(throttleInUs, 1000, 2000)
+        : neutralUs;
+
+    if(throttleValid)
+    {
+        learnNeutral(input, dt);
+    }
+    else
+    {
+        neutralCandidateUs = neutralUs;
+        neutralStableSeconds = 0.0f;
+    }
+
+    int offset = input - neutralUs;
 
     lifted = offset >= -LIFT_BAND_US && offset <= LIFT_BAND_US;
     liftTimer = lifted ? liftTimer + dt : 0.0f;
 
-    if(valid && liftTimer >= LIFT_SETTLE_SECONDS)
+    if(valid && initialised && liftTimer >= LIFT_SETTLE_SECONDS)
     {
         restingVolts +=
             (volts - restingVolts) * alphaFor(dt, config.filterSeconds);
+
+        sinceRestingSeconds = 0.0f;
+    }
+    else
+    {
+        sinceRestingSeconds =
+            clampFloat(sinceRestingSeconds + dt, 0.0f, STALE_RESTING_SECONDS);
+
+        if(
+            valid &&
+            initialised &&
+            sinceRestingSeconds >= STALE_RESTING_SECONDS
+        )
+        {
+            restingVolts +=
+                (filteredVolts - restingVolts) *
+                alphaFor(dt, config.filterSeconds);
+        }
     }
 
     if(!config.sensorEnabled)
@@ -129,7 +166,7 @@ void BatteryCompensation::update(
     }
 
     float healthTarget =
-        valid && config.enabled && settingsValid()
+        valid && initialised && config.enabled && settingsValid()
         ? 1.0f
         : 0.0f;
 
@@ -149,22 +186,27 @@ int BatteryCompensation::apply(int throttleInUs)
 
     int forward =
         config.throttleReversed
-        ? 1500 - input
-        : input - 1500;
+        ? neutralUs - input
+        : input - neutralUs;
 
-    if(forward <= 0 || compensation <= 0.0f)
+    int span =
+        config.throttleReversed
+        ? neutralUs - 1000
+        : 2000 - neutralUs;
+
+    if(forward <= 0 || span <= 0 || compensation <= 0.0f)
     {
         lastCompensationPercent = 0.0f;
         lastOutputUs = input;
         return input;
     }
 
-    float throttle = (float)forward / 500.0f;
+    float throttle = (float)forward / (float)span;
     float weight = shapeWeight(throttle, config.curve, config.kneePercent);
     float reduction = compensation * weight;
 
     int forwardOut =
-        (int)lroundf(500.0f * throttle * (1.0f - reduction));
+        (int)lroundf((float)forward * (1.0f - reduction));
 
     forwardOut = clampInt(forwardOut, 0, forward);
 
@@ -172,10 +214,18 @@ int BatteryCompensation::apply(int throttleInUs)
 
     lastOutputUs =
         config.throttleReversed
-        ? 1500 - forwardOut
-        : 1500 + forwardOut;
+        ? neutralUs - forwardOut
+        : neutralUs + forwardOut;
 
     return lastOutputUs;
+}
+
+
+void BatteryCompensation::clearApplied()
+{
+    lastCompensationPercent = 0.0f;
+    lastInputUs = 1500;
+    lastOutputUs = 1500;
 }
 
 
@@ -252,6 +302,18 @@ int BatteryCompensation::getLastOutputUs() const
 }
 
 
+int BatteryCompensation::getNeutralUs() const
+{
+    return neutralUs;
+}
+
+
+bool BatteryCompensation::isNeutralLearned() const
+{
+    return neutralLearned;
+}
+
+
 BatteryCompensation::Fault BatteryCompensation::getFault() const
 {
     return fault;
@@ -302,23 +364,58 @@ bool BatteryCompensation::settingsValid() const
 }
 
 
-void BatteryCompensation::updateCompensation()
+void BatteryCompensation::learnNeutral(int input, float dt)
 {
-    if(!settingsValid())
+    int offset = input - neutralCandidateUs;
+
+    if(
+        offset >= -NEUTRAL_STABLE_BAND_US &&
+        offset <= NEUTRAL_STABLE_BAND_US
+    )
     {
-        compensation = 0.0f;
-        return;
+        neutralStableSeconds += dt;
+    }
+    else
+    {
+        neutralCandidateUs = input;
+        neutralStableSeconds = 0.0f;
     }
 
-    float source = getSourceVolts();
-    float span = config.startVoltage - config.endVoltage;
+    float required =
+        neutralLearned
+        ? NEUTRAL_RELEARN_SECONDS
+        : NEUTRAL_LEARN_SECONDS;
 
-    float position =
-        clampFloat((source - config.endVoltage) / span, 0.0f, 1.0f);
+    if(
+        neutralCandidateUs >= NEUTRAL_MIN_US &&
+        neutralCandidateUs <= NEUTRAL_MAX_US &&
+        neutralStableSeconds >= required
+    )
+    {
+        neutralUs = neutralCandidateUs;
+        neutralLearned = true;
+    }
+}
 
-    float maximum =
-        ((float)config.strengthPercent / 100.0f) *
-        (1.0f - config.endVoltage / config.startVoltage);
 
-    compensation = maximum * position * health;
+// The base holds the last value computed from valid settings and a real
+// voltage; health alone takes it to zero, so nothing ever steps.
+void BatteryCompensation::updateCompensation()
+{
+    if(settingsValid() && initialised)
+    {
+        float source = getSourceVolts();
+        float span = config.startVoltage - config.endVoltage;
+
+        float position =
+            clampFloat((source - config.endVoltage) / span, 0.0f, 1.0f);
+
+        float maximum =
+            ((float)config.strengthPercent / 100.0f) *
+            (1.0f - config.endVoltage / config.startVoltage);
+
+        compensationBase = maximum * position;
+    }
+
+    compensation = compensationBase * health;
 }
