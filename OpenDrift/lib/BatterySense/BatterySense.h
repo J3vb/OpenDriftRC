@@ -9,7 +9,8 @@ class BatterySense
 public:
 
     // gpio 0 disables sensing. scale is pack volts per volt at the pin.
-    // Returns true when the pin changed, so callers can reset their filters.
+    // Returns true when the pin or the scale changed, so callers can
+    // reset their filters; the current sample is dropped either way.
     bool configure(
         uint8_t gpio,
         float scale
@@ -44,5 +45,6 @@ private:
     uint32_t pinMillivolts = 0;
     float volts = 0.0f;
     bool sampleValid = false;
+    bool hasSampled = false;
     uint8_t settleRemaining = 0;
 };

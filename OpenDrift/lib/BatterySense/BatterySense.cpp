@@ -6,24 +6,30 @@ bool BatterySense::configure(
     float newScale
 )
 {
-    scale = newScale;
+    bool pinChanged = gpio != pin;
+    bool scaleChanged = newScale != scale;
 
-    if(gpio == pin)
+    if(!pinChanged && !scaleChanged)
     {
         return false;
     }
 
-    pin = gpio;
+    scale = newScale;
     sampleValid = false;
     volts = 0.0f;
     pinMillivolts = 0;
-    settleRemaining = SETTLE_SAMPLES;
-    lastSampleMs = 0;
 
-    if(pin != 0)
+    if(pinChanged)
     {
-        pinMode(pin, INPUT);
-        analogSetPinAttenuation(pin, ADC_11db);
+        pin = gpio;
+        settleRemaining = SETTLE_SAMPLES;
+        hasSampled = false;
+
+        if(pin != 0)
+        {
+            pinMode(pin, INPUT);
+            analogSetPinAttenuation(pin, ADC_11db);
+        }
     }
 
     return true;
@@ -40,12 +46,13 @@ bool BatterySense::update()
 
     uint32_t now = millis();
 
-    if(lastSampleMs != 0 && now - lastSampleMs < SAMPLE_INTERVAL_MS)
+    if(hasSampled && now - lastSampleMs < SAMPLE_INTERVAL_MS)
     {
         return false;
     }
 
-    lastSampleMs = now == 0 ? 1 : now;
+    lastSampleMs = now;
+    hasSampled = true;
 
     if(settleRemaining > 0)
     {

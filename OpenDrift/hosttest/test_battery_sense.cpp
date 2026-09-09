@@ -35,14 +35,18 @@ int main()
     CHECK(!sense.update(), "disabled sense produced a sample");
 
     fakeAdcMillivolts = 2032;
-    fakeMillis = 1000;
+    fakeMillis = 0;
 
     CHECK(sense.configure(8, 4.133f), "pin change not reported");
     CHECK(sense.isEnabled() && sense.getPin() == 8, "pin not stored");
-    CHECK(!sense.configure(8, 4.133f), "same pin reported as change");
+    CHECK(!sense.configure(8, 4.133f), "same pin and scale reported as change");
+
+    // millis() of 0 is an ordinary time: one settle discard now, none
+    // more until the interval has passed.
+    CHECK(!sense.update() && !sense.update(), "sampled twice at millis 0");
 
     int accepted = 0;
-    for(int i = 0; i < 3; i++)
+    for(int i = 0; i < 2; i++)
     {
         fakeMillis += 20;
         if(sense.update()) accepted++;
@@ -63,9 +67,10 @@ int main()
     CHECK(sense.update(), "did not sample at 20 ms");
     CHECK(std::fabs(sense.getVolts() - 7.439f) < 0.005f, "volts after change %.3f", (double)sense.getVolts());
 
-    sense.configure(8, 4.2f);
+    CHECK(sense.configure(8, 4.2f), "scale change not reported");
+    CHECK(!sense.hasSample() && sense.getVolts() == 0.0f, "sample kept across scale change");
     fakeMillis += 20;
-    sense.update();
+    CHECK(sense.update(), "scale change needs no settle");
     CHECK(std::fabs(sense.getVolts() - 7.56f) < 0.005f, "scale change not applied: %.3f", (double)sense.getVolts());
 
     CHECK(sense.configure(5, 4.2f), "pin change to 5 not reported");

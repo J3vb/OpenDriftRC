@@ -617,6 +617,8 @@ void updateCrsfThrottleOutput(
         crsfThrottleArmed = false;
         crsfThrottleNeutralSinceMs = 0;
 
+        batteryComp.clearApplied();
+
         return;
     }
 
@@ -626,6 +628,8 @@ void updateCrsfThrottleOutput(
 
     if(!crsfThrottleArmed)
     {
+        batteryComp.clearApplied();
+
         if(!throttleNeutral)
         {
             crsfThrottleNeutralSinceMs = 0;
@@ -695,9 +699,11 @@ void updateCrsfThrottleOutput(
 
 // Samples the pack voltage and refreshes the compensation from the current
 // profile. Runs in loop() ahead of the throttle output writes. The driver's
-// raw throttle pulse is used only to detect lifts for the resting estimate.
+// raw throttle pulse is used only to learn the neutral and detect lifts for
+// the resting estimate; a lost signal counts as a lift.
 void updateBatteryCompensation(
-    int throttleInputUs
+    int throttleInputUs,
+    bool throttleValid
 )
 {
     uint8_t sensePin = settings.getBatterySensePin();
@@ -743,7 +749,8 @@ void updateBatteryCompensation(
         batterySense.getVolts(),
         batterySense.hasSample(),
         throttleInputUs,
-        dt
+        dt,
+        throttleValid
     );
 }
 
@@ -2058,7 +2065,8 @@ void loop()
         crsfThrottlePulseSnapshot;
 
     updateBatteryCompensation(
-        crsfThrottleSignal ? crsfThrottlePulse : 1500
+        crsfThrottlePulse,
+        crsfThrottleSignal
     );
 
     updateCrsfThrottleOutput(
@@ -2075,7 +2083,8 @@ void loop()
     #endif
     #else
     updateBatteryCompensation(
-        throttleRadio.hasSignal() ? throttleRadio.getPulseWidth() : 1500
+        throttleRadio.getPulseWidth(),
+        throttleRadio.hasSignal()
     );
 
     if(
@@ -2106,21 +2115,30 @@ void loop()
                 )
             );
         }
+        else
+        {
+            batteryComp.clearApplied();
+        }
     }
-    else if(
-        pin18ThrottleOutputMode &&
-        throttleOutputActive
-    )
+    else
     {
-        // Removing the PWM signal lets the ESC's own signal-loss
-        // failsafe take over instead of holding the last throttle value.
-        throttleOutput.end();
-        throttleOutputActive = false;
+        batteryComp.clearApplied();
 
-        pinMode(
-            SHARED_GAIN_THROTTLE_PIN,
-            INPUT_PULLDOWN
-        );
+        if(
+            pin18ThrottleOutputMode &&
+            throttleOutputActive
+        )
+        {
+            // Removing the PWM signal lets the ESC's own signal-loss
+            // failsafe take over instead of holding the last throttle value.
+            throttleOutput.end();
+            throttleOutputActive = false;
+
+            pinMode(
+                SHARED_GAIN_THROTTLE_PIN,
+                INPUT_PULLDOWN
+            );
+        }
     }
     #endif
 
