@@ -55,6 +55,18 @@ private:
 
     bool running = false;
 
+    // A calibration typed into the form waits until the sense pin saved in
+    // the same request has produced a reading.
+    static constexpr unsigned long CALIBRATION_TIMEOUT_MS = 10000;
+
+    bool calibrationPending = false;
+    float pendingCalibrationVolts = 0.0f;
+    uint8_t pendingCalibrationPin = 0;
+    unsigned long pendingCalibrationSinceMs = 0;
+    String calibrationStatus;
+
+    void applyPendingCalibration();
+
     void handleRoot();
 
     void handleLiveStatus();
@@ -81,6 +93,16 @@ private:
         String value,
         const char* type = "number",
         const char* step = "1"
+    );
+
+    // A required number input whose min/max mirror the firmware clamps.
+    String inputRange(
+        const char* label,
+        const char* name,
+        String value,
+        const char* step,
+        const char* minimum,
+        const char* maximum
     );
 
     String checkbox(

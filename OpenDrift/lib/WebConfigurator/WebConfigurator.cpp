@@ -154,7 +154,50 @@ void WebConfigurator::update()
         return;
     }
 
+    applyPendingCalibration();
+
     server.handleClient();
+}
+
+
+void WebConfigurator::applyPendingCalibration()
+{
+    if(
+        !calibrationPending ||
+        batterySense == nullptr ||
+        settings == nullptr
+    )
+    {
+        return;
+    }
+
+    if(
+        batterySense->getPin() == pendingCalibrationPin &&
+        batterySense->hasSample() &&
+        batterySense->getPinMillivolts() > 0
+    )
+    {
+        settings->setBatteryVoltageScale(
+            pendingCalibrationVolts * 1000.0f /
+            (float)batterySense->getPinMillivolts()
+        );
+
+        calibrationPending = false;
+        calibrationStatus = F("Calibrated: scale ");
+        calibrationStatus += String(settings->getBatteryVoltageScale(), 3);
+        calibrationStatus += F(" from ");
+        calibrationStatus += String(pendingCalibrationVolts, 2);
+        calibrationStatus += F(" V");
+
+        return;
+    }
+
+    if(millis() - pendingCalibrationSinceMs >= CALIBRATION_TIMEOUT_MS)
+    {
+        calibrationPending = false;
+        calibrationStatus = F("Calibration failed: no reading on GPIO ");
+        calibrationStatus += String(pendingCalibrationPin);
+    }
 }
 
 
@@ -390,6 +433,9 @@ void WebConfigurator::handleRoot()
         #endif
     }
     #endif
+    #if !defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='pill' style='border-color:#c9a227'>This board has no free ADC pin, so no sense pin can be selected and compensation cannot run here. The settings are kept for the profile.</div>");
+    #endif
     html += F("<div class='status'>");
     html += F("<div class='pill'>Pack: <strong id='batRaw'>--</strong> V raw &middot; <strong id='batFilt'>--</strong> V filtered</div>");
     html += F("<div class='pill'>Resting: <strong id='batRest'>--</strong> V &middot; applied <strong id='batComp'>--</strong>%</div>");
@@ -400,9 +446,9 @@ void WebConfigurator::handleRoot()
     html += F("<canvas id='batThrGraph' width='720' height='260' style='width:100%;height:auto;margin-top:10px;background:#0b0d10;border:1px solid #33383f;border-radius:6px'></canvas>");
     html += checkbox("Enable battery compensation", "batEnabled", settings->getBatteryCompEnabled());
     html += F("<div class='row'>");
-    html += input("Start voltage (V, max compensation)", "batStartV", String(settings->getBatteryCompStartVoltage(), 1), "number", "0.1");
-    html += input("End voltage (V, no compensation, the pack the car should feel like)", "batEndV", String(settings->getBatteryCompEndVoltage(), 1), "number", "0.1");
-    html += input("Strength (% of the physical amount, 100 = feels exactly like the end voltage)", "batStrength", String(settings->getBatteryCompStrength()), "number", "1");
+    html += inputRange("Start voltage (V, max compensation)", "batStartV", String(settings->getBatteryCompStartVoltage(), 1), "0.1", "7.0", "8.4");
+    html += inputRange("End voltage (V, no compensation, the pack the car should feel like)", "batEndV", String(settings->getBatteryCompEndVoltage(), 1), "0.1", "7.0", "8.4");
+    html += inputRange("Strength (% of the physical amount, 100 = feels exactly like the end voltage)", "batStrength", String(settings->getBatteryCompStrength()), "1", "0", "100");
     html += F("<div><label>Curve type</label><select name='batCurve'><option value='0'");
     if(settings->getBatteryCompCurve() == 0) html += F(" selected");
     html += F(">Linear - fades evenly to zero at full stick</option><option value='1'");
@@ -410,29 +456,29 @@ void WebConfigurator::handleRoot()
     html += F(">Expo - fades early, no slope change at full stick</option><option value='2'");
     if(settings->getBatteryCompCurve() == 2) html += F(" selected");
     html += F(">Custom - full compensation up to the knee, then fade</option></select></div>");
-    html += input("Custom knee (% throttle, Custom curve only)", "batKnee", String(settings->getBatteryCompKnee()), "number", "5");
+    html += inputRange("Custom knee (% throttle, Custom curve only)", "batKnee", String(settings->getBatteryCompKnee()), "1", "0", "90");
     html += F("<div><label>Voltage filter (resting estimate)</label><select name='batFilterMs'>");
     {
-        const int presets[] = {500, 1000, 2000, 5000, 10000};
-        const char* labels[] = {"0.5 s", "1 s", "2 s", "5 s", "10 s"};
-        for(int i = 0; i < 5; i++)
+        int selected = Settings::batteryFilterPresetIndex(settings->getBatteryCompFilterMs());
+        for(int i = 0; i < Settings::BATTERY_FILTER_PRESET_COUNT; i++)
         {
+            int preset = Settings::BATTERY_FILTER_PRESETS[i];
             html += F("<option value='");
-            html += String(presets[i]);
+            html += String(preset);
             html += F("'");
-            if(settings->getBatteryCompFilterMs() == presets[i]) html += F(" selected");
+            if(i == selected) html += F(" selected");
             html += F(">");
-            html += labels[i];
-            html += F("</option>");
+            html += String(preset / 1000.0f, preset % 1000 == 0 ? 0 : 1);
+            html += F(" s</option>");
         }
     }
     html += F("</select></div>");
-    html += input("Voltage drop rate (s)", "batDropS", String(settings->getBatteryCompDropMs() / 1000.0f, 1), "number", "0.5");
-    html += input("Voltage recovery rate (s)", "batRiseS", String(settings->getBatteryCompRecoveryMs() / 1000.0f, 1), "number", "1");
+    html += inputRange("Voltage drop rate (s)", "batDropS", String(settings->getBatteryCompDropMs() / 1000.0f, 1), "0.1", "0.5", "10");
+    html += inputRange("Voltage recovery rate (s)", "batRiseS", String(settings->getBatteryCompRecoveryMs() / 1000.0f, 1), "0.1", "1", "30");
     html += F("</div>");
     html += checkbox("Use resting voltage (sampled while the throttle is lifted) instead of the filtered voltage", "batResting", settings->getBatteryCompUseResting());
     html += F("<p class='sub'>Resting voltage ignores the sag of a short throttle burst, so the feel stays constant through a corner. The filtered voltage follows the drop and recovery rates and is always shown and logged.</p>");
-    html += F("<h2>Battery Sense Hardware</h2><p class='sub'>Global settings. Pack + through a 47k/15k divider with 100 nF at the pin; see Hardware.md. Anything above 9.2 V is rejected, so a 3S pack disables compensation.</p><div class='row'>");
+    html += F("<h2>Battery Sense Hardware</h2><p class='sub'>Global settings. Pack + through a 47k/15k divider with 100 nF at the pin; see Hardware.md. Readings above 9.2 V are rejected as a wrong pack, so a 3S pack disables compensation.</p><div class='row'>");
     html += F("<div><label>Sense pin</label><select name='batPin'><option value='0'");
     if(settings->getBatterySensePin() == 0) html += F(" selected");
     html += F(">Off</option>");
@@ -448,8 +494,8 @@ void WebConfigurator::handleRoot()
         html += F("</option>");
     }
     html += F("</select></div>");
-    html += input("Voltage scale (pack volts per volt at the pin)", "batScale", String(settings->getBatteryVoltageScale(), 3), "number", "0.001");
-    html += input("Measured pack voltage (type the multimeter reading to calibrate the scale)", "batMeasured", "", "number", "0.01");
+    html += inputRange("Voltage scale (pack volts per volt at the pin)", "batScale", String(settings->getBatteryVoltageScale(), 3), "0.001", "1", "10");
+    html += input("Measured pack voltage (type the multimeter reading to calibrate the scale; applied once the selected pin has a reading)", "batMeasured", "", "number", "0.01");
     html += F("<div><label>Pin reading</label><div class='pill'>");
     if(batterySense != nullptr && batterySense->hasSample())
     {
@@ -460,6 +506,9 @@ void WebConfigurator::handleRoot()
     {
         html += F("no sample");
     }
+    html += F("</div></div>");
+    html += F("<div><label>Calibration</label><div class='pill' id='batCal'>");
+    html += calibrationStatus.length() > 0 ? calibrationStatus : String(F("no calibration requested"));
     html += F("</div></div></div>");
     html += checkbox("Throttle reversed (forward is below 1500 us on this radio/ESC)", "batThrRev", settings->getBatteryThrottleReversed());
     html += F("</div>");
@@ -610,7 +659,7 @@ void WebConfigurator::handleLiveStatus()
     #endif
 
     String json;
-    json.reserve(224);
+    json.reserve(320);
     json += F("{\"gain\":");
     json += String(gyro->getGain(), 2);
     json += F(",\"pulse\":");
@@ -636,6 +685,11 @@ void WebConfigurator::handleLiveStatus()
         json += batteryComp->getConfig().throttleReversed ? F("true") : F("false");
         json += F(",\"binit\":");
         json += batteryComp->isInitialised() ? F("true") : F("false");
+        json += F(",\"bneut\":");
+        json += String(batteryComp->getNeutralUs());
+        json += F(",\"bcal\":\"");
+        json += calibrationStatus;
+        json += F("\"");
     }
 
     json += F("}");
@@ -659,16 +713,19 @@ namespace
     // BatteryCompensation::shapeWeight() and apply() for the live preview.
     const char BATTERY_SCRIPT[] PROGMEM = R"JS((function(){
 var q=function(n){return document.querySelector("[name='"+n+"']");};
-var live={vraw:0,vfilt:0,vrest:0,comp:0,stat:'',en:false,rev:false,init:false,seen:false};
-function num(el,d){var v=parseFloat(el?el.value:'');return isNaN(v)?d:v;}
-function cfg(){var c=q('batCurve');return{sv:num(q('batStartV'),8.4),ev:num(q('batEndV'),7.4),str:num(q('batStrength'),100),curve:c?parseInt(c.value,10)||0:0,knee:num(q('batKnee'),50),rest:!!(q('batResting')&&q('batResting').checked),en:!!(q('batEnabled')&&q('batEnabled').checked)};}
+var live={vraw:0,vfilt:0,vrest:0,comp:0,stat:'',en:false,rev:false,init:false,neut:1500,seen:false};
+function num(el,d,lo,hi){var v=parseFloat(el?el.value:'');if(!isFinite(v))return d;return Math.max(lo,Math.min(hi,v));}
+function cfg(){var c=q('batCurve');return{sv:num(q('batStartV'),8.4,7,8.4),ev:num(q('batEndV'),7.4,7,8.4),str:num(q('batStrength'),100,0,100),curve:c?parseInt(c.value,10)||0:0,knee:num(q('batKnee'),50,0,90),rest:!!(q('batResting')&&q('batResting').checked),en:!!(q('batEnabled')&&q('batEnabled').checked)};}
 function weight(t,curve,knee){var k=curve===2?Math.min(90,Math.max(0,knee))/100:0;var u=(1-t)/(1-k);u=Math.max(0,Math.min(1,u));return curve===1?u*u:u;}
 function compAt(c,v){var span=c.sv-c.ev;if(span<0.199)return 0;var x=Math.max(0,Math.min(1,(v-c.ev)/span));return (c.str/100)*(1-c.ev/c.sv)*x;}
-function outUs(c,v,inUs){var fwd=inUs-1500;if(fwd<=0)return inUs;var t=fwd/500;return 1500+Math.round(500*t*(1-compAt(c,v)*weight(t,c.curve,c.knee)));}
+function outFrac(c,v,t){return t*(1-compAt(c,v)*weight(t,c.curve,c.knee));}
+function fwdOf(inUs){return live.rev?live.neut-inUs:inUs-live.neut;}
+function spanUs(){return live.rev?live.neut-1000:2000-live.neut;}
+function outUs(c,v,inUs){var fwd=fwdOf(inUs),span=spanUs();if(fwd<=0||span<=0)return inUs;var o=Math.round(fwd*(1-compAt(c,v)*weight(fwd/span,c.curve,c.knee)));return live.rev?live.neut-o:live.neut+o;}
 function sourceVolts(c){if(!live.seen||!live.init)return null;return c.rest?live.vrest:live.vfilt;}
 function frame(ctx,W,H,pad,title){ctx.clearRect(0,0,W,H);ctx.fillStyle='#0b0d10';ctx.fillRect(0,0,W,H);ctx.strokeStyle='#3b4148';ctx.lineWidth=1;ctx.strokeRect(pad.l,pad.t,W-pad.l-pad.r,H-pad.t-pad.b);ctx.fillStyle='#c8cdd2';ctx.font='14px system-ui,Arial,sans-serif';ctx.fillText(title,pad.l,pad.t-8);}
 function label(ctx,text,x,y,align){ctx.fillStyle='#aeb4bb';ctx.font='12px system-ui,Arial,sans-serif';ctx.textAlign=align||'left';ctx.fillText(text,x,y);ctx.textAlign='left';}
-function drawVolt(){var cv=document.getElementById('batVoltGraph');if(!cv)return;var ctx=cv.getContext('2d');var W=cv.width,H=cv.height,pad={l:52,r:16,t:28,b:34};var c=cfg();var vmin=6.9,vmax=8.5;var cmax=Math.max(5,compAt(c,c.sv)*100*1.15);
+function drawVolt(){var cv=document.getElementById('batVoltGraph');if(!cv)return;var ctx=cv.getContext('2d');var W=cv.width,H=cv.height,pad={l:52,r:16,t:28,b:34};var c=cfg();var vmin=6.9,vmax=8.5;var cmax=Math.min(200,Math.max(5,compAt(c,c.sv)*100*1.15));
 frame(ctx,W,H,pad,'Compensation at low throttle vs pack voltage');
 var gx=function(v){return pad.l+(v-vmin)/(vmax-vmin)*(W-pad.l-pad.r);},gy=function(p){return H-pad.b-p/cmax*(H-pad.t-pad.b);};
 for(var v=7.0;v<=8.4001;v+=0.2){ctx.strokeStyle='#1f2429';ctx.beginPath();ctx.moveTo(gx(v),pad.t);ctx.lineTo(gx(v),H-pad.b);ctx.stroke();label(ctx,v.toFixed(1)+' V',gx(v),H-pad.b+16,'center');}
@@ -678,22 +735,22 @@ ctx.strokeStyle='#65b7ff';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(gx(c
 var sv=sourceVolts(c);if(sv!==null){var x=gx(Math.max(vmin,Math.min(vmax,sv)));ctx.strokeStyle='#d24fd1';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,H-pad.b);ctx.stroke();ctx.lineWidth=1;ctx.fillStyle='#d24fd1';ctx.beginPath();ctx.arc(x,gy(compAt(c,sv)*100),5,0,6.283);ctx.fill();label(ctx,'now '+sv.toFixed(2)+' V, '+(compAt(c,sv)*100).toFixed(1)+'%',x+8,gy(compAt(c,sv)*100)-8);}
 }
 function drawThr(){var cv=document.getElementById('batThrGraph');if(!cv)return;var ctx=cv.getContext('2d');var W=cv.width,H=cv.height,pad={l:52,r:16,t:28,b:34};var c=cfg();var sv=sourceVolts(c);var v=sv===null?c.sv:sv;
-frame(ctx,W,H,pad,'Throttle in vs ESC out at '+(sv===null?'start voltage '+c.sv.toFixed(1)+' V (no live reading)':v.toFixed(2)+' V live'));
+frame(ctx,W,H,pad,'Forward throttle in vs ESC out at '+(sv===null?'start voltage '+c.sv.toFixed(1)+' V (no live reading)':v.toFixed(2)+' V live'));
 var gx=function(p){return pad.l+p/100*(W-pad.l-pad.r);},gy=function(p){return H-pad.b-p/100*(H-pad.t-pad.b);};
 for(var p=0;p<=100;p+=25){ctx.strokeStyle='#1f2429';ctx.beginPath();ctx.moveTo(gx(p),pad.t);ctx.lineTo(gx(p),H-pad.b);ctx.moveTo(pad.l,gy(p));ctx.lineTo(W-pad.r,gy(p));ctx.stroke();label(ctx,p+'%',gx(p),H-pad.b+16,'center');label(ctx,p+'%',pad.l-6,gy(p)+4,'right');}
-label(ctx,'stick',W-pad.r,H-pad.b+30,'right');
+label(ctx,'forward stick'+(live.rev?' (reversed channel)':''),W-pad.r,H-pad.b+30,'right');
 ctx.strokeStyle='#5c6570';ctx.setLineDash([5,5]);ctx.beginPath();ctx.moveTo(gx(0),gy(0));ctx.lineTo(gx(100),gy(100));ctx.stroke();ctx.setLineDash([]);
-var plot=function(volts,color,width){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();for(var i=0;i<=100;i++){var inUs=1500+i*5;var o=(outUs(c,volts,inUs)-1500)/5;if(i===0)ctx.moveTo(gx(i),gy(o));else ctx.lineTo(gx(i),gy(o));}ctx.stroke();ctx.lineWidth=1;};
+var plot=function(volts,color,width){ctx.strokeStyle=color;ctx.lineWidth=width;ctx.beginPath();for(var i=0;i<=100;i++){var o=outFrac(c,volts,i/100)*100;if(i===0)ctx.moveTo(gx(i),gy(o));else ctx.lineTo(gx(i),gy(o));}ctx.stroke();ctx.lineWidth=1;};
 if(sv!==null&&Math.abs(sv-c.sv)>0.02){plot(c.sv,'#2c5a44',1.5);}
 plot(v,c.en?'#24a36b':'#5c6570',2.5);
-[25,50,75].forEach(function(p){var o=(outUs(c,v,1500+p*5)-1500)/5;ctx.fillStyle='#d24fd1';ctx.beginPath();ctx.arc(gx(p),gy(o),4,0,6.283);ctx.fill();label(ctx,p+'% -> '+o.toFixed(0)+'%',gx(p)+8,gy(o)+14);});
+[25,50,75].forEach(function(p){var o=outFrac(c,v,p/100)*100;ctx.fillStyle='#d24fd1';ctx.beginPath();ctx.arc(gx(p),gy(o),4,0,6.283);ctx.fill();label(ctx,p+'% -> '+o.toFixed(0)+'%',gx(p)+8,gy(o)+14);});
 }
 function redraw(){drawVolt();drawThr();}
 window.batteryOut=function(v,inUs){return outUs(cfg(),v,inUs);};
 function text(id,t){var el=document.getElementById(id);if(el)el.textContent=t;}
-window.batteryLive=function(s){if(s.bstat===undefined)return;live.seen=true;live.vraw=Number(s.vraw);live.vfilt=Number(s.vfilt);live.vrest=Number(s.vrest);live.comp=Number(s.comp);live.stat=s.bstat;live.en=!!s.ben;live.rev=!!s.brev;live.init=!!s.binit;
+window.batteryLive=function(s){if(s.bstat===undefined)return;live.seen=true;live.vraw=Number(s.vraw);live.vfilt=Number(s.vfilt);live.vrest=Number(s.vrest);live.comp=Number(s.comp);live.stat=s.bstat;live.en=!!s.ben;live.rev=!!s.brev;live.init=!!s.binit;live.neut=Number(s.bneut)||1500;
 text('batRaw',live.init||live.stat==='OUT OF RANGE'?live.vraw.toFixed(2):'--');text('batFilt',live.init?live.vfilt.toFixed(2):'--');text('batRest',live.init?live.vrest.toFixed(2):'--');text('batComp',live.comp.toFixed(1));
-text('batStatus',live.stat!=='OK'?live.stat:(live.en?'ACTIVE':'DISABLED IN PROFILE'));text('batFwd',live.rev?'below 1500 us (reversed)':'above 1500 us');redraw();};
+text('batStatus',live.stat!=='OK'?live.stat:(live.en?'ACTIVE':'DISABLED IN PROFILE'));text('batFwd',(live.rev?'below ':'above ')+live.neut+' us'+(live.rev?' (reversed)':'')+' (learned neutral)');if(s.bcal!==undefined)text('batCal',s.bcal||'no calibration requested');redraw();};
 ['batStartV','batEndV','batStrength','batCurve','batKnee','batResting','batEnabled'].forEach(function(n){var el=q(n);if(el){el.addEventListener('input',redraw);el.addEventListener('change',redraw);}});
 redraw();
 })();)JS";
@@ -1009,21 +1066,38 @@ void WebConfigurator::handleSave()
     );
 
     // Calibration: a typed multimeter reading rescales the divider so the
-    // live voltage matches it. Ignored when empty or without a sample.
-    if(
-        server.hasArg("batMeasured") &&
-        batterySense != nullptr &&
-        batterySense->hasSample() &&
-        batterySense->getPinMillivolts() > 0
-    )
+    // live voltage matches it. The pin saved above is configured by loop()
+    // after this request, so the request is applied from update() once
+    // that pin has a reading.
+    if(server.hasArg("batMeasured"))
     {
-        float measured = server.arg("batMeasured").toFloat();
+        String typed = server.arg("batMeasured");
+        typed.trim();
 
-        if(measured >= 5.0f && measured <= 9.5f)
+        if(typed.length() > 0)
         {
-            settings->setBatteryVoltageScale(
-                measured * 1000.0f / (float)batterySense->getPinMillivolts()
-            );
+            float measured = typed.toFloat();
+            uint8_t pin = settings->getBatterySensePin();
+
+            if(pin == 0)
+            {
+                calibrationPending = false;
+                calibrationStatus = F("Calibration ignored: sense pin is Off");
+            }
+            else if(measured < 5.0f || measured > 9.5f)
+            {
+                calibrationPending = false;
+                calibrationStatus = F("Calibration ignored: enter the pack voltage in volts (5.0-9.5)");
+            }
+            else
+            {
+                calibrationPending = true;
+                pendingCalibrationVolts = measured;
+                pendingCalibrationPin = pin;
+                pendingCalibrationSinceMs = millis();
+                calibrationStatus = F("Calibrating: waiting for a reading on GPIO ");
+                calibrationStatus += String(pin);
+            }
         }
     }
 
@@ -1402,6 +1476,36 @@ String WebConfigurator::input(
 
 
 
+String WebConfigurator::inputRange(
+    const char* label,
+    const char* name,
+    String value,
+    const char* step,
+    const char* minimum,
+    const char* maximum
+)
+{
+    String html;
+
+    html += F("<div><label>");
+    html += label;
+    html += F("</label><input name='");
+    html += name;
+    html += F("' type='number' required step='");
+    html += step;
+    html += F("' min='");
+    html += minimum;
+    html += F("' max='");
+    html += maximum;
+    html += F("' value='");
+    html += value;
+    html += F("'></div>");
+
+    return html;
+}
+
+
+
 String WebConfigurator::checkbox(
     const char* label,
     const char* name,
@@ -1428,6 +1532,8 @@ String WebConfigurator::checkbox(
 
 
 
+// A field that is present but empty keeps the current value instead of
+// becoming zero.
 int WebConfigurator::getIntArg(
     const char* name,
     int fallback
@@ -1438,7 +1544,15 @@ int WebConfigurator::getIntArg(
         return fallback;
     }
 
-    return server.arg(name).toInt();
+    String value = server.arg(name);
+    value.trim();
+
+    if(value.length() == 0)
+    {
+        return fallback;
+    }
+
+    return value.toInt();
 }
 
 
@@ -1453,5 +1567,13 @@ float WebConfigurator::getFloatArg(
         return fallback;
     }
 
-    return server.arg(name).toFloat();
+    String value = server.arg(name);
+    value.trim();
+
+    if(value.length() == 0)
+    {
+        return fallback;
+    }
+
+    return value.toFloat();
 }
