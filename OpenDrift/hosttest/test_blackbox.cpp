@@ -1,6 +1,7 @@
 // Logs one record through the real BlackboxLogger and checks the CSV row:
-// column count matches the header, the battery fields land at the end, and
-// the row fits the download buffer with margin.
+// column count matches the header, the battery fields land at the end, the
+// widest possible row fits the download buffer, and a row that does not fit
+// a smaller buffer still ends with a newline.
 #include "BlackboxLogger.h"
 
 #include <cstdio>
@@ -47,25 +48,30 @@ int main()
     CHECK(blackbox.begin(), "begin failed");
     CHECK(blackbox.isReady(), "not ready");
 
-    // Large-magnitude values so the row length is a pessimistic estimate.
+    // Every integer at INT32_MIN and every float at a five-digit magnitude
+    // (far beyond any real rate, angle, pulse or percentage in the log):
+    // the widest plausible row. A wider one is cut by the newline guard.
+    const int32_t I = -2147483647 - 1;
+    const float B = -99999.5f;
+
     blackbox.log(
         4294967295UL,
-        -123.456f, -123.456f, -123.456f, -123.456f,
-        -12.3456f, -12.3456f, -12.3456f, 12.3456f, 12.3456f,
-        -123.456f, 1.0f,
-        -1000, -1000, -1000, true,
-        2200, 2200, 2200, 50, 2200, 2200,
-        6.00f, 200.00f, 100, 1.000f, 2,
-        20.000f, 500, -500,
-        100, 100, 100,
-        -123.456f, -123.456f, -123.456f, 1.000f, 1.000f, -1234.567f,
-        -1000,
-        -1234.567f, 1.000f, 1.000f, -12345.678f,
-        3, 1.000f, 1.000f,
+        B, B, B, B,
+        B, B, B, B, B,
+        B, B,
+        I, I, I, true,
+        I, I, I, I, I, I,
+        B, B, I, B, I,
+        B, I, I,
+        I, I, I,
+        B, B, B, B, B, B,
+        I,
+        B, B, B, B,
+        I, B, B,
         true, true, true, true,
-        100, -1.000f, 1.000f, 3.600f, 1.000f, 1.000f, 1.000f, -123.456f, -1234.567f,
-        99, 1.000f, 100, 123.456f, 3.600f,
-        8.201f, 8.150f, 8.180f, 4.3f, 1737
+        I, B, B, B, B, B, B, B, B,
+        I, B, I, B, B,
+        B, B, B, B, I
     );
 
     CHECK(blackbox.getRecordCount() == 1, "record count %zu", blackbox.getRecordCount());
@@ -77,13 +83,20 @@ int main()
     char line[800];
     size_t length = blackbox.formatCsvRecord(0, line, sizeof(line));
 
-    CHECK(length > 0 && length < sizeof(line) - 1, "row length %zu", length);
-    CHECK(line[length - 1] == '\n', "row lacks newline");
+    CHECK(length > 0 && length < sizeof(line) - 1, "widest row does not fit the 800-byte download buffer: %zu", length);
+    CHECK(line[length - 1] == '\n' && line[length] == '\0', "row lacks newline");
     CHECK(countColumns(line) == headerColumns, "row columns %d vs header %d", countColumns(line), headerColumns);
 
     std::string row(line);
-    const char* tail = ",8.201,8.150,8.180,4.3,1737\n";
+    const char* tail = ",-99999.500,-99999.500,-99999.500,-99999.5,-2147483648\n";
     CHECK(row.size() >= std::strlen(tail) && row.compare(row.size() - std::strlen(tail), std::strlen(tail), tail) == 0, "battery columns missing from row tail: %s", row.c_str() + (row.size() > 80 ? row.size() - 80 : 0));
+
+    // A buffer too small for the row: truncated, but still one line.
+    char small[100];
+    size_t smallLength = blackbox.formatCsvRecord(0, small, sizeof(small));
+    CHECK(smallLength == sizeof(small) - 1, "truncated length %zu", smallLength);
+    CHECK(small[smallLength - 1] == '\n' && small[smallLength] == '\0', "truncated row lost its newline");
+    CHECK(std::strncmp(small, line, smallLength - 1) == 0, "truncated row differs from the full row");
 
     std::string header(blackbox.getCsvHeader());
     const char* headerTail = ",battery_raw_v,battery_filtered_v,battery_resting_v,battery_comp_pct,throttle_out_us";

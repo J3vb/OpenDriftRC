@@ -388,10 +388,16 @@ size_t BlackboxLogger::formatCsvRecord(
         return 0;
     }
 
-    return min(
-        (size_t)formatted,
-        outputSize - 1
-    );
+    if((size_t)formatted >= outputSize)
+    {
+        // A row that did not fit still ends its line so it cannot merge
+        // with the next one in the download.
+        output[outputSize - 2] = '\n';
+        output[outputSize - 1] = '\0';
+        return outputSize - 1;
+    }
+
+    return (size_t)formatted;
 }
 
 
