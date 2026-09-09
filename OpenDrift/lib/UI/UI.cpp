@@ -195,20 +195,19 @@ static void adjustBatteryRow(
 
         case BATTERY_ROW_FILTER:
         {
-            const int presets[] = {500, 1000, 2000, 5000, 10000};
-            int current = settings.getBatteryCompFilterMs();
-            int index = 2;
+            int index = Settings::batteryFilterPresetIndex(
+                settings.getBatteryCompFilterMs()
+            );
 
-            for(int i = 0; i < 5; i++)
-            {
-                if(presets[i] == current)
-                {
-                    index = i;
-                }
-            }
+            index = constrain(
+                index + step,
+                0,
+                Settings::BATTERY_FILTER_PRESET_COUNT - 1
+            );
 
-            index = constrain(index + step, 0, 4);
-            settings.setBatteryCompFilterMs(presets[index]);
+            settings.setBatteryCompFilterMs(
+                Settings::BATTERY_FILTER_PRESETS[index]
+            );
             break;
         }
 
@@ -2879,6 +2878,11 @@ void UI::drawBatteryPage(
     lcd->setTextColor(TFT_MAGENTA);
     lcd->drawCenterString("Battery", 120, 14);
 
+    // The round board has no free ADC pin, so sensing never runs here.
+    lcd->setTextSize(1);
+    lcd->setTextColor(TFT_RED);
+    lcd->drawCenterString("NO ADC PIN ON THIS BOARD", 120, 39);
+
     for(uint8_t slot = 0; slot < BATTERY_VISIBLE_ROWS; slot++)
     {
         uint8_t index =
@@ -2889,13 +2893,43 @@ void UI::drawBatteryPage(
             break;
         }
 
-        drawRoundAdjustRow(
-            lcd,
-            batteryRowLabel(rows[index]),
-            batteryRowValue(rows[index], settings),
-            slot,
-            TFT_MAGENTA
-        );
+        uint8_t row = rows[index];
+
+        if(row == BATTERY_ROW_ENABLED)
+        {
+            // One wide toggle, the same strip the tap handler tests.
+            bool enabled =
+                settings.getBatteryCompEnabled();
+
+            int buttonY =
+                BATTERY_ROW_Y + (slot * BATTERY_ROW_PITCH);
+
+            lcd->setTextSize(1);
+            lcd->setTextColor(0xBDF7);
+            lcd->drawCenterString(batteryRowLabel(row), 120, buttonY - 14);
+
+            lcd->drawRect(
+                26,
+                buttonY,
+                188,
+                30,
+                enabled ? TFT_GREEN : TFT_MAGENTA
+            );
+
+            lcd->setTextSize(2);
+            lcd->setTextColor(TFT_WHITE);
+            lcd->drawCenterString(enabled ? "ON" : "OFF", 120, buttonY + 7);
+        }
+        else
+        {
+            drawRoundAdjustRow(
+                lcd,
+                batteryRowLabel(row),
+                batteryRowValue(row, settings),
+                slot,
+                TFT_MAGENTA
+            );
+        }
     }
     #endif
 
@@ -5406,7 +5440,7 @@ void UI::drawFixedPageDots()
         return;
     }
 
-    const int spacing = 14;
+    const int spacing = 12;
 
     int startX =
         (UI_CANVAS_WIDTH / 2) -
