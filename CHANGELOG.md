@@ -32,6 +32,18 @@
 - Adds a host-side test suite under `OpenDrift/hosttest` (plain `g++` and `make`)
   covering the compensation maths, profile migration, battery sensing, and the
   blackbox record layout.
+- Review fixes: the throttle neutral is learned from the radio (1400-1600 us held
+  still for 1 s), so trim and subtrim neither freeze the resting-voltage estimate nor
+  count as forward throttle, and an estimate with no lift for 60 s follows the
+  filtered voltage. A settings change that makes the voltage span invalid, a sensor
+  or calibration change, and a lost link all fade instead of stepping. The web
+  calibration is applied once the selected pin has a reading and reports its result;
+  the preview mirrors reversed channels and the learned neutral, keeps emptied fields
+  at their saved value, carries the firmware ranges on its inputs, and cannot be hung
+  by pasted input. The blackbox logs 0 % while no ESC output is active and keeps a
+  CSV row that does not fit its buffer on its own line. Sense-pin and curve values
+  from the web are clamped as integers, and selecting a sense pin clears its aux
+  channel so the divider pin never resumes as an accessory output.
 
 ## v1.0.8 - 2026-09-03
 

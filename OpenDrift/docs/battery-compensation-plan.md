@@ -308,8 +308,9 @@ divided down before it reaches an ADC pin.
 
 **Pin: GPIO 8** (ADC1 channel 7). Free on V2 in both PWM and CRSF builds, WiFi-safe (ADC1),
 not a strapping pin, and on the daughter-board header at J6 pin 5 (the header row runs
-GPIO 18, 17, 16, 15, 8, 7, 6, 5, 3, 2, 1 from pin 1). GPIO 5–7 stay for aux outputs. The
-firmware default remains Off; select GPIO 8 in the web configurator after fitting the divider.
+GPIO 18, 17, 16, 15, 8, 7, 6, 5, 3, 2, 1 from pin 1). GPIO 8 is recommended so GPIO 5–7 stay
+free for accessories; any of GPIO 5–8 can be selected. The firmware default remains Off;
+select GPIO 8 in the web configurator after fitting the divider.
 
 **Circuit** (three parts, all JLCPCB basic parts):
 

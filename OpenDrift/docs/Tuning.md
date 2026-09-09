@@ -132,12 +132,17 @@ selected curve:
   then fades to zero.
 
 Compensation is driven by the resting voltage by default: the pack voltage is only
-sampled into the estimate after the throttle has been within 50 us of neutral for
-0.25 s, so the sag of a throttle burst cannot change the feel mid-corner. The
-`Voltage Filter` preset is that estimate's time constant. `Drop Rate` and `Recovery
-Rate` shape the always-visible filtered voltage, which becomes the source when the
-resting toggle is off. Any fault (no sensor, no sample, reading outside 5.5-9.2 V, or
-End Voltage within 0.2 V of Start Voltage) fades compensation out over one second.
+sampled into the estimate after the throttle has been within 50 us of the learned
+neutral for 0.25 s, so the sag of a throttle burst cannot change the feel mid-corner.
+The neutral is learned from the radio (a pulse between 1400 and 1600 us that holds
+still for 1 s, or 5 s once a neutral is known), so throttle trim and subtrim do not
+matter; forward throttle is measured from it and a lost link counts as a lift. If no
+lift is seen for 60 s the estimate follows the filtered voltage instead of staying
+frozen. The `Voltage Filter` preset is that estimate's time constant. `Drop Rate` and
+`Recovery Rate` shape the always-visible filtered voltage, which becomes the source
+when the resting toggle is off. Any fault (no sensor, no sample, reading outside
+5.5-9.2 V, or End Voltage within 0.2 V of Start Voltage) and any sensor or
+calibration change fade compensation out over one second.
 
 First test:
 

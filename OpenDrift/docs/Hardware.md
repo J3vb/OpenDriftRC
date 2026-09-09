@@ -141,9 +141,12 @@ Next daughter-board revision: a 2-pin JST-PH VBAT input (pack +, GND), R1, R2, C
 optional BAT54S on the board, traced to the GPIO 8 header pin.
 
 Calibration, once: power the car, read the pack with a multimeter at the balance plug, type
-the value into "Measured pack voltage" on the web configurator and save. The live readout
-should then match the meter within about 0.05 V at rest.
+the value into "Measured pack voltage" on the web configurator and save. The scale is
+applied as soon as the selected pin has a reading (the sense pin can be selected in the same
+save) and the Calibration pill on the card confirms it. The live readout should then match
+the meter within about 0.05 V at rest.
 
-The compensation only acts when the ESC is driven by OpenDrift: always on CRSF builds
-(GPIO 16), and on PWM builds only with GPIO 18 (V1) or GPIO 2 (V2) in THROTTLE OUT mode with
-the ESC plugged into that output.
+The compensation only acts when the ESC is driven by OpenDrift: on CRSF builds (GPIO 16, or
+GPIO 15 on the `waveshare_amoled_164_crsf_oops_swapped` recovery build), and on PWM builds
+only with GPIO 18 (V1) or GPIO 2 (V2) in THROTTLE OUT mode with the ESC plugged into that
+output.
