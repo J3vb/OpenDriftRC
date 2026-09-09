@@ -276,7 +276,13 @@ namespace
         for(const char* key : keys)
         {
             CHECK(store.count(key) == 1, "key %s not saved", key);
-            CHECK(std::strlen(key) <= 15, "key %s longer than NVS allows", key);
+        }
+
+        // NVS rejects keys longer than 15 characters: check what save() wrote.
+        CHECK(store.size() > 50, "store holds only %zu keys", store.size());
+        for(const auto& entry : store)
+        {
+            CHECK(entry.first.size() <= 15, "saved key %s longer than NVS allows", entry.first.c_str());
         }
 
         Settings reloaded;
@@ -348,8 +354,30 @@ namespace
         CHECK(settings.getBatterySensePin() == 0, "disallowed pin accepted");
         settings.setBatterySensePin(5);
         CHECK(settings.getBatterySensePin() == 5, "GPIO 5 rejected");
+        settings.setBatterySensePin(261);
+        CHECK(settings.getBatterySensePin() == 0, "pin 261 wrapped to %d", settings.getBatterySensePin());
+        settings.setBatterySensePin(-3);
+        CHECK(settings.getBatterySensePin() == 0, "negative pin accepted: %d", settings.getBatterySensePin());
         settings.setBatteryCompCurve(9);
         CHECK(settings.getBatteryCompCurve() == 2, "curve setter clamp");
+        settings.setBatteryCompCurve(-1);
+        CHECK(settings.getBatteryCompCurve() == 0, "curve -1 wrapped to %d", settings.getBatteryCompCurve());
+
+        settings.setBatterySensePin(0);
+        settings.setAuxChannelForGpio(8, 5);
+        CHECK(settings.getAuxChannelForGpio(8) == 5, "aux channel on a free pin");
+        settings.setBatterySensePin(8);
+        CHECK(settings.getAuxChannelForGpio(8) == 0, "sense pin kept its aux channel: %d", settings.getAuxChannelForGpio(8));
+        settings.setAuxChannelForGpio(8, 3);
+        CHECK(settings.getAuxChannelForGpio(8) == 0, "sense pin accepted an aux channel: %d", settings.getAuxChannelForGpio(8));
+        settings.setAuxChannelForGpio(7, 3);
+        CHECK(settings.getAuxChannelForGpio(7) == 3, "other pin refused an aux channel");
+        settings.setBatterySensePin(0);
+        settings.setAuxChannelForGpio(8, 3);
+        CHECK(settings.getAuxChannelForGpio(8) == 3, "released pin refused an aux channel");
+
+        CHECK(Settings::batteryFilterPresetIndex(4000) == 3 && Settings::batteryFilterPresetIndex(0) == 0 && Settings::batteryFilterPresetIndex(99999) == 4 && Settings::batteryFilterPresetIndex(1499) == 1, "preset index");
+        CHECK(Settings::BATTERY_FILTER_PRESETS[2] == 2000 && Settings::BATTERY_FILTER_PRESET_COUNT == 5, "preset table");
         settings.setBatteryCompStartVoltage(1.0f);
         CHECK(settings.getBatteryCompStartVoltage() == 7.0f, "start setter clamp");
         settings.setBatteryVoltageScale(0.0f);
@@ -358,6 +386,7 @@ namespace
         CHECK(Settings::isBatterySensePinAllowed(0), "pin 0");
         CHECK(Settings::isBatterySensePinAllowed(5) && Settings::isBatterySensePinAllowed(8), "pins 5 and 8");
         CHECK(!Settings::isBatterySensePinAllowed(4) && !Settings::isBatterySensePinAllowed(9) && !Settings::isBatterySensePinAllowed(18), "pins 4, 9, 18");
+        CHECK(!Settings::isBatterySensePinAllowed(-1) && !Settings::isBatterySensePinAllowed(261), "pins -1, 261");
     }
 }
 

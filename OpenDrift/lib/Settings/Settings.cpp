@@ -14,24 +14,6 @@ namespace
         return constrain((value + 1) / 2, 0, 100);
     }
 
-    struct DrivingProfileV8
-    {
-        uint32_t version;
-        char name[Settings::PROFILE_NAME_LENGTH];
-        float gain;
-        float deadband;
-        float gyroSmoothing;
-        float gyroIntegralGain;
-        int32_t gyroMaxCorrection;
-        int32_t gyroIntegralLimit;
-        int32_t gyroHoldBoost;
-        int32_t predictionStrength;
-        int32_t radioSteeringTravel;
-        int32_t gyroCounterSteerAssist;
-        int32_t gyroTransitionSpeed;
-        int32_t gyroHuntStrength;
-    };
-
     struct DrivingProfileV1
     {
         uint32_t version;
@@ -210,18 +192,7 @@ namespace
 
     int snapBatteryFilterMs(int value)
     {
-        const int presets[] = {500, 1000, 2000, 5000, 10000};
-        int best = presets[0];
-
-        for(int preset : presets)
-        {
-            if(abs(preset - value) < abs(best - value))
-            {
-                best = preset;
-            }
-        }
-
-        return best;
+        return Settings::BATTERY_FILTER_PRESETS[Settings::batteryFilterPresetIndex(value)];
     }
 }
 
@@ -1016,9 +987,9 @@ uint8_t Settings::getBatteryCompCurve()
     return batteryCompCurve;
 }
 
-void Settings::setBatteryCompCurve(uint8_t value)
+void Settings::setBatteryCompCurve(int value)
 {
-    batteryCompCurve = value > 2 ? 2 : value;
+    batteryCompCurve = (uint8_t)constrain(value, 0, 2);
     dirty = true;
 }
 
@@ -1031,6 +1002,24 @@ void Settings::setBatteryCompKnee(int value)
 {
     batteryCompKnee = constrain(value, 0, 90);
     dirty = true;
+}
+
+const int Settings::BATTERY_FILTER_PRESETS[Settings::BATTERY_FILTER_PRESET_COUNT] =
+    {500, 1000, 2000, 5000, 10000};
+
+int Settings::batteryFilterPresetIndex(int ms)
+{
+    int best = 0;
+
+    for(int i = 1; i < BATTERY_FILTER_PRESET_COUNT; i++)
+    {
+        if(abs(BATTERY_FILTER_PRESETS[i] - ms) < abs(BATTERY_FILTER_PRESETS[best] - ms))
+        {
+            best = i;
+        }
+    }
+
+    return best;
 }
 
 int Settings::getBatteryCompFilterMs()
@@ -1082,13 +1071,21 @@ uint8_t Settings::getBatterySensePin()
     return batterySensePin;
 }
 
-void Settings::setBatterySensePin(uint8_t gpio)
+void Settings::setBatterySensePin(int gpio)
 {
-    batterySensePin = isBatterySensePinAllowed(gpio) ? gpio : 0;
+    batterySensePin = isBatterySensePinAllowed(gpio) ? (uint8_t)gpio : 0;
+
+    // The divider pin must not resume as an accessory output when sensing
+    // is switched off again.
+    if(batterySensePin != 0)
+    {
+        auxChannels[batterySensePin - 1] = 0;
+    }
+
     dirty = true;
 }
 
-bool Settings::isBatterySensePinAllowed(uint8_t gpio)
+bool Settings::isBatterySensePinAllowed(int gpio)
 {
     if(gpio == 0)
     {
@@ -1541,11 +1538,14 @@ void Settings::setAuxChannelForGpio(
         return;
     }
 
-    auxChannels[gpio - 1] = constrain(
-        channel,
-        (uint8_t)0,
-        (uint8_t)16
-    );
+    auxChannels[gpio - 1] =
+        gpio == batterySensePin
+        ? 0
+        : constrain(
+            channel,
+            (uint8_t)0,
+            (uint8_t)16
+        );
 
     dirty = true;
 }
@@ -1866,35 +1866,6 @@ void Settings::loadProfiles()
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
                 profile.gyroHuntStrength = legacy.gyroHuntStrength;
-                loadedCount++;
-            }
-        }
-        else if(storedSize == sizeof(DrivingProfileV6))
-        {
-            DrivingProfileV6 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 6 &&
-                legacy.name[0] != '\0'
-            )
-            {
-                DrivingProfile& profile = profiles[loadedCount];
-                profile = DrivingProfile();
-                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
-                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
-                profile.gain = legacy.gain;
-                profile.deadband = legacy.deadband;
-                profile.gyroSmoothing = legacy.gyroSmoothing;
-                profile.gyroIntegralGain = legacy.gyroIntegralGain;
-                profile.gyroMaxCorrection = legacyMaxCorrectionToPercent(legacy.gyroMaxCorrection);
-                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
-                profile.gyroHoldBoost = legacy.gyroHoldBoost;
-                profile.predictionStrength = legacy.predictionStrength;
-                profile.radioSteeringTravel = legacy.radioSteeringTravel;
-                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
-                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
-                profile.gyroHuntStrength = 50;
                 loadedCount++;
             }
         }

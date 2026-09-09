@@ -101,12 +101,16 @@ public:
 
     // 0 = linear, 1 = expo, 2 = custom knee.
     uint8_t getBatteryCompCurve();
-    void setBatteryCompCurve(uint8_t value);
+    void setBatteryCompCurve(int value);
 
     int getBatteryCompKnee();
     void setBatteryCompKnee(int value);
 
-    // Resting-voltage estimator time constant: 500/1000/2000/5000/10000 ms.
+    // Resting-voltage estimator time constant, one of the presets. The
+    // setter snaps to the nearest one.
+    static constexpr int BATTERY_FILTER_PRESET_COUNT = 5;
+    static const int BATTERY_FILTER_PRESETS[BATTERY_FILTER_PRESET_COUNT];
+    static int batteryFilterPresetIndex(int ms);
     int getBatteryCompFilterMs();
     void setBatteryCompFilterMs(int value);
 
@@ -120,10 +124,11 @@ public:
     void setBatteryCompUseResting(bool value);
 
     // Battery sense hardware. Global because it describes the car, not the
-    // surface. Pin 0 disables sensing.
+    // surface. Pin 0 disables sensing; a pin outside the allow-list is
+    // stored as 0. The sense pin never drives an aux channel.
     uint8_t getBatterySensePin();
-    void setBatterySensePin(uint8_t gpio);
-    static bool isBatterySensePinAllowed(uint8_t gpio);
+    void setBatterySensePin(int gpio);
+    static bool isBatterySensePinAllowed(int gpio);
 
     float getBatteryVoltageScale();
     void setBatteryVoltageScale(float value);

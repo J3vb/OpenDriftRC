@@ -9,15 +9,25 @@
 #include <cctype>
 #include <string>
 
+// The ESP32 core keeps constrain() a macro but takes abs/min/max/round from
+// <cmath>; templates here keep the C++ headers usable on the host too.
+#ifndef constrain
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
-#define abs(x) ((x) > 0 ? (x) : -(x))
+#endif
 
-// Arduino provides these as macros; functions keep the C++ headers usable.
+#ifndef abs
+#define abs(x) ((x) > 0 ? (x) : -(x))
+#endif
+
+#ifndef min
 template<typename T>
 inline T min(T a, T b) { return a < b ? a : b; }
+#endif
 
+#ifndef max
 template<typename T>
 inline T max(T a, T b) { return a > b ? a : b; }
+#endif
 
 extern unsigned long fakeMillis;
 extern uint32_t fakeAdcMillivolts;
