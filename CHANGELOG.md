@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Battery Voltage Compensation
+
+- Adds Battery Voltage Compensation: forward throttle below full stick is scaled by a
+  voltage- and throttle-dependent amount so a fresh 2S pack feels like a partly used
+  one. Full stick, neutral, brake, and reverse always pass through unchanged.
+- Drives the compensation from a resting-voltage estimate sampled while the throttle
+  is lifted, so a short burst sag cannot change the feel mid-corner, with an
+  asymmetric drop/recovery filter as the alternative source. Any fault fades the
+  compensation out over one second instead of stepping the throttle.
+- Stores every compensation setting per profile: enable, start and end voltage,
+  strength, curve (linear, expo, custom knee), voltage filter, drop and recovery
+  rates, and the resting-voltage source. The sense pin, voltage scale, and throttle
+  direction are global hardware settings.
+- Adds a scrolling Battery Compensation page to the touch UI, a web configurator card
+  with live graphs of compensation against pack voltage and throttle in against ESC
+  out, and one-step multimeter calibration of the divider.
+- Logs `battery_raw_v`, `battery_filtered_v`, `battery_resting_v`, `battery_comp_pct`,
+  and `throttle_out_us` in the blackbox. Records grow from 244 to 264 bytes, which
+  retains about 13 minutes in the 4 MB buffer.
+- Needs a resistor divider from the pack to GPIO 5, 6, 7, or 8 (GPIO 5 on PWM
+  builds; GPIO 8 on CRSF builds, which keeps 5-7 free for the auxiliary outputs)
+  and the ESC driven by OpenDrift; see `OpenDrift/docs/Hardware.md`. Sensing is off
+  by default, so existing installs behave as before.
+- Migrates saved profiles from the 76-byte version 10 layout to the 116-byte
+  version 11 layout on first boot, and now also loads version 6 profiles, which
+  shared the old size and could never load before. **Downgrading to v1.0.8 or older
+  afterwards drops every saved profile**, because older firmware does not recognise
+  the new size; note your tunes before flashing an older release.
+- Adds a host-side test suite under `OpenDrift/hosttest` (plain `g++` and `make`)
+  covering the compensation maths, profile migration, battery sensing, and the
+  blackbox record layout.
+- Review fixes: the throttle neutral is learned from the radio (1400-1600 us held
+  still for 1 s), so trim and subtrim neither freeze the resting-voltage estimate nor
+  count as forward throttle, and an estimate with no lift for 60 s follows the
+  filtered voltage. A settings change that makes the voltage span invalid, a sensor
+  or calibration change, and a lost link all fade instead of stepping. The web
+  calibration is applied once the selected pin has a reading and reports its result;
+  the preview mirrors reversed channels and the learned neutral, keeps emptied fields
+  at their saved value, carries the firmware ranges on its inputs, and cannot be hung
+  by pasted input. The blackbox logs 0 % while no ESC output is active and keeps a
+  CSV row that does not fit its buffer on its own line. Sense-pin and curve values
+  from the web are clamped as integers, and selecting a sense pin clears its aux
+  channel so the divider pin never resumes as an accessory output.
+
 ## v1.0.8 - 2026-09-03
 
 ### Lower-latency gyro experiments

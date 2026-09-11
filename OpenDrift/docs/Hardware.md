@@ -28,12 +28,24 @@ AMOLED V1 and the Round build use the same PWM pinout:
 | Steering servo / servo out | 17 | Output at selectable 250/333 Hz |
 | Gain input or throttle passthrough | 18 | Selectable |
 
-GPIO 18 can be a receiver gain input or an ESC throttle output, but not both.
-To retain throttle sensing and receiver gain control simultaneously, split the
-receiver throttle signal between GPIO 16 and the ESC instead of connecting the
-ESC to GPIO 18.
+AMOLED V2 moves the servo output and the shared gain/throttle pin:
 
-AMOLED V2 PWM uses GPIO 15 steering input, GPIO 16 throttle input, GPIO 1 steering-servo output, and GPIO 2 as the selectable gain input or throttle output.
+| Signal | GPIO | Direction |
+| --- | ---: | --- |
+| Receiver steering / servo in | 15 | Input |
+| Receiver throttle / throttle in | 16 | Input |
+| Steering servo / servo out | 1 | Output at selectable 250/333 Hz |
+| Gain input or throttle passthrough | 2 | Selectable |
+
+**The shared pin is the ESC throttle output: GPIO 18 on V1, GPIO 2 on V2.** Never
+wire an ESC to GPIO 18 on a V2 board. That pin carries TP_INT there and the touch
+controller drives it, so the ESC signal and the touch interrupt would fight over
+the same net. Check the board marking before wiring.
+
+The shared pin can be a receiver gain input or an ESC throttle output, but not
+both. To retain throttle sensing and receiver gain control simultaneously, split
+the receiver throttle signal between GPIO 16 and the ESC instead of connecting
+the ESC to the shared pin.
 
 ## CRSF routing
 
@@ -93,3 +105,64 @@ and are not 5 V tolerant; every external GPIO is a 3.3 V signal only.
 Fast drift servos can draw large transient current and can oscillate from their own internal settings. Verify servo stability directly from the receiver before diagnosing the gyro.
 
 OpenDrift defaults to 250 Hz for broad digital-servo compatibility. The optional 333 Hz control and servo rate is only for servos whose manufacturer explicitly supports 333 Hz. Restart the board after changing the rate.
+
+## Battery voltage sense
+
+Battery Voltage Compensation needs to read the car's 2S pack. Nothing on the Waveshare
+board or the OpenDrift daughter board measures it, so a small resistor divider must be
+added. The feature stays inert until the sense pin is selected in the web configurator.
+
+| Board | Sense GPIO | ADC | Header location on the daughter board |
+| --- | ---: | --- | --- |
+| AMOLED V1 / V2 | any of 5, 6, 7, 8 | ADC1, usable with WiFi on | J6 pins 5, 6, 7, 8 carry GPIO 8, 7, 6, 5 |
+| Round 1.28 | none | GPIO 5–8 are used by touch, I2C and the display | not available |
+
+Which of the four to use depends on the build. PWM builds do not touch GPIO 5–8 at all, so
+any of them is free and **GPIO 5** (J6 pin 8) is the worked example below. CRSF builds also
+offer GPIO 1–8 as auxiliary channel outputs, so **GPIO 8** is the better choice there
+because it leaves GPIO 5–7 for accessories. Either way the selected sense pin is removed
+from the auxiliary channel output list automatically.
+
+Circuit, three parts:
+
+```
+pack +  --[ R1 47k 1% ]--+--[ R2 15k 1% ]-- GND (OpenDrift ground)
+                         |
+                         +--[ C1 100 nF ]-- GND
+                         |
+                         +----------------- GPIO 5 (J6 pin 8)
+```
+
+- Ratio (47 + 15) / 15 = 4.133: 8.4 V becomes 2.03 V at the pin. The firmware default
+  voltage scale is 4.133; the one-time calibration below removes resistor tolerance.
+- Drain is 0.14 mA. Unplug the sense lead together with the pack if the car is stored with
+  the battery connected.
+- A 3S pack reads 3.05 V at the pin and is rejected by firmware (anything above 9.2 V is a
+  fault). A 4S pack or reversed lead is limited by R1 to well under 1 mA into the pin's
+  protection diode. An optional BAT54S clamp to 3V3 and GND at the pin is cheap insurance on
+  a board revision.
+- Never connect the pack directly to a GPIO. ESP32-S3 pins are 3.3 V maximum.
+
+Where to tap the pack: the 2S balance plug (JST-XH, three pins: black = GND, middle = cell 1,
+outer = pack +). Use a balance extension or breakout, take only the outer pack + wire to R1,
+and leave the balance GND unconnected; OpenDrift's ground is already the battery negative
+through the ESC. Alternative taps: the ESC's battery + input or the ESC side of the power
+switch. Route the sense wire away from the motor wires.
+
+Hand-wired: solder R1 and R2 inline in the sense wire or on a scrap of perfboard with C1,
+heat-shrink it, output to the header pin for the sense GPIO (J6 pin 8 for GPIO 5, J6 pin 5
+for GPIO 8) and ground to any daughter-board GND pin.
+
+Next daughter-board revision: a 2-pin JST-PH VBAT input (pack +, GND), R1, R2, C1 and the
+optional BAT54S on the board, traced to the sense GPIO header pin.
+
+Calibration, once: power the car, read the pack with a multimeter at the balance plug, type
+the value into "Measured pack voltage" on the web configurator and save. The scale is
+applied as soon as the selected pin has a reading (the sense pin can be selected in the same
+save) and the Calibration pill on the card confirms it. The live readout should then match
+the meter within about 0.05 V at rest.
+
+The compensation only acts when the ESC is driven by OpenDrift: on CRSF builds (GPIO 16, or
+GPIO 15 on the `waveshare_amoled_164_crsf_oops_swapped` recovery build), and on PWM builds
+only with GPIO 18 (V1) or GPIO 2 (V2) in THROTTLE OUT mode with the ESC plugged into that
+output.

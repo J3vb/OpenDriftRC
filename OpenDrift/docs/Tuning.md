@@ -83,6 +83,7 @@ the car quickly. They do not disable the fast direct damping path.
 | Steering Travel | Scales driver steering only; it does not reduce gyro authority |
 | Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
+| Battery Compensation | Voltage- and throttle-dependent ESC output scaling so a fresh pack feels like a partly used one; full stick always passes through |
 
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general
@@ -109,6 +110,52 @@ higher values reduce damping for faster rotation. It never changes the hard
 Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
+
+### Battery Compensation
+
+A fresh 2S pack at 8.4 V makes the car sharper at low and mid throttle than the same
+car at 7.8 V. Battery Compensation scales forward throttle below full stick by an
+amount that depends on the pack voltage and on the throttle position, so the car
+feels the same across the pack. Full stick, neutral, brake, and reverse are never
+changed, so turbo, boost, top speed, and initiations are unaffected.
+
+The physical anchor is motor speed and torque scaling with duty times voltage: at
+`Strength 100` a pack at the Start Voltage feels like a pack at the End Voltage. The
+reduction is largest at low throttle and fades to zero at full stick with the
+selected curve:
+
+- `Linear` fades evenly. The top quarter of the stick is at most about 12 % steeper
+  than uncompensated, which is not noticeable in practice.
+- `Expo` fades early and keeps the slope at full stick unchanged, at the cost of only a
+  quarter of the compensation remaining at mid throttle.
+- `Custom` keeps the full compensation up to the `Knee` percentage of throttle and
+  then fades to zero.
+
+Compensation is driven by the resting voltage by default: the pack voltage is only
+sampled into the estimate after the throttle has been within 50 us of the learned
+neutral for 0.25 s, so the sag of a throttle burst cannot change the feel mid-corner.
+The neutral is learned from the radio (a pulse between 1400 and 1600 us that holds
+still for 1 s, or 5 s once a neutral is known), so throttle trim and subtrim do not
+matter; forward throttle is measured from it and a lost link counts as a lift. If no
+lift is seen for 60 s the estimate follows the filtered voltage instead of staying
+frozen. The `Voltage Filter` preset is that estimate's time constant. `Drop Rate` and
+`Recovery Rate` shape the always-visible filtered voltage, which becomes the source
+when the resting toggle is off. Any fault (no sensor, no sample, reading outside
+5.5-9.2 V, or End Voltage within 0.2 V of Start Voltage) and any sensor or
+calibration change fade compensation out over one second.
+
+First test:
+
+1. Fit the sense divider and calibrate the scale as described in Hardware.md; confirm
+   the live voltage on the web page matches a multimeter at rest.
+2. Enable compensation on one profile with the defaults (`8.4`, `7.4`, `100`, `Linear`).
+3. With a fresh pack, drive the entries and transitions you know. Compare with the same
+   profile compensation off; the car should feel like it does late in a run.
+4. Lower `Strength` if the pack feels too tame, or raise `End Voltage` toward `7.8` to
+   compensate less overall. Try `Expo` if the top of the stick feels too abrupt.
+5. Check the blackbox: `battery_resting_v` should stay steady through bursts while
+   `battery_raw_v` sags, `battery_comp_pct` should track throttle position, and
+   `throttle_out_us` should equal `throttle_raw_us` at full stick and below neutral.
 
 ## Safe first test
 
@@ -202,11 +249,16 @@ the retired alpha-era tuning fields:
 | `hunt_consistent_half_cycles` | Number of consecutive frequency-consistent half-cycles observed |
 | `hunt_latch` | Confirmed-event hold from 0 to 1; transitions clear it immediately |
 | `anti_wobble` | Saved Anti Wobble notch-depth setting from 0-100; default `50` |
+| `battery_raw_v` | Pack voltage from the sense divider, unfiltered; `0` when sensing is off |
+| `battery_filtered_v` | Asymmetric drop/recovery filtered pack voltage |
+| `battery_resting_v` | Resting-voltage estimate sampled while the throttle is lifted; drives compensation by default |
+| `battery_comp_pct` | Throttle reduction applied at the last ESC write, in percent of the pulse above neutral |
+| `throttle_out_us` | ESC pulse actually written after Battery Compensation; `0` when no throttle output is active. `throttle_raw_us` is the driver's input |
 
 The stage-one onboard logger stores fixed-size binary records entirely in a
 4 MB circular PSRAM buffer. It performs no internal-flash or filesystem writes
-while driving. At the current 20 Hz sample rate, the complete telemetry set
-retains approximately the newest 18 minutes of a run. Once full, the oldest
+while driving. At the current 20 Hz sample rate, the 264-byte record
+retains approximately the newest 13 minutes of a run in a 4 MB buffer. Once full, the oldest
 records are overwritten so the most recent behavior remains available.
 
 Use **Download CSV** in the web configurator before removing power. CSV text is

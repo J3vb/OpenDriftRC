@@ -122,11 +122,33 @@ void AuxChannelOutputs::update(
 }
 
 
+uint8_t AuxChannelOutputs::reservedPin = 0;
+
+
+void AuxChannelOutputs::setReservedPin(
+    uint8_t gpio
+)
+{
+    reservedPin = gpio;
+}
+
+
+uint8_t AuxChannelOutputs::getReservedPin()
+{
+    return reservedPin;
+}
+
+
 bool AuxChannelOutputs::isPinAvailable(
     uint8_t gpio
 )
 {
     if(gpio < FIRST_GPIO || gpio > LAST_GPIO)
+    {
+        return false;
+    }
+
+    if(reservedPin != 0 && gpio == reservedPin)
     {
         return false;
     }

@@ -24,6 +24,8 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#include "BatterySense.h"
+#include "BatteryCompensation.h"
 
 LGFX lcd;
 
@@ -60,6 +62,12 @@ AuxChannelOutputs auxChannelOutputs;
 #endif
 
 BlackboxLogger blackbox;
+
+BatterySense batterySense;
+
+BatteryCompensation batteryComp;
+
+static uint32_t lastBatteryUpdateMicros = 0;
 
 unsigned long lastBlackboxLog = 0;
 
@@ -609,6 +617,8 @@ void updateCrsfThrottleOutput(
         crsfThrottleArmed = false;
         crsfThrottleNeutralSinceMs = 0;
 
+        batteryComp.clearApplied();
+
         return;
     }
 
@@ -618,6 +628,8 @@ void updateCrsfThrottleOutput(
 
     if(!crsfThrottleArmed)
     {
+        batteryComp.clearApplied();
+
         if(!throttleNeutral)
         {
             crsfThrottleNeutralSinceMs = 0;
@@ -674,14 +686,73 @@ void updateCrsfThrottleOutput(
     }
 
     throttleOutput.writeMicroseconds(
-        constrain(
-            throttlePulse,
-            1000,
-            2000
+        batteryComp.apply(
+            constrain(
+                throttlePulse,
+                1000,
+                2000
+            )
         )
     );
 }
 #endif
+
+// Samples the pack voltage and refreshes the compensation from the current
+// profile. Runs in loop() ahead of the throttle output writes. The driver's
+// raw throttle pulse is used only to learn the neutral and detect lifts for
+// the resting estimate; a lost signal counts as a lift.
+void updateBatteryCompensation(
+    int throttleInputUs,
+    bool throttleValid
+)
+{
+    uint8_t sensePin = settings.getBatterySensePin();
+
+    #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
+    AuxChannelOutputs::setReservedPin(sensePin);
+    #endif
+
+    if(batterySense.configure(sensePin, settings.getBatteryVoltageScale()))
+    {
+        batteryComp.reset();
+    }
+
+    batterySense.update();
+
+    BatteryCompensation::Config config;
+
+    config.enabled = settings.getBatteryCompEnabled();
+    config.startVoltage = settings.getBatteryCompStartVoltage();
+    config.endVoltage = settings.getBatteryCompEndVoltage();
+    config.strengthPercent = settings.getBatteryCompStrength();
+    config.curve = settings.getBatteryCompCurve();
+    config.kneePercent = settings.getBatteryCompKnee();
+    config.filterSeconds = settings.getBatteryCompFilterMs() / 1000.0f;
+    config.dropSeconds = settings.getBatteryCompDropMs() / 1000.0f;
+    config.recoverySeconds = settings.getBatteryCompRecoveryMs() / 1000.0f;
+    config.useResting = settings.getBatteryCompUseResting();
+    config.sensorEnabled = batterySense.isEnabled();
+    config.throttleReversed = settings.getBatteryThrottleReversed();
+
+    batteryComp.configure(config);
+
+    uint32_t now = micros();
+
+    float dt =
+        lastBatteryUpdateMicros == 0
+        ? 0.0f
+        : (float)(now - lastBatteryUpdateMicros) / 1000000.0f;
+
+    lastBatteryUpdateMicros = now == 0 ? 1 : now;
+
+    batteryComp.update(
+        batterySense.getVolts(),
+        batterySense.hasSample(),
+        throttleInputUs,
+        dt,
+        throttleValid
+    );
+}
 
 int mapSteeringPulse(
     int pulse,
@@ -1484,6 +1555,10 @@ void setup()
     bool throttleOutputOk = throttleOutputActive;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    AuxChannelOutputs::setReservedPin(
+        settings.getBatterySensePin()
+    );
+
     bool auxOutputsOk =
         auxChannelOutputs.begin(settings);
     #endif
@@ -1700,6 +1775,43 @@ void setup()
     }
 
     //-------------------
+    // BATTERY SENSE
+    //-------------------
+
+    batterySense.configure(
+        settings.getBatterySensePin(),
+        settings.getBatteryVoltageScale()
+    );
+
+    if(batterySense.isEnabled())
+    {
+        char batteryMessage[48];
+
+        snprintf(
+            batteryMessage,
+            sizeof(batteryMessage),
+            "adc: battery sense on GPIO %u",
+            batterySense.getPin()
+        );
+
+        Serial.println(batteryMessage);
+
+        bootConsole.log(
+            batteryMessage
+        );
+    }
+    else
+    {
+        Serial.println("Battery sense disabled");
+
+        bootConsole.log(
+            "adc: battery sense disabled",
+            "[SKIP]",
+            0x8410
+        );
+    }
+
+    //-------------------
     // WIFI
     //-------------------
 
@@ -1740,7 +1852,9 @@ void setup()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            batteryComp,
+            batterySense
         );
 
         bootConsole.log(
@@ -1776,6 +1890,10 @@ void setup()
         steeringRadio,
         gainRadio,
         steeringServo
+    );
+
+    ui.setBatteryCompensation(
+        batteryComp
     );
 
     #if defined(OPENDRIFT_INPUT_CRSF)
@@ -1926,7 +2044,9 @@ void loop()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            batteryComp,
+            batterySense
         );
     }
 
@@ -1944,6 +2064,11 @@ void loop()
     int crsfThrottlePulse =
         crsfThrottlePulseSnapshot;
 
+    updateBatteryCompensation(
+        crsfThrottlePulse,
+        crsfThrottleSignal
+    );
+
     updateCrsfThrottleOutput(
         crsfThrottlePulse,
         crsfThrottleSignal
@@ -1957,6 +2082,11 @@ void loop()
     );
     #endif
     #else
+    updateBatteryCompensation(
+        throttleRadio.getPulseWidth(),
+        throttleRadio.hasSignal()
+    );
+
     if(
         pin18ThrottleOutputMode &&
         throttleRadio.hasSignal()
@@ -1980,24 +2110,35 @@ void loop()
         if(throttleOutputActive)
         {
             throttleOutput.writeMicroseconds(
-                throttleRadio.getPulseWidth()
+                batteryComp.apply(
+                    throttleRadio.getPulseWidth()
+                )
             );
         }
+        else
+        {
+            batteryComp.clearApplied();
+        }
     }
-    else if(
-        pin18ThrottleOutputMode &&
-        throttleOutputActive
-    )
+    else
     {
-        // Removing the PWM signal lets the ESC's own signal-loss
-        // failsafe take over instead of holding the last throttle value.
-        throttleOutput.end();
-        throttleOutputActive = false;
+        batteryComp.clearApplied();
 
-        pinMode(
-            SHARED_GAIN_THROTTLE_PIN,
-            INPUT_PULLDOWN
-        );
+        if(
+            pin18ThrottleOutputMode &&
+            throttleOutputActive
+        )
+        {
+            // Removing the PWM signal lets the ESC's own signal-loss
+            // failsafe take over instead of holding the last throttle value.
+            throttleOutput.end();
+            throttleOutputActive = false;
+
+            pinMode(
+                SHARED_GAIN_THROTTLE_PIN,
+                INPUT_PULLDOWN
+            );
+        }
     }
     #endif
 
@@ -2107,7 +2248,12 @@ void loop()
             gyro.getHuntLatch(),
             settings.getGyroHuntStrength(),
             gyro.getHuntResidualEnvelope(),
-            gyro.getHuntNotchCenter()
+            gyro.getHuntNotchCenter(),
+            batteryComp.getRawVolts(),
+            batteryComp.getFilteredVolts(),
+            batteryComp.getRestingVolts(),
+            batteryComp.getCompensationPercent(),
+            throttleOutput.isActive() ? throttleOutput.getPulse() : 0
         );
     }
 
