@@ -82,7 +82,7 @@ Make sure the receiver, ESP32 board, and servo power system share ground.
 
 AMOLED V2 keeps receiver steering on GPIO 15 and throttle on GPIO 16, but moves steering output to GPIO 1 and the switchable gain/throttle connection to GPIO 2. Do not use GPIO 17/18 for OpenDrift signals on V2; Waveshare connects those pins to IMU_INT2 and TP_INT.
 
-Battery Voltage Compensation reads the pack through an optional resistor divider on GPIO 5, 6, 7, or 8 (GPIO 8 recommended). Sensing is off until the pin is selected in the web configurator. It only changes the ESC signal when OpenDrift drives the ESC: always on CRSF builds, and on PWM builds only in throttle-output mode. Wiring and calibration are in [Hardware.md](OpenDrift/docs/Hardware.md).
+Battery Voltage Compensation reads the pack through an optional resistor divider on GPIO 5, 6, 7, or 8 (GPIO 5 on PWM builds; GPIO 8 on CRSF builds, which keeps 5-7 free for the auxiliary outputs). Sensing is off until the pin is selected in the web configurator. It only changes the ESC signal when OpenDrift drives the ESC: always on CRSF builds, and on PWM builds only in throttle-output mode. Wiring and calibration are in [Hardware.md](OpenDrift/docs/Hardware.md).
 
 CRSF targets repurpose the receiver pins:
 

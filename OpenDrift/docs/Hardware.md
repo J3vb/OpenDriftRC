@@ -28,12 +28,24 @@ AMOLED V1 and the Round build use the same PWM pinout:
 | Steering servo / servo out | 17 | Output at selectable 250/333 Hz |
 | Gain input or throttle passthrough | 18 | Selectable |
 
-GPIO 18 can be a receiver gain input or an ESC throttle output, but not both.
-To retain throttle sensing and receiver gain control simultaneously, split the
-receiver throttle signal between GPIO 16 and the ESC instead of connecting the
-ESC to GPIO 18.
+AMOLED V2 moves the servo output and the shared gain/throttle pin:
 
-AMOLED V2 PWM uses GPIO 15 steering input, GPIO 16 throttle input, GPIO 1 steering-servo output, and GPIO 2 as the selectable gain input or throttle output.
+| Signal | GPIO | Direction |
+| --- | ---: | --- |
+| Receiver steering / servo in | 15 | Input |
+| Receiver throttle / throttle in | 16 | Input |
+| Steering servo / servo out | 1 | Output at selectable 250/333 Hz |
+| Gain input or throttle passthrough | 2 | Selectable |
+
+**The shared pin is the ESC throttle output: GPIO 18 on V1, GPIO 2 on V2.** Never
+wire an ESC to GPIO 18 on a V2 board. That pin carries TP_INT there and the touch
+controller drives it, so the ESC signal and the touch interrupt would fight over
+the same net. Check the board marking before wiring.
+
+The shared pin can be a receiver gain input or an ESC throttle output, but not
+both. To retain throttle sensing and receiver gain control simultaneously, split
+the receiver throttle signal between GPIO 16 and the ESC instead of connecting
+the ESC to the shared pin.
 
 ## CRSF routing
 
@@ -102,11 +114,14 @@ added. The feature stays inert until the sense pin is selected in the web config
 
 | Board | Sense GPIO | ADC | Header location on the daughter board |
 | --- | ---: | --- | --- |
-| AMOLED V1 / V2 | 8 (also 5, 6, 7) | ADC1, usable with WiFi on | J6 pin 5 (GPIO 8); J6 pins 6, 7, 8 are GPIO 7, 6, 5 |
+| AMOLED V1 / V2 | any of 5, 6, 7, 8 | ADC1, usable with WiFi on | J6 pins 5, 6, 7, 8 carry GPIO 8, 7, 6, 5 |
 | Round 1.28 | none | GPIO 5–8 are used by touch, I2C and the display | not available |
 
-GPIO 8 is the documented choice. On CRSF builds the selected sense pin is removed from the
-auxiliary channel output list automatically.
+Which of the four to use depends on the build. PWM builds do not touch GPIO 5–8 at all, so
+any of them is free and **GPIO 5** (J6 pin 8) is the worked example below. CRSF builds also
+offer GPIO 1–8 as auxiliary channel outputs, so **GPIO 8** is the better choice there
+because it leaves GPIO 5–7 for accessories. Either way the selected sense pin is removed
+from the auxiliary channel output list automatically.
 
 Circuit, three parts:
 
@@ -115,7 +130,7 @@ pack +  --[ R1 47k 1% ]--+--[ R2 15k 1% ]-- GND (OpenDrift ground)
                          |
                          +--[ C1 100 nF ]-- GND
                          |
-                         +----------------- GPIO 8 (J6 pin 5)
+                         +----------------- GPIO 5 (J6 pin 8)
 ```
 
 - Ratio (47 + 15) / 15 = 4.133: 8.4 V becomes 2.03 V at the pin. The firmware default
@@ -135,10 +150,11 @@ through the ESC. Alternative taps: the ESC's battery + input or the ESC side of 
 switch. Route the sense wire away from the motor wires.
 
 Hand-wired: solder R1 and R2 inline in the sense wire or on a scrap of perfboard with C1,
-heat-shrink it, output to header pin J6 pin 5 and ground to any daughter-board GND pin.
+heat-shrink it, output to the header pin for the sense GPIO (J6 pin 8 for GPIO 5, J6 pin 5
+for GPIO 8) and ground to any daughter-board GND pin.
 
 Next daughter-board revision: a 2-pin JST-PH VBAT input (pack +, GND), R1, R2, C1 and the
-optional BAT54S on the board, traced to the GPIO 8 header pin.
+optional BAT54S on the board, traced to the sense GPIO header pin.
 
 Calibration, once: power the car, read the pack with a multimeter at the balance plug, type
 the value into "Measured pack voltage" on the web configurator and save. The scale is

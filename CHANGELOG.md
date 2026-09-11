@@ -21,7 +21,8 @@
 - Logs `battery_raw_v`, `battery_filtered_v`, `battery_resting_v`, `battery_comp_pct`,
   and `throttle_out_us` in the blackbox. Records grow from 244 to 264 bytes, which
   retains about 13 minutes in the 4 MB buffer.
-- Needs a resistor divider from the pack to GPIO 5, 6, 7, or 8 (GPIO 8 recommended)
+- Needs a resistor divider from the pack to GPIO 5, 6, 7, or 8 (GPIO 5 on PWM
+  builds; GPIO 8 on CRSF builds, which keeps 5-7 free for the auxiliary outputs)
   and the ESC driven by OpenDrift; see `OpenDrift/docs/Hardware.md`. Sensing is off
   by default, so existing installs behave as before.
 - Migrates saved profiles from the 76-byte version 10 layout to the 116-byte

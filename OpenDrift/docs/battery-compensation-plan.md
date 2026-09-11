@@ -71,7 +71,7 @@ Departures the firmware forces, and additions the spec does not mention:
     mechanism the Profiles page uses. Three rows are visible at a time with a scrollbar.
 12. **Hardware settings, global** (the spec does not list them, and they describe the car,
     not the surface): sense pin (Off / GPIO 5 / 6 / 7 / 8, default Off, runtime-selectable
-    like the GPIO 18 mode; GPIO 8 is the documented choice for the user's V2 board), voltage
+    like the GPIO 18 mode; GPIO 5 on PWM builds, GPIO 8 on CRSF builds), voltage
     scale (default 4.133 for the 47k/15k divider in B10, with a web "measured pack voltage"
     calibrate field), and throttle reversed (default off, because nothing in the codebase
     fixes which side of 1500 is forward; the gyro only uses the magnitude).
@@ -306,11 +306,16 @@ Why it is needed: the Waveshare board is fed regulated 5 V from the BEC and no p
 on the daughter board sees the pack. ESP32-S3 pins take 3.3 V maximum, so 8.4 V must be
 divided down before it reaches an ADC pin.
 
-**Pin: GPIO 8** (ADC1 channel 7). Free on V2 in both PWM and CRSF builds, WiFi-safe (ADC1),
-not a strapping pin, and on the daughter-board header at J6 pin 5 (the header row runs
-GPIO 18, 17, 16, 15, 8, 7, 6, 5, 3, 2, 1 from pin 1). GPIO 8 is recommended so GPIO 5–7 stay
-free for accessories; any of GPIO 5–8 can be selected. The firmware default remains Off;
-select GPIO 8 in the web configurator after fitting the divider.
+**Pin: GPIO 5 on a PWM build, GPIO 8 on a CRSF build.** Both are ADC1 (WiFi-safe), neither
+is a strapping pin, and both reach the daughter-board header: the row runs GPIO 18, 17, 16,
+15, 8, 7, 6, 5, 3, 2, 1 from pin 1, so GPIO 8 is J6 pin 5 and GPIO 5 is J6 pin 8. PWM builds
+leave GPIO 5–8 unused, so any of the four is free; CRSF builds also offer GPIO 1–8 as
+auxiliary outputs, where GPIO 8 keeps GPIO 5–7 available for accessories. The firmware
+default remains Off; select the pin in the web configurator after fitting the divider.
+
+The user's car is an AMOLED V2 on the PWM build, so its map is GPIO 15 steering in, GPIO 16
+throttle in, GPIO 1 servo out, GPIO 2 ESC out in THROTTLE OUT mode, and GPIO 5 battery
+sense. GPIO 18 is the ESC output on V1 only; on V2 that pin carries TP_INT.
 
 **Circuit** (three parts, all JLCPCB basic parts):
 
@@ -319,7 +324,7 @@ pack +  ──[ R1 47 kΩ 1 % ]──┬──[ R2 15 kΩ 1 % ]── GND (OpenD
                             │
                             ├──[ C1 100 nF ]────── GND
                             │
-                            └───────────────────── GPIO 8 (J6-5)
+                            └───────────────────── GPIO 5 (J6-8)
 ```
 
 | Item | Value | Reason |
@@ -348,7 +353,7 @@ with C1, heat-shrunk, output to header pin J6-5 and ground to any PDB GND pin. R
 sense wire away from the motor wires.
 
 **Next daughter-board revision:** add a 2-pin JST-PH "VBAT" input (pack +, GND), R1/R2/C1
-on the board, optional BAT54S, trace to the GPIO 8 header pin. I do not edit the KiCad
+on the board, optional BAT54S, trace to the sense GPIO header pin. I do not edit the KiCad
 files in this work (PCB layout needs a human in KiCad); the schematic change is the three
 parts above and is documented in `Hardware.md` so it can be drawn in minutes.
 
