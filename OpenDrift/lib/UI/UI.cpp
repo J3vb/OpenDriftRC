@@ -17,7 +17,13 @@ static constexpr uint8_t PAGE_STEERING = 7;
 static constexpr uint8_t PAGE_STEERING_CAL = 8;
 static constexpr uint8_t PAGE_WIFI = 9;
 static constexpr uint8_t PAGE_SYSTEM = 10;
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+static constexpr uint8_t PAGE_DISPLAY = 11;
+static constexpr uint8_t PAGE_BACKGROUNDS = 12;
+#else
 static constexpr uint8_t PAGE_BACKGROUNDS = 11;
+#endif
 
 
 static uint8_t radioSectionForPage(
@@ -625,6 +631,12 @@ void UI::begin(
         settings
     );
 
+    // begin() draws the first page itself, so the compositor needs the
+    // stored flip now. screenFlipApplied stays false so the first
+    // update() still mirrors the touch driver to match.
+    screenFlipped =
+        settings.getDisplayFlip();
+
     applyBackground(
         settings
     );
@@ -969,6 +981,12 @@ void UI::drawPage(
             break;
 
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        case PAGE_DISPLAY:
+            drawDisplayPage(
+                settings
+            );
+            break;
+
         case PAGE_BACKGROUNDS:
             drawBackgroundsPage(
                 settings
@@ -1506,6 +1524,14 @@ void UI::flushDisplay(
 
         for(int y = 0; y < UI_CANVAS_HEIGHT; y++)
         {
+            // The panel index is linear in x either way, so the
+            // orientation costs one branch per row instead of per pixel.
+            int targetIndex =
+                panelRowStart(y);
+
+            int targetStep =
+                panelColumnStep();
+
             for(int x = 0; x < UI_CANVAS_WIDTH; x++)
             {
                 int sourceX =
@@ -1540,11 +1566,10 @@ void UI::flushDisplay(
                     }
                 }
 
-                target[
-                    ((UI_CANVAS_WIDTH - 1 - x) * UI_CANVAS_HEIGHT) +
-                    y
-                ] =
+                target[targetIndex] =
                     color;
+
+                targetIndex += targetStep;
             }
         }
 
@@ -1603,11 +1628,22 @@ void UI::flushDisplay(
                 }
             }
 
-            panelCanvas.drawPixel(
-                y,
-                UI_CANVAS_WIDTH - 1 - x,
-                color
-            );
+            if(screenFlipped)
+            {
+                panelCanvas.drawPixel(
+                    UI_CANVAS_HEIGHT - 1 - y,
+                    x,
+                    color
+                );
+            }
+            else
+            {
+                panelCanvas.drawPixel(
+                    y,
+                    UI_CANVAS_WIDTH - 1 - x,
+                    color
+                );
+            }
         }
     }
 
@@ -1687,6 +1723,12 @@ void UI::flushTransitionDisplay(
 
     for(int y = 0; y < UI_CANVAS_HEIGHT; y++)
     {
+        int targetIndex =
+            panelRowStart(y);
+
+        int targetStep =
+            panelColumnStep();
+
         for(int x = 0; x < UI_CANVAS_WIDTH; x++)
         {
             uint16_t color =
@@ -1741,11 +1783,10 @@ void UI::flushTransitionDisplay(
                     pageColor;
             }
 
-            target[
-                ((UI_CANVAS_WIDTH - 1 - x) * UI_CANVAS_HEIGHT) +
-                y
-            ] =
+            target[targetIndex] =
                 color;
+
+            targetIndex += targetStep;
         }
     }
 
@@ -2328,7 +2369,6 @@ void UI::drawSystemPage(
     drawAmoledRowPanel(lcd, 89, 36);
     drawAmoledRowPanel(lcd, 130, 36);
     drawAmoledRowPanel(lcd, 171, 36);
-    drawAmoledRowPanel(lcd, 212, 36);
 
     lcd->setTextSize(2);
 
@@ -2374,12 +2414,6 @@ void UI::drawSystemPage(
         #endif
         22,
         181
-    );
-
-    lcd->drawString(
-        "BRIGHTNESS",
-        22,
-        222
     );
 
     lcd->setTextSize(3);
@@ -2463,24 +2497,6 @@ void UI::drawSystemPage(
         #endif
         2
     );
-
-    String brightnessLabel =
-        String(settings.getDisplayBrightness()) + "%";
-
-    lcd->setTextSize(3);
-
-    lcd->setTextColor(
-        OD_TEXT
-    );
-
-    lcd->drawString(
-        brightnessLabel.c_str(),
-        150,
-        214
-    );
-
-    drawAmoledButton(lcd, 276, 212, 70, 36, "-", OD_BLUE);
-    drawAmoledButton(lcd, 364, 212, 70, 36, "+", OD_BLUE);
 
     drawPageDots();
 
@@ -2728,6 +2744,165 @@ bool UI::isProfilesPage()
 
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
+// Idle timeouts users actually want, instead of stepping 0-600 one second
+// at a time. Index 0 is "never dim".
+static const uint16_t DIM_TIMEOUT_STEPS[] =
+{
+    0, 5, 10, 15, 30, 60, 120, 300, 600
+};
+
+static constexpr uint8_t DIM_TIMEOUT_STEP_COUNT =
+    sizeof(DIM_TIMEOUT_STEPS) / sizeof(DIM_TIMEOUT_STEPS[0]);
+
+
+// Nearest step at or below the stored value, so a timeout typed on the web
+// page still lands somewhere sensible on the ladder.
+static uint8_t dimTimeoutStepIndex(
+    uint16_t seconds
+)
+{
+    uint8_t index = 0;
+
+    for(uint8_t i = 0; i < DIM_TIMEOUT_STEP_COUNT; i++)
+    {
+        if(DIM_TIMEOUT_STEPS[i] <= seconds)
+        {
+            index = i;
+        }
+    }
+
+    return index;
+}
+
+
+static uint16_t nextDimTimeout(
+    uint16_t seconds,
+    int8_t direction
+)
+{
+    int8_t index =
+        (int8_t)dimTimeoutStepIndex(seconds) + direction;
+
+    if(index < 0)
+    {
+        index = 0;
+    }
+
+    if(index > (int8_t)DIM_TIMEOUT_STEP_COUNT - 1)
+    {
+        index = DIM_TIMEOUT_STEP_COUNT - 1;
+    }
+
+    return DIM_TIMEOUT_STEPS[index];
+}
+
+
+void UI::drawDisplayPage(
+    Settings& settings
+)
+{
+    drawUiBackground(lcd);
+
+    lcd->setTextColor(
+        TFT_WHITE
+    );
+
+    drawAmoledHeader(
+        lcd,
+        "Display",
+        OD_BLUE
+    );
+
+    drawAmoledRowPanel(lcd, 48, 36);
+    drawAmoledRowPanel(lcd, 89, 36);
+    drawAmoledRowPanel(lcd, 130, 36);
+
+    setAmoledLabelSize(lcd);
+
+    lcd->setTextColor(
+        OD_MUTED
+    );
+
+    lcd->drawString(
+        "SCREEN",
+        22,
+        58
+    );
+
+    lcd->drawString(
+        "BRIGHTNESS",
+        22,
+        99
+    );
+
+    lcd->drawString(
+        "DIM AFTER",
+        22,
+        140
+    );
+
+    bool flipped =
+        settings.getDisplayFlip();
+
+    drawAmoledButton(
+        lcd,
+        150,
+        48,
+        240,
+        36,
+        flipped ? "FLIPPED 180" : "NORMAL",
+        flipped ? OD_AMBER : OD_CYAN,
+        2
+    );
+
+    lcd->setTextSize(3);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    String brightnessLabel =
+        String(settings.getDisplayBrightness()) + "%";
+
+    lcd->drawString(
+        brightnessLabel.c_str(),
+        150,
+        91
+    );
+
+    drawAmoledButton(lcd, 276, 89, 70, 36, "-", OD_BLUE);
+    drawAmoledButton(lcd, 364, 89, 70, 36, "+", OD_BLUE);
+
+    uint16_t dimSeconds =
+        settings.getDisplayDimTimeout();
+
+    // drawAmoledButton leaves the text at the button's own size.
+    lcd->setTextSize(3);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    String dimLabel =
+        dimSeconds == 0
+        ?
+        String("OFF")
+        :
+        String(dimSeconds) + "S";
+
+    lcd->drawString(
+        dimLabel.c_str(),
+        150,
+        132
+    );
+
+    drawAmoledButton(lcd, 276, 130, 70, 36, "-", OD_BLUE);
+    drawAmoledButton(lcd, 364, 130, 70, 36, "+", OD_BLUE);
+
+    drawPageDots();
+}
+
+
 bool UI::isBackgroundsPage()
 {
     return page == PAGE_BACKGROUNDS;
@@ -2770,6 +2945,34 @@ bool UI::syncTheme(
     applyAmoledTheme(
         textMode,
         accent
+    );
+
+    return true;
+}
+
+
+bool UI::syncScreenFlip(
+    Settings& settings,
+    Touch& touch
+)
+{
+    bool flip =
+        settings.getDisplayFlip();
+
+    if(
+        screenFlipApplied &&
+        flip == screenFlipped
+    )
+    {
+        return false;
+    }
+
+    screenFlipApplied = true;
+
+    screenFlipped = flip;
+
+    touch.setFlipped(
+        flip
     );
 
     return true;
@@ -5510,11 +5713,20 @@ void UI::drawFixedPageDots()
         int landscapeX =
             startX + (i * spacing);
 
-        // The AMOLED panel canvas is the landscape UI rotated clockwise.
+        // The AMOLED panel canvas is the landscape UI rotated clockwise,
+        // or the same rotation mirrored when the screen is flipped.
         int panelX =
+            screenFlipped
+            ?
+            UI_CANVAS_HEIGHT - 1 - UI_DOTS_Y
+            :
             UI_DOTS_Y;
 
         int panelY =
+            screenFlipped
+            ?
+            landscapeX
+            :
             UI_CANVAS_WIDTH - 1 - landscapeX;
 
         if(i == page)
@@ -5736,13 +5948,19 @@ int8_t UI::repeatButtonAt(
             return 30;
     }
 
-    if(page == PAGE_SYSTEM)
+    if(page == PAGE_DISPLAY)
     {
-        if(buttonPressed(x, y, 276, 212, 70, 36))
+        if(buttonPressed(x, y, 276, 89, 70, 36))
             return 35;
 
-        if(buttonPressed(x, y, 364, 212, 70, 36))
+        if(buttonPressed(x, y, 364, 89, 70, 36))
             return 36;
+
+        if(buttonPressed(x, y, 276, 130, 70, 36))
+            return 37;
+
+        if(buttonPressed(x, y, 364, 130, 70, 36))
+            return 38;
     }
 
     return 0;
@@ -5874,6 +6092,9 @@ bool UI::actionButtonAt(
 
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 296, 70, 130, 92);
+
+    if(page == PAGE_DISPLAY)
+        return buttonPressed(x, y, 150, 48, 240, 36);
 
     if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 48, 240, 36))
         return true;
@@ -6194,6 +6415,26 @@ bool UI::applyRepeatButton(
             );
             break;
 
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 37:
+            settings.setDisplayDimTimeout(
+                nextDimTimeout(
+                    settings.getDisplayDimTimeout(),
+                    -1
+                )
+            );
+            break;
+
+        case 38:
+            settings.setDisplayDimTimeout(
+                nextDimTimeout(
+                    settings.getDisplayDimTimeout(),
+                    1
+                )
+            );
+            break;
+        #endif
+
         default:
             return false;
     }
@@ -6211,6 +6452,14 @@ bool UI::applyRepeatButton(
             settings
         );
     }
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    else if(page == PAGE_DISPLAY)
+    {
+        drawDisplayPage(
+            settings
+        );
+    }
+    #endif
     else if(page == PAGE_DRIFT_ASSIST)
     {
         drawDriftAssistPage(
@@ -6369,6 +6618,18 @@ void UI::update(
     }
 
     if(syncTheme(settings))
+    {
+        refreshRequested = true;
+    }
+
+    // A flip chosen on the Display page, or restored from NVS on the
+    // first loop, rotates the compositor and the touch mapping together.
+    if(
+        syncScreenFlip(
+            settings,
+            touch
+        )
+    )
     {
         refreshRequested = true;
     }
@@ -7192,6 +7453,26 @@ void UI::update(
             lastTouchState =
                 touched;
 
+            return;
+        }
+
+        if(
+            page == PAGE_DISPLAY &&
+            buttonPressed(x, y, 150, 48, 240, 36)
+        )
+        {
+            settings.setDisplayFlip(
+                !settings.getDisplayFlip()
+            );
+
+            syncScreenFlip(
+                settings,
+                touch
+            );
+
+            drawDisplayPage(settings);
+
+            lastTouchState = touched;
             return;
         }
 

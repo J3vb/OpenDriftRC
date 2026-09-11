@@ -392,6 +392,11 @@ bool Settings::begin()
         600
     );
 
+    displayFlip = prefs.getBool(
+        "dispFlip",
+        false
+    );
+
     {
         String storedBackground =
             sanitizeBackgroundName(
@@ -698,6 +703,11 @@ void Settings::save()
     prefs.putUShort(
         "dispDimS",
         displayDimTimeout
+    );
+
+    prefs.putBool(
+        "dispFlip",
+        displayFlip
     );
 
     prefs.putString(
@@ -1214,6 +1224,18 @@ void Settings::setDisplayDimTimeout(int value)
             0,
             600
         );
+
+    dirty = true;
+}
+
+bool Settings::getDisplayFlip()
+{
+    return displayFlip;
+}
+
+void Settings::setDisplayFlip(bool value)
+{
+    displayFlip = value;
 
     dirty = true;
 }

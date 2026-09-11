@@ -131,6 +131,12 @@ public:
     uint16_t getDisplayDimTimeout();
     void setDisplayDimTimeout(int value);
 
+    // Rotates the rendered UI and the touch input by 180 degrees, for a
+    // board mounted upside down. Purely cosmetic: the gyro has its own
+    // reverse setting and must not be changed with this one.
+    bool getDisplayFlip();
+    void setDisplayFlip(bool value);
+
     // Name of the stored AMOLED background image, "" for the built-in
     // one. Letters, digits, - and _ only; the returned pointer is stable.
     const char* getBackgroundName();
@@ -269,6 +275,8 @@ private:
     uint8_t displayBrightness = 100;
 
     uint16_t displayDimTimeout = 0;
+
+    bool displayFlip = false;
 
     char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
 

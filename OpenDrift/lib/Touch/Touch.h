@@ -57,6 +57,10 @@ public:
 
     uint8_t getGesture();
 
+    // Mirrors reported coordinates (and therefore swipe direction) for a
+    // board mounted upside down.
+    void setFlipped(bool value);
+
 
 
 private:
@@ -83,6 +87,9 @@ private:
     unsigned long lastTouchErrorMs = 0;
 
     uint8_t touchReadFailures = 0;
+
+
+    bool flipped = false;
 
 
     bool pressed = false;

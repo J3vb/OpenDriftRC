@@ -122,7 +122,7 @@ private:
 
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    const uint8_t totalPages = 12;
+    const uint8_t totalPages = 13;
     #else
     const uint8_t totalPages = 11;
     #endif
@@ -204,6 +204,43 @@ private:
     // stored rate that differs until the next restart.
     uint16_t bootControlLoopHz = 250;
 
+    // 180 degree screen flip for an upside-down board. The compositor
+    // reads this on every flush and the Touch driver mirrors to match.
+    bool screenFlipped = false;
+
+    bool screenFlipApplied = false;
+
+    bool syncScreenFlip(
+        Settings& settings,
+        Touch& touch
+    );
+
+    // Panel index of landscape (0, y), and the step taken per landscape x.
+    // Unflipped the UI is rotated clockwise into the portrait panel, so x
+    // walks the panel backwards; flipped it walks forwards from the
+    // mirrored row.
+    int panelRowStart(
+        int y
+    ) const
+    {
+        return
+            screenFlipped
+            ?
+            (UI_CANVAS_HEIGHT - 1 - y)
+            :
+            (((UI_CANVAS_WIDTH - 1) * UI_CANVAS_HEIGHT) + y);
+    }
+
+    int panelColumnStep() const
+    {
+        return
+            screenFlipped
+            ?
+            UI_CANVAS_HEIGHT
+            :
+            -UI_CANVAS_HEIGHT;
+    }
+
     // Theme applied to the palette; re-applied when Settings change.
     uint8_t appliedThemeText = 0;
 
@@ -227,6 +264,10 @@ private:
     );
 
     bool isBackgroundsPage();
+
+    void drawDisplayPage(
+        Settings& settings
+    );
     #endif
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)

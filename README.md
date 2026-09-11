@@ -15,7 +15,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 ## Current Features
 
 - ESP32-S3 firmware using PlatformIO and Arduino.
-- 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages.
+- 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages, and a 180 degree screen flip for an upside-down board.
 - Dedicated 250 Hz or 333 Hz IMU/control/steering task isolated from UI, WiFi, and logging work.
 - Continuous yaw-acceleration prediction with throttle-informed look-ahead.
 - Quiet-drift reference feedback that yields to driver steering and throttle changes.
@@ -337,11 +337,19 @@ If your device cannot resolve the name, the address `http://192.168.4.1/` always
 
 Basic firmware/system information. Tap the GPIO 18 mode button to switch between `GAIN INPUT` and `THROTTLE OUT`.
 
-The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
-
 The `THEME` row has two buttons. The left one cycles the accent colour used for every page header and the adjustment buttons: Mixed (the original colour per page), Cyan, Blue, Magenta, Amber, Green or White. Amber stays reserved for warnings such as a pending restart or a pending WiFi rename. The right one switches between light and dark text; dark text suits a light photo background. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any image. Both settings are saved and shared with the web configurator.
 
-The Display card also has an idle dim timeout. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default.
+### Display
+
+Everything about the panel itself.
+
+`SCREEN` flips the whole UI 180 degrees, for a board mounted upside down in the chassis. The rendered image and the touch input rotate together, so the buttons stay where you see them and a swipe still moves the pages in the direction your finger travels. The setting is saved and applied from the first frame after a restart.
+
+The flip is cosmetic only. A physically inverted board also inverts the gyro, and that has its own `GYRO REV` setting on the Steering page - do not change both for the same problem.
+
+The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
+
+`DIM AFTER` sets the idle dim timeout, stepping through `OFF`, 5, 10, 15, 30, 60, 120, 300 and 600 seconds. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default, and the web configurator's Display card can set any value from 0 to 600.
 
 ### Backgrounds
 
