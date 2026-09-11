@@ -24,6 +24,7 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#include "Backgrounds.h"
 #include "../include/Version.h"
 
 LGFX lcd;
@@ -61,6 +62,8 @@ AuxChannelOutputs auxChannelOutputs;
 #endif
 
 BlackboxLogger blackbox;
+
+Backgrounds backgrounds;
 
 unsigned long lastBlackboxLog = 0;
 
@@ -1270,11 +1273,74 @@ void setup()
     controlLoopHz = settings.getControlLoopHz();
     controlLoopPeriodMs = 1000 / controlLoopHz;
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(displayOk)
+    {
+        lcd.setBrightness(
+            opendriftBrightnessLevel(
+                settings.getDisplayBrightness()
+            )
+        );
+    }
+    #endif
+
     bootConsole.log(
         "nvs: mounted OpenDrift settings store",
         settingsOk ? "[ OK ]" : "[WARN]",
         settingsOk ? TFT_GREEN : TFT_YELLOW
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    //-------------------
+    // BACKGROUND STORAGE
+    //-------------------
+
+    // Mounted before the control task exists: the one-time format of the
+    // ffat partition on the first boot takes a few seconds and must never
+    // overlap with steering.
+    bootConsole.log(
+        "ffat: mounting background storage"
+    );
+
+    bool backgroundsOk =
+        backgrounds.begin();
+
+    char backgroundMessage[64];
+
+    if(!backgroundsOk)
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: background storage unavailable"
+        );
+    }
+    else if(backgrounds.wasFormatted())
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: formatted, %u KB free for backgrounds",
+            (unsigned int)(backgrounds.getFreeBytes() / 1024)
+        );
+    }
+    else
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: %u backgrounds, %u KB free",
+            (unsigned int)backgrounds.getCount(),
+            (unsigned int)(backgrounds.getFreeBytes() / 1024)
+        );
+    }
+
+    bootConsole.log(
+        backgroundMessage,
+        backgroundsOk ? "[ OK ]" : "[WARN]",
+        backgroundsOk ? TFT_GREEN : TFT_YELLOW
+    );
+    #endif
 
     //-------------------
     // IMU
@@ -1743,7 +1809,10 @@ void setup()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi,
+            steeringServo,
+            backgrounds
         );
 
         bootConsole.log(
@@ -1783,6 +1852,12 @@ void setup()
     delay(350);
 
     bootConsole.end();
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    ui.setBackgroundStore(
+        backgrounds
+    );
+    #endif
 
     ui.begin(
         &lcd,
@@ -1942,11 +2017,19 @@ void loop()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi,
+            steeringServo,
+            backgrounds
         );
     }
 
-    if(wifi.isEnabled())
+    // A requested restart must still fire if the access point drops
+    // inside the short delay between the response and the reset.
+    if(
+        wifi.isEnabled() ||
+        webConfig.isRestartPending()
+    )
     {
         webConfig.update();
     }

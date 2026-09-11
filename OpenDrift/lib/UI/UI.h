@@ -11,6 +11,10 @@
 #include "RadioInput.h"
 #include "Servo.h"
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+#include "Backgrounds.h"
+#endif
+
 
 class UI
 {
@@ -30,6 +34,14 @@ public:
     void setThrottleRadio(
         RadioInput& throttleRadio
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Storage for uploaded backgrounds. Set before begin() so the saved
+    // background is on screen from the first frame.
+    void setBackgroundStore(
+        Backgrounds& store
+    );
+    #endif
 
     void requestRefresh();
 
@@ -103,12 +115,17 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System.
+    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System, and on
+    // the AMOLED a final Backgrounds page.
 
     uint8_t page = 0;
 
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    const uint8_t totalPages = 13;
+    #else
     const uint8_t totalPages = 11;
+    #endif
 
 
 
@@ -126,6 +143,11 @@ private:
 
     int16_t lastDrawnGainHundredths = -1;
 
+    // WiFi page live refresh: redraw only when these change.
+    uint8_t lastDrawnWifiClients = 255;
+
+    bool lastDrawnWifiEnabled = false;
+
     unsigned long lastPageSwipe = 0;
 
     uint8_t radioSection = 0;
@@ -137,6 +159,116 @@ private:
     unsigned long nextRepeatAt = 0;
 
     uint8_t profileScroll = 0;
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // The UI owns the panel brightness so a change from the web or from
+    // the System page lands here on the next update(). The same routine
+    // dims the panel after the configured idle time and restores it on
+    // the next touch, which it swallows so it cannot press a button.
+    static constexpr uint8_t DIM_FLOOR_LEVEL = 8;
+
+    uint8_t appliedBrightnessLevel = 0;
+
+    unsigned long lastTouchMs = 0;
+
+    uint16_t lastDimTimeoutSeconds = 0;
+
+    uint8_t lastBrightnessPercent = 0;
+
+    bool displayDimmed = false;
+
+    bool swallowTouchUntilRelease = false;
+
+    // Returns true while the current touch is a wake-up that the rest of
+    // update() must ignore.
+    bool updateDisplayBrightness(
+        Settings& settings,
+        bool touched
+    );
+
+    // Uploaded backgrounds. The selected image is loaded into PSRAM once
+    // and read by the composition path in place of the flash image.
+    Backgrounds* backgroundStore = nullptr;
+
+    uint16_t* backgroundPixels = nullptr;
+
+    char appliedBackgroundName[Backgrounds::NAME_LENGTH] = {0};
+
+    uint32_t appliedBackgroundRevision = 0;
+
+    bool backgroundApplied = false;
+
+    uint8_t backgroundScroll = 0;
+
+    // Control rate the firmware booted with; the System page flags a
+    // stored rate that differs until the next restart.
+    uint16_t bootControlLoopHz = 250;
+
+    // 180 degree screen flip for an upside-down board. The compositor
+    // reads this on every flush and the Touch driver mirrors to match.
+    bool screenFlipped = false;
+
+    bool screenFlipApplied = false;
+
+    bool syncScreenFlip(
+        Settings& settings,
+        Touch& touch
+    );
+
+    // Panel index of landscape (0, y), and the step taken per landscape x.
+    // Unflipped the UI is rotated clockwise into the portrait panel, so x
+    // walks the panel backwards; flipped it walks forwards from the
+    // mirrored row.
+    int panelRowStart(
+        int y
+    ) const
+    {
+        return
+            screenFlipped
+            ?
+            (UI_CANVAS_HEIGHT - 1 - y)
+            :
+            (((UI_CANVAS_WIDTH - 1) * UI_CANVAS_HEIGHT) + y);
+    }
+
+    int panelColumnStep() const
+    {
+        return
+            screenFlipped
+            ?
+            UI_CANVAS_HEIGHT
+            :
+            -UI_CANVAS_HEIGHT;
+    }
+
+    // Theme applied to the palette; re-applied when Settings change.
+    uint8_t appliedThemeText = 0;
+
+    uint8_t appliedThemeAccent = 0;
+
+    bool themeApplied = false;
+
+    bool syncTheme(
+        Settings& settings
+    );
+
+    // Loads the background named in Settings when it differs from the one
+    // on screen, or when storage changed. Returns true when a redraw is
+    // needed.
+    bool applyBackground(
+        Settings& settings
+    );
+
+    void drawBackgroundsPage(
+        Settings& settings
+    );
+
+    bool isBackgroundsPage();
+
+    void drawDisplayPage(
+        Settings& settings
+    );
+    #endif
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     bool swipePreviewActive = false;

@@ -1,9 +1,114 @@
 #include "WebConfigurator.h"
 #include "../../include/Version.h"
 
+#include <esp_system.h>
+
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
 #endif
+
+namespace
+{
+    // Hand-rolled JSON in the same style as /live-status. Values arrive
+    // already rendered so numbers, booleans and quoted strings share one
+    // path.
+    void appendJsonField(
+        String& json,
+        const char* key,
+        const String& rawValue
+    )
+    {
+        json += F(",\"");
+        json += key;
+        json += F("\":");
+        json += rawValue;
+    }
+
+    String jsonBool(
+        bool value
+    )
+    {
+        return value ? String(F("true")) : String(F("false"));
+    }
+
+    String jsonString(
+        const char* value
+    )
+    {
+        String quoted;
+
+        quoted.reserve(strlen(value) + 2);
+
+        quoted += '"';
+        quoted += value;
+        quoted += '"';
+
+        return quoted;
+    }
+
+    // One profile as a JSON object, shared by the settings and profile
+    // exports so an exported profile always imports.
+    void appendProfileJson(
+        String& json,
+        const Settings::DrivingProfile* profile
+    )
+    {
+        json += F("{\"name\":");
+        json += jsonString(profile->name);
+        appendJsonField(json, "gain", String(profile->gain, 2));
+        appendJsonField(json, "deadband", String(profile->deadband, 2));
+        appendJsonField(json, "gyroSmoothing", String(profile->gyroSmoothing, 2));
+        appendJsonField(json, "gyroIntegralGain", String(profile->gyroIntegralGain, 2));
+        appendJsonField(json, "gyroMaxCorrection", String((int)profile->gyroMaxCorrection));
+        appendJsonField(json, "gyroIntegralLimit", String((int)profile->gyroIntegralLimit));
+        appendJsonField(json, "gyroHoldBoost", String((int)profile->gyroHoldBoost));
+        appendJsonField(json, "predictionStrength", String((int)profile->predictionStrength));
+        appendJsonField(json, "radioSteeringTravel", String((int)profile->radioSteeringTravel));
+        appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
+        appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
+        appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
+        json += '}';
+    }
+
+    const char* resetReasonText(
+        esp_reset_reason_t reason
+    )
+    {
+        switch(reason)
+        {
+            case ESP_RST_POWERON: return "power-on";
+            case ESP_RST_EXT: return "external reset";
+            case ESP_RST_SW: return "software restart";
+            case ESP_RST_PANIC: return "crash (panic)";
+            case ESP_RST_INT_WDT: return "interrupt watchdog";
+            case ESP_RST_TASK_WDT: return "task watchdog";
+            case ESP_RST_WDT: return "watchdog";
+            case ESP_RST_DEEPSLEEP: return "deep sleep";
+            case ESP_RST_BROWNOUT: return "brownout (power dip)";
+            case ESP_RST_SDIO: return "sdio";
+            default: return "unknown";
+        }
+    }
+
+    String uptimeText()
+    {
+        unsigned long seconds =
+            millis() / 1000UL;
+
+        char text[24];
+
+        snprintf(
+            text,
+            sizeof(text),
+            "%lu:%02lu:%02lu",
+            seconds / 3600UL,
+            (seconds / 60UL) % 60UL,
+            seconds % 60UL
+        );
+
+        return String(text);
+    }
+}
 
 WebConfigurator::WebConfigurator()
 :
@@ -20,7 +125,10 @@ void WebConfigurator::begin(
     RadioInput& steeringRadioRef,
     RadioInput& gainRadioRef,
     RadioInput& throttleRadioRef,
-    BlackboxLogger& blackboxRef
+    BlackboxLogger& blackboxRef,
+    WiFiManager& wifiRef,
+    ServoOutput& steeringServoRef,
+    Backgrounds& backgroundsRef
 )
 {
     settings =
@@ -40,6 +148,15 @@ void WebConfigurator::begin(
 
     blackbox =
         &blackboxRef;
+
+    wifi =
+        &wifiRef;
+
+    steeringServo =
+        &steeringServoRef;
+
+    backgrounds =
+        &backgroundsRef;
 
     server.on(
         "/",
@@ -105,6 +222,33 @@ void WebConfigurator::begin(
     );
 
     server.on(
+        "/settings.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleSettingsExport();
+        }
+    );
+
+    server.on(
+        "/profiles.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleProfilesExport();
+        }
+    );
+
+    server.on(
+        "/import-profiles",
+        HTTP_POST,
+        [this]()
+        {
+            handleProfilesImport();
+        }
+    );
+
+    server.on(
         "/clear-log",
         HTTP_POST,
         [this]()
@@ -112,6 +256,77 @@ void WebConfigurator::begin(
             handleLogClear();
         }
     );
+
+    server.on(
+        "/restart",
+        HTTP_POST,
+        [this]()
+        {
+            handleRestart();
+        }
+    );
+
+    server.on(
+        "/factory-reset",
+        HTTP_POST,
+        [this]()
+        {
+            handleFactoryReset();
+        }
+    );
+
+    server.on(
+        "/capture-endpoint",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointCapture();
+        }
+    );
+
+    server.on(
+        "/reset-endpoints",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointReset();
+        }
+    );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // The second handler receives the multipart file in chunks while the
+    // request is parsed; the first one answers once it is complete.
+    server.on(
+        "/upload-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUpload();
+        },
+        [this]()
+        {
+            handleBackgroundUploadChunk();
+        }
+    );
+
+    server.on(
+        "/use-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUse();
+        }
+    );
+
+    server.on(
+        "/delete-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundDelete();
+        }
+    );
+    #endif
 
     server.onNotFound(
         [this]()
@@ -133,6 +348,46 @@ void WebConfigurator::begin(
 
 void WebConfigurator::update()
 {
+    // Checked before the running guard so a WiFi auto-off inside the
+    // delay window cannot strand a requested restart.
+    if(
+        restartAtMs != 0 &&
+        (long)(millis() - restartAtMs) >= 0
+    )
+    {
+        if(settings != nullptr)
+        {
+            // Erasing here, microseconds before the reset, means no
+            // deferred save, display press or CRSF write can put the
+            // in-memory settings back into flash.
+            if(factoryResetPending)
+            {
+                settings->factoryReset();
+
+                #if defined(OPENDRIFT_BOARD_AMOLED_164)
+                if(backgrounds != nullptr)
+                {
+                    backgrounds->eraseAll();
+                }
+                #endif
+            }
+            else
+            {
+                settings->flush();
+            }
+        }
+
+        Serial.println(
+            factoryResetPending
+            ? "Factory reset requested from web configurator"
+            : "Restart requested from web configurator"
+        );
+
+        Serial.flush();
+
+        esp_restart();
+    }
+
     if(!running)
     {
         return;
@@ -146,6 +401,13 @@ void WebConfigurator::update()
 bool WebConfigurator::isRunning()
 {
     return running;
+}
+
+
+
+bool WebConfigurator::isRestartPending()
+{
+    return restartAtMs != 0;
 }
 
 
@@ -177,8 +439,10 @@ void WebConfigurator::handleRoot()
     html += F("input[type=checkbox]{width:auto;transform:scale(1.3);margin-right:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}");
     html += F(".status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pill{background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:10px}");
     html += F("button{width:100%;padding:13px 16px;border:0;border-radius:6px;background:#24a36b;color:#fff;font-size:17px;font-weight:700;margin-top:16px}");
+    html += F("button.secondary{background:#3b4148}button.danger{background:#973b45}.warn{color:#e5a733}.ok{color:#24a36b}.bad{color:#e5484d}");
+    html += F(".endpoints{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.endpoints button{margin:0;padding:10px 6px;font-size:13px}.endpoints small{font-weight:400}");
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
-    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
+    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile,.endpoints{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
     html += F("</style></head><body><main>");
     html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator &middot; ");
     html += F(OPENDRIFT_VERSION_STRING);
@@ -217,7 +481,7 @@ void WebConfigurator::handleRoot()
     #endif
     html += F("</div></div></div>");
 
-    html += F("<div class='card'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
+    html += F("<div class='card' id='profiles'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
     html += settings->getActiveProfileName();
     html += F("</strong>. Active profiles automatically keep trackside tune changes.</p>");
 
@@ -272,6 +536,11 @@ void WebConfigurator::handleRoot()
         html += F("<p class='sub'>Profile limit reached. Delete one to create another.</p>");
     }
 
+    html += F("<p class='sub'><a href='/profiles.json'>Export profiles (JSON)</a> saves every driving profile to one file for backup or sharing.</p>");
+    html += F("<label>Import profiles from a file</label><input id='profileFile' type='file' accept='.json,application/json'>");
+    html += F("<button type='button' class='secondary' onclick='importProfiles()'>Import profiles</button>");
+    html += F("<p class='sub' id='profileImportStatus'>Takes a profiles export or a full settings export. A profile whose name already exists is replaced; if that profile is active it is deactivated so the imported values stick, then tap it to load them. The list holds 12; the browser reads the file and the board only receives checked values.</p>");
+
     html += F("</div>");
 
     html += F("<form method='post' action='/save'>");
@@ -316,16 +585,91 @@ void WebConfigurator::handleRoot()
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
     if(settings->getControlLoopHz() == 333) html += F(" selected");
-    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting.</p>");
+    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting: save first, then restart.</p>");
+    html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     html += F("<div class='row'>");
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
-    html += settings->isSteeringCalibrated() ? F("CALIBRATED") : F("NOT CALIBRATED");
-    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Position the wheels at each safe physical endpoint and capture it from the display or EdgeTX tool, or enter all three pulse values below.</p><div class='row'>");
+    // Same states and colours as the display's endpoint page.
+    bool endpointsSaved =
+        settings->isSteeringCalibrated();
+
+    if(endpointsSaved)
+    {
+        endpointCaptureError = false;
+    }
+
+    bool steeringSignal =
+        steeringRadio != nullptr &&
+        steeringRadio->hasSignal();
+
+    uint8_t endpointMask =
+        settings->getSteeringCalibrationMask();
+
+    html += F("<div class='card' id='endpoints'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong class='");
+    html += endpointsSaved
+        ? F("ok")
+        : (
+            (!steeringSignal || endpointCaptureError)
+            ? F("bad")
+            : F("")
+        );
+    html += F("'>");
+    html += endpointsSaved
+        ? F("CALIBRATED")
+        : (
+            !steeringSignal
+            ? F("NO STEERING SIGNAL")
+            : (
+                endpointCaptureError
+                ? F("INVALID - RETRY")
+                : (
+                    endpointMask != 0
+                    ? F("CAPTURE REMAINING")
+                    : F("CAPTURE ALL 3")
+                )
+            )
+        );
+    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Steer the wheels to each safe physical stop with the transmitter, then capture it here, on the display, or in the EdgeTX tool. Entering all three pulse values by hand also works.</p>");
+    html += F("<p class='sub'>Servo now: <strong id='servoPulse'>");
+    html += steeringServo != nullptr
+        ? String(steeringServo->getPosition())
+        : String(F("--"));
+    html += F("</strong> us &middot; steering signal <strong id='steeringSignal'>");
+    html += steeringSignal ? F("OK") : F("NONE");
+    html += F("</strong></p><div class='endpoints'>");
+
+    static const char* const endpointLabels[3] =
+    {
+        "Capture left",
+        "Capture center",
+        "Capture right"
+    };
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        bool captured =
+            (endpointMask & (1U << point)) != 0;
+
+        html += F("<button type='submit' form='captureEndpoint");
+        html += String(point);
+        html += captured ? F("'>") : F("' class='danger'>");
+        html += endpointLabels[point];
+
+        if(captured)
+        {
+            html += F("<br><small>");
+            html += String(settings->getSteeringCapturedPulse(point));
+            html += F(" us</small>");
+        }
+
+        html += F("</button>");
+    }
+
+    html += F("<button type='submit' form='resetEndpoints' class='secondary'>Reset calibration</button></div><div class='row'>");
     html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
     html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
     html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
@@ -414,17 +758,99 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
+    html += F("<p class='sub'>Connected devices now: <strong id='wifiClients'>");
+    html += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
+    html += F("</strong></p>");
     html += input("Network name (SSID)", "wifiSsid", String(settings->getWifiSsid()), "text", "");
-    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. Applies the next time WiFi starts: toggle WiFi off and on from the display, or reboot, then join the new network.</p>");
+    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. A new name applies after a restart, or the next time WiFi is switched on from the display.</p>");
+
+    if(
+        wifi != nullptr &&
+        wifi->isSsidChangePending()
+    )
+    {
+        // The active name is sanitized to the same character set as the
+        // form values, so it is safe to inline.
+        html += F("<p class='sub warn'>Rename pending: the access point still broadcasts <strong>");
+        html += wifi->getActiveSsid();
+        html += F("</strong>. Restart to switch to the new name.</p>");
+        html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
+    }
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
-    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
+    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off.</p>");
     html += F("</div>");
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='card'><h2>Display</h2><label>Brightness</label><select name='displayBrightness'>");
+
+    for(uint8_t percent = 10; percent <= 100; percent += 10)
+    {
+        html += F("<option value='");
+        html += String(percent);
+        html += F("'");
+
+        if(settings->getDisplayBrightness() == percent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += String(percent);
+        html += F("%</option>");
+    }
+
+    html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
+    html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
+    html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p>");
+
+    html += F("<label>Text colour</label><select name='themeText'><option value='0'");
+    if(settings->getThemeText() == 0) html += F(" selected");
+    html += F(">Light text (default)</option><option value='1'");
+    if(settings->getThemeText() == 1) html += F(" selected");
+    html += F(">Dark text, for light backgrounds</option></select>");
+
+    html += F("<label>Accent colour</label><select name='themeAccent'>");
+
+    for(uint8_t accent = 0; accent < Settings::THEME_ACCENT_COUNT; accent++)
+    {
+        html += F("<option value='");
+        html += String((int)accent);
+        html += F("'");
+
+        if(settings->getThemeAccent() == accent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += Settings::themeAccentName(accent);
+        html += F("</option>");
+    }
+
+    html += F("</select><p class='sub'>Headers, buttons and highlights use the accent; Mixed keeps the original colour per page. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any photo. The System page has the same two controls.</p></div>");
+
+    #endif
 
     html += F("<div class='card'><h2>Blackbox</h2>");
     html += checkbox("Enable onboard logging", "blackboxEnabled", settings->getBlackboxEnabled());
     html += F("</div>");
 
     html += F("<button type='submit'>Save Settings</button></form>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> downloads every setting, the endpoint calibration and all profiles as one backup file.</p>");
+
+    // The capture and reset buttons live inside the settings form above,
+    // which cannot nest another form, so they target these through their
+    // form attribute.
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        html += F("<form id='captureEndpoint");
+        html += String(point);
+        html += F("' method='post' action='/capture-endpoint'><input type='hidden' name='point' value='");
+        html += String(point);
+        html += F("'></form>");
+    }
+
+    html += F("<form id='resetEndpoints' method='post' action='/reset-endpoints' onsubmit=\"return confirm('Clear the physical endpoint calibration? The servo returns to the plain center and travel map until all three points are captured again.')\"></form>");
 
     html += F("<div class='card'><h2>Blackbox Log</h2>");
 
@@ -468,7 +894,104 @@ void WebConfigurator::handleRoot()
 
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Outside the settings form on purpose: the Use and Delete buttons
+    // are forms of their own, and forms cannot nest.
+    html += F("<div class='card' id='backgrounds'><h2>Backgrounds</h2>");
+
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        html += F("<p class='sub bad'>Background storage is not available on this board.</p></div>");
+    }
+    else
+    {
+        const char* activeBackground =
+            settings->getBackgroundName();
+
+        html += F("<p class='sub'>Active: <strong>");
+        html += activeBackground[0] != 0 ? activeBackground : "Built-in";
+        html += F("</strong> &middot; stored: ");
+        html += String((int)backgrounds->getCount());
+        html += F(" of ");
+        html += String((int)Backgrounds::MAX_BACKGROUNDS);
+        html += F(" &middot; free: ");
+        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
+        html += F(" KB</p>");
+
+        html += F("<div class='profile");
+
+        if(activeBackground[0] == 0)
+        {
+            html += F(" active");
+        }
+
+        html += F("'><div><strong>Built-in</strong><small>The image compiled into the firmware</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
+
+        // Names are sanitized to letters, digits, - and _ so they are safe
+        // inside attributes without escaping.
+        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
+        {
+            const char* name =
+                backgrounds->getName(i);
+
+            html += F("<div class='profile");
+
+            if(strcmp(name, activeBackground) == 0)
+            {
+                html += F(" active");
+            }
+
+            html += F("'><div><strong>");
+            html += name;
+            html += F("</strong><small>456 x 280 &middot; 250 KB</small></div>");
+            html += F("<form method='post' action='/use-background'><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button type='submit'>Use</button></form>");
+            html += F("<form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
+        }
+
+        html += F("<label>Image file</label><input id='bgFile' type='file' accept='image/*'>");
+        html += F("<label>Name (letters, digits, - and _)</label><input id='bgName' type='text' maxlength='23' placeholder='Example: track-night'>");
+        html += F("<button type='button' class='secondary' onclick='uploadBackground()'>Convert and upload</button>");
+        html += F("<p class='sub' id='bgStatus'>Any JPG or PNG. Your browser scales and crops it to 456 x 280 and converts it to the panel's pixel format, so the board only stores 250 KB per image and holds up to 16. Upload at the bench, not while driving: it writes flash.</p>");
+        html += F("</div>");
+    }
+    #endif
+
+    // The settings form above cannot contain another form, so the restart
+    // form lives here and the restart buttons elsewhere on the page point
+    // at it through their form attribute.
+    html += F("<div class='card'><h2>System</h2><p class='sub'>Last reset: <strong>");
+    html += resetReasonText(esp_reset_reason());
+    html += F("</strong> &middot; up ");
+    html += uptimeText();
+    html += F(". A crash or watchdog here means the board rebooted on its own; check the serial monitor for the backtrace.</p>");
+    html += F("<p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
+    html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> before a factory reset to keep a copy of the tune and profiles.</p>");
+    html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults.</p>");
+    html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, logging settings, and every uploaded background. OpenDrift restarts with defaults and the WiFi name ");
+    html += Settings::defaultWifiSsid();
+    html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
+    html += F("</div>");
+
+    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+
+    // The browser parses the JSON and posts plain form fields, so the board
+    // needs no JSON parser and every value goes through the same clamps as
+    // the settings form.
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.readAsText(f);}");
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
+    // raw pixels as a multipart file named <name>.rgb. The board never has
+    // to decode an image format.
+    html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
+    #endif
+
+    html += F("</script></body></html>");
 
     server.send(
         200,
@@ -504,13 +1027,21 @@ void WebConfigurator::handleLiveStatus()
     #endif
 
     String json;
-    json.reserve(72);
+    json.reserve(128);
     json += F("{\"gain\":");
     json += String(gyro->getGain(), 2);
     json += F(",\"pulse\":");
     json += String(gainRadio->getPulseWidth());
     json += F(",\"override\":");
     json += gainOverride ? F("true") : F("false");
+    json += F(",\"steering\":");
+    json += (steeringRadio != nullptr && steeringRadio->hasSignal()) ? F("true") : F("false");
+    json += F(",\"servo\":");
+    json += steeringServo != nullptr
+        ? String(steeringServo->getPosition())
+        : String(0);
+    json += F(",\"clients\":");
+    json += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
     json += F("}");
 
     server.sendHeader(
@@ -780,6 +1311,36 @@ void WebConfigurator::handleSave()
     settings->setBlackboxEnabled(
         server.hasArg("blackboxEnabled")
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    settings->setDisplayBrightness(
+        getIntArg(
+            "displayBrightness",
+            settings->getDisplayBrightness()
+        )
+    );
+
+    settings->setDisplayDimTimeout(
+        getIntArg(
+            "displayDimTimeout",
+            settings->getDisplayDimTimeout()
+        )
+    );
+
+    settings->setThemeText(
+        getIntArg(
+            "themeText",
+            settings->getThemeText()
+        )
+    );
+
+    settings->setThemeAccent(
+        getIntArg(
+            "themeAccent",
+            settings->getThemeAccent()
+        )
+    );
+    #endif
 
     if(gyro != nullptr)
     {
@@ -1068,6 +1629,791 @@ void WebConfigurator::handleLogClear()
 
     server.send(
         303
+    );
+}
+
+
+
+void WebConfigurator::handleSettingsExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Keys are the web form field names so a future import can post the
+    // same values straight back through /save. No escaping is needed: the
+    // WiFi name and profile names are sanitized to letters, digits, space
+    // and - _ . on the way in.
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
+
+    String json;
+
+    json.reserve(6144);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\"");
+
+    appendJsonField(json, "gain", String(settings->getGain(), 2));
+    appendJsonField(json, "deadband", String(settings->getDeadband(), 2));
+    appendJsonField(json, "gyroReverse", jsonBool(settings->getGyroReverse()));
+    appendJsonField(json, "gyroMax", String(settings->getGyroMaxCorrection()));
+    appendJsonField(json, "gyroSmoothing", String(settings->getGyroSmoothing(), 2));
+    appendJsonField(json, "gyroLpfMode", String((int)settings->getGyroLpfMode()));
+    appendJsonField(json, "predictionStrength", String(settings->getPredictionStrength()));
+    appendJsonField(json, "huntStrength", String(settings->getGyroHuntStrength()));
+    appendJsonField(json, "transitionSpeed", String(settings->getGyroTransitionSpeed()));
+    appendJsonField(json, "counterSteerAssist", String(settings->getGyroCounterSteerAssist()));
+    appendJsonField(json, "gyroHoldBoost", String(settings->getGyroHoldBoost()));
+    appendJsonField(json, "gyroIGain", String(settings->getGyroIntegralGain(), 2));
+    appendJsonField(json, "gyroILimit", String(settings->getGyroIntegralLimit()));
+
+    appendJsonField(json, "servoReverse", jsonBool(settings->getServoReverse()));
+    appendJsonField(json, "controlLoopHz", String((int)settings->getControlLoopHz()));
+    appendJsonField(json, "servoCenter", String(settings->getServoCenter()));
+    appendJsonField(json, "servoTravel", String(settings->getServoTravel()));
+    appendJsonField(json, "servoQuiet", String(settings->getServoQuiet()));
+
+    appendJsonField(json, "steeringMin", String(settings->getSteeringMin()));
+    appendJsonField(json, "steeringCenter", String(settings->getSteeringCenter()));
+    appendJsonField(json, "steeringMax", String(settings->getSteeringMax()));
+    appendJsonField(json, "radioSteeringTravel", String(settings->getRadioSteeringTravel()));
+
+    appendJsonField(json, "gainMin", String(settings->getGainMin()));
+    appendJsonField(json, "gainMax", String(settings->getGainMax()));
+    appendJsonField(json, "channel3GainMin", String(settings->getChannel3GainMin(), 2));
+    appendJsonField(json, "channel3GainMax", String(settings->getChannel3GainMax(), 2));
+    appendJsonField(json, "throttleOutputEnabled", jsonBool(settings->getThrottleOutputEnabled()));
+
+    // Emitted on every build so the file layout does not depend on the
+    // firmware variant that wrote it.
+    for(uint8_t gpio = 1; gpio <= 8; gpio++)
+    {
+        char key[12];
+
+        snprintf(
+            key,
+            sizeof(key),
+            "auxGpio%u",
+            gpio
+        );
+
+        appendJsonField(json, key, String((int)settings->getAuxChannelForGpio(gpio)));
+    }
+
+    appendJsonField(json, "wifiEnabled", jsonBool(settings->getWifiEnabled()));
+    appendJsonField(json, "wifiSsid", jsonString(settings->getWifiSsid()));
+    appendJsonField(json, "wifiTimeout", String(settings->getWifiTimeout()));
+    appendJsonField(json, "blackboxEnabled", jsonBool(settings->getBlackboxEnabled()));
+    appendJsonField(json, "displayBrightness", String((int)settings->getDisplayBrightness()));
+    appendJsonField(json, "displayDimTimeout", String((int)settings->getDisplayDimTimeout()));
+    appendJsonField(json, "themeText", String((int)settings->getThemeText()));
+    appendJsonField(json, "themeAccent", String((int)settings->getThemeAccent()));
+    appendJsonField(json, "backgroundName", jsonString(settings->getBackgroundName()));
+
+    json += F(",\"endpointCalibration\":{\"calibrated\":");
+    json += jsonBool(settings->isSteeringCalibrated());
+    json += F(",\"mask\":");
+    json += String((int)settings->getSteeringCalibrationMask());
+    json += F(",\"servoPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedPulse(point));
+    }
+
+    json += F("],\"inputPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedInputPulse(point));
+    }
+
+    json += F("]},\"profiles\":{\"active\":");
+    json += String((int)settings->getActiveProfileIndex());
+    json += F(",\"activeName\":");
+    json += jsonString(settings->getActiveProfileName());
+    json += F(",\"items\":[");
+
+    bool firstProfile = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!firstProfile)
+        {
+            json += ',';
+        }
+
+        firstProfile = false;
+
+        appendProfileJson(json, profile);
+    }
+
+    json += F("]}}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-settings-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
+    );
+}
+
+
+
+void WebConfigurator::handleProfilesExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
+
+    String json;
+
+    json.reserve(4096);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\",\"profiles\":[");
+
+    bool first = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!first)
+        {
+            json += ',';
+        }
+
+        first = false;
+
+        appendProfileJson(json, profile);
+    }
+
+    json += F("]}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-profiles-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
+    );
+}
+
+
+
+void WebConfigurator::handleProfilesImport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    int count =
+        constrain(
+            getIntArg("count", 0),
+            0,
+            (int)Settings::MAX_PROFILES
+        );
+
+    uint8_t added = 0;
+    uint8_t replaced = 0;
+    uint8_t invalid = 0;
+    uint8_t full = 0;
+
+    for(int i = 0; i < count; i++)
+    {
+        Settings::DrivingProfile profile;
+
+        char key[16];
+
+        snprintf(key, sizeof(key), "n%d", i);
+        server.arg(key).toCharArray(profile.name, Settings::PROFILE_NAME_LENGTH);
+
+        profile.gain = profileFloatArg("gain", i, profile.gain);
+        profile.deadband = profileFloatArg("deadband", i, profile.deadband);
+        profile.gyroSmoothing = profileFloatArg("smooth", i, profile.gyroSmoothing);
+        profile.gyroIntegralGain = profileFloatArg("igain", i, profile.gyroIntegralGain);
+        profile.gyroMaxCorrection = profileIntArg("max", i, profile.gyroMaxCorrection);
+        profile.gyroIntegralLimit = profileIntArg("ilimit", i, profile.gyroIntegralLimit);
+        profile.gyroHoldBoost = profileIntArg("hold", i, profile.gyroHoldBoost);
+        profile.predictionStrength = profileIntArg("pred", i, profile.predictionStrength);
+        profile.radioSteeringTravel = profileIntArg("travel", i, profile.radioSteeringTravel);
+        profile.gyroCounterSteerAssist = profileIntArg("csteer", i, profile.gyroCounterSteerAssist);
+        profile.gyroTransitionSpeed = profileIntArg("tspeed", i, profile.gyroTransitionSpeed);
+        profile.gyroHuntStrength = profileIntArg("wobble", i, profile.gyroHuntStrength);
+
+        bool wasReplaced = false;
+
+        int8_t result =
+            settings->importProfile(
+                profile,
+                wasReplaced
+            );
+
+        if(result == -1)
+        {
+            invalid++;
+        }
+        else if(result == -2)
+        {
+            full++;
+        }
+        else if(wasReplaced)
+        {
+            replaced++;
+        }
+        else
+        {
+            added++;
+        }
+    }
+
+    String summary;
+
+    summary += F("Imported ");
+    summary += String((int)(added + replaced));
+    summary += F(" profile(s): ");
+    summary += String((int)added);
+    summary += F(" added, ");
+    summary += String((int)replaced);
+    summary += F(" replaced");
+
+    if(invalid > 0)
+    {
+        summary += F(", ");
+        summary += String((int)invalid);
+        summary += F(" skipped (unusable name)");
+    }
+
+    if(full > 0)
+    {
+        summary += F(", ");
+        summary += String((int)full);
+        summary += F(" skipped (list full)");
+    }
+
+    summary += '.';
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        (added + replaced) > 0 ? 200 : 400,
+        "text/plain",
+        summary
+    );
+}
+
+
+
+float WebConfigurator::profileFloatArg(
+    const char* prefix,
+    int index,
+    float fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    float value =
+        server.arg(key).toFloat();
+
+    // strtod accepts "nan" and "inf"; neither may reach the controller.
+    return isfinite(value) ? value : fallback;
+}
+
+
+
+int32_t WebConfigurator::profileIntArg(
+    const char* prefix,
+    int index,
+    int32_t fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    return server.arg(key).toInt();
+}
+
+
+
+void WebConfigurator::handleRestart()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Persist anything still waiting for the deferred save so a change
+    // made moments ago cannot be lost by the reset.
+    settings->flush();
+
+    // The configured name is the one the access point uses after boot.
+    sendRestartPage(
+        "Restarting",
+        settings->getWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleFactoryReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Nothing is flushed here on purpose: the deferred restart erases
+    // the namespace and the board boots with defaults.
+    factoryResetPending = true;
+
+    sendRestartPage(
+        "Factory reset",
+        Settings::defaultWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleEndpointCapture()
+{
+    if(
+        settings == nullptr ||
+        steeringRadio == nullptr ||
+        steeringServo == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Endpoint capture unavailable"
+        );
+
+        return;
+    }
+
+    int point =
+        getIntArg(
+            "point",
+            -1
+        );
+
+    if(point < 0 || point > 2)
+    {
+        server.send(
+            400,
+            "text/plain",
+            "Invalid endpoint"
+        );
+
+        return;
+    }
+
+    // Same gate and same inputs as the display and the EdgeTX tool: the
+    // servo's current position is only meaningful while the transmitter
+    // is steering it, and the captured pulse must be a sane servo value.
+    if(!steeringRadio->hasSignal())
+    {
+        endpointCaptureError = true;
+    }
+    else
+    {
+        int pulse =
+            steeringServo->getPosition();
+
+        if(pulse < 900 || pulse > 2100)
+        {
+            endpointCaptureError = true;
+        }
+        else
+        {
+            endpointCaptureError =
+                !settings->captureSteeringCalibrationPoint(
+                    (uint8_t)point,
+                    pulse,
+                    steeringRadio->getPulseWidth()
+                );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+void WebConfigurator::handleEndpointReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    settings->clearSteeringCalibration();
+
+    endpointCaptureError = false;
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void WebConfigurator::handleBackgroundUploadChunk()
+{
+    if(backgrounds == nullptr)
+    {
+        return;
+    }
+
+    HTTPUpload& upload =
+        server.upload();
+
+    switch(upload.status)
+    {
+        case UPLOAD_FILE_START:
+        {
+            // The browser sends <name>.rgb; beginUpload() validates the
+            // name and refuses when the list or the partition is full.
+            String name =
+                upload.filename;
+
+            int dot =
+                name.lastIndexOf('.');
+
+            if(dot > 0)
+            {
+                name = name.substring(0, dot);
+            }
+
+            backgroundUploadOk =
+                backgrounds->beginUpload(
+                    name.c_str()
+                );
+
+            break;
+        }
+
+        case UPLOAD_FILE_WRITE:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->writeUpload(
+                        upload.buf,
+                        upload.currentSize
+                    );
+            }
+            break;
+
+        case UPLOAD_FILE_END:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->endUpload();
+            }
+            else
+            {
+                backgrounds->abortUpload();
+            }
+            break;
+
+        default:
+            backgrounds->abortUpload();
+            backgroundUploadOk = false;
+            break;
+    }
+}
+
+
+
+void WebConfigurator::handleBackgroundUpload()
+{
+    if(
+        backgrounds == nullptr ||
+        !backgrounds->isReady()
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    if(backgroundUploadOk)
+    {
+        backgroundUploadOk = false;
+
+        server.send(
+            200,
+            "text/plain",
+            "OK"
+        );
+
+        return;
+    }
+
+    const char* error =
+        backgrounds->getUploadError();
+
+    server.send(
+        400,
+        "text/plain",
+        error[0] != 0 ? error : "No image was received"
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundUse()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    // An unknown name selects the built-in image rather than leaving a
+    // dangling choice behind.
+    if(
+        name.length() > 0 &&
+        (
+            backgrounds == nullptr ||
+            !backgrounds->exists(name.c_str())
+        )
+    )
+    {
+        name = "";
+    }
+
+    settings->setBackgroundName(
+        name
+    );
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundDelete()
+{
+    if(
+        settings == nullptr ||
+        backgrounds == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    if(name.length() > 0)
+    {
+        backgrounds->remove(
+            name.c_str()
+        );
+
+        if(strcmp(settings->getBackgroundName(), name.c_str()) == 0)
+        {
+            settings->setBackgroundName(
+                ""
+            );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+#endif
+
+
+
+void WebConfigurator::sendRestartPage(
+    const char* heading,
+    const char* ssid
+)
+{
+    String html;
+
+    html.reserve(1200);
+
+    html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='12;url=/'>");
+    html += F("<title>OpenDrift</title><style>body{font-family:system-ui,Arial,sans-serif;margin:0;background:#101214;color:#f5f5f5}main{max-width:760px;margin:0 auto;padding:18px}h1{font-size:28px;margin:8px 0 2px}p{color:#aeb4bb;font-size:16px}a{color:#65b7ff}</style></head><body><main><h1>");
+    html += heading;
+    html += F("</h1><p>OpenDrift is restarting. Rejoin the WiFi network <strong>");
+    html += ssid;
+    html += F("</strong> in about 10 seconds. This page reloads by itself once you are back on the network, or <a href='/'>reload it</a> yourself.</p>");
+    html += F("<p>The RAM blackbox log does not survive a restart.</p></main></body></html>");
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "text/html",
+        html
     );
 }
 

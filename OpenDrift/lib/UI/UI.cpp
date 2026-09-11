@@ -1,6 +1,8 @@
 #include "UI.h"
 #include "../../include/Version.h"
 
+#include <esp_heap_caps.h>
+
 static constexpr uint16_t ROUND_CYAN = 0x07FF;
 static constexpr uint16_t ROUND_DIM = 0x3186;
 
@@ -15,6 +17,13 @@ static constexpr uint8_t PAGE_STEERING = 7;
 static constexpr uint8_t PAGE_STEERING_CAL = 8;
 static constexpr uint8_t PAGE_WIFI = 9;
 static constexpr uint8_t PAGE_SYSTEM = 10;
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+static constexpr uint8_t PAGE_DISPLAY = 11;
+static constexpr uint8_t PAGE_BACKGROUNDS = 12;
+#else
+static constexpr uint8_t PAGE_BACKGROUNDS = 11;
+#endif
 
 
 static uint8_t radioSectionForPage(
@@ -37,6 +46,20 @@ static constexpr int OD_BACKGROUND_WIDTH = 456;
 static constexpr int OD_BACKGROUND_HEIGHT = 280;
 static constexpr float OD_TEXT_SCALE = 1.15f;
 
+// Row labels use narrower glyphs at the normal height so the longest
+// ones ("COUNTERSTEER", "SERVO QUIET") end before the value column at
+// x=146. Defined ahead of the setTextSize macro below so this two-argument
+// call is left alone.
+static void setAmoledLabelSize(
+    LGFX_Sprite* lcd
+)
+{
+    lcd->setTextSize(
+        1.4f * OD_TEXT_SCALE,
+        2.0f * OD_TEXT_SCALE
+    );
+}
+
 // LovyanGFX supports fractional text scaling. This enlarges all AMOLED
 // typography without adding another rendering pass.
 #define setTextSize(size) setTextSize(static_cast<float>(size) * OD_TEXT_SCALE)
@@ -48,15 +71,115 @@ static_assert(
 );
 
 static constexpr uint16_t OD_BG = TFT_BLACK;
-static constexpr uint16_t OD_TEXT = 0xFFFF;
-static constexpr uint16_t OD_MUTED = 0x9CF3;
-static constexpr uint16_t OD_DIM = 0x3186;
-static constexpr uint16_t OD_CYAN = 0x07FF;
-static constexpr uint16_t OD_BLUE = 0x3D9F;
-static constexpr uint16_t OD_MAGENTA = 0xF81F;
 static constexpr uint16_t OD_AMBER = 0xFD20;
 static constexpr uint16_t OD_GREEN = 0x07E0;
 static constexpr uint16_t OD_RED = 0xF800;
+
+// Themed colours. applyAmoledTheme() assigns them from the Settings theme;
+// these defaults are the original palette.
+static uint16_t OD_TEXT = 0xFFFF;
+static uint16_t OD_MUTED = 0x9CF3;
+static uint16_t OD_DIM = 0x3186;
+static uint16_t OD_CYAN = 0x07FF;
+static uint16_t OD_BLUE = 0x3D9F;
+static uint16_t OD_MAGENTA = 0xF81F;
+static uint16_t OD_WARM = 0xFD20;   // page-role amber; OD_AMBER stays fixed for warnings
+
+static bool themeDarkText = false;
+
+// Translucent panel marker. Page canvases treat black as transparent; this
+// near-black value is not produced by anything else the UI draws, and the
+// compositor replaces it with a blended background pixel.
+static constexpr uint16_t OD_PANEL = 0x0020;
+static constexpr uint16_t OD_PANEL_RAW = 0x2000;   // OD_PANEL in the sprite's byte order
+
+struct AmoledAccentPreset
+{
+    uint16_t primary;
+    uint16_t secondary;
+    uint16_t tertiary;
+    uint16_t warm;
+};
+
+// Order matches Settings::themeAccentName(). MIXED keeps the original
+// cyan/blue/magenta split between pages; the others use one colour.
+static const AmoledAccentPreset ACCENT_PRESETS[Settings::THEME_ACCENT_COUNT] =
+{
+    {0x07FF, 0x3D9F, 0xF81F, 0xFD20},
+    {0x07FF, 0x07FF, 0x07FF, 0x07FF},
+    {0x3D9F, 0x3D9F, 0x3D9F, 0x3D9F},
+    {0xF81F, 0xF81F, 0xF81F, 0xF81F},
+    {0xFD20, 0xFD20, 0xFD20, 0xFD20},
+    {0x07E0, 0x07E0, 0x07E0, 0x07E0},
+    {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF},
+};
+
+static void applyAmoledTheme(
+    uint8_t textMode,
+    uint8_t accent
+)
+{
+    themeDarkText = textMode == 1;
+
+    if(themeDarkText)
+    {
+        // Near-black rather than black, because black is the transparent key.
+        OD_TEXT = 0x0841;
+        OD_MUTED = 0x4228;
+        OD_DIM = 0xAD75;
+    }
+    else
+    {
+        OD_TEXT = 0xFFFF;
+        OD_MUTED = 0x9CF3;
+        OD_DIM = 0x3186;
+    }
+
+    const AmoledAccentPreset& preset =
+        ACCENT_PRESETS[accent < Settings::THEME_ACCENT_COUNT ? accent : 0];
+
+    OD_CYAN = preset.primary;
+    OD_BLUE = preset.secondary;
+    OD_MAGENTA = preset.tertiary;
+    OD_WARM = preset.warm;
+}
+
+static inline uint16_t swapColorBytes(
+    uint16_t value
+)
+{
+    return (uint16_t)((value << 8) | (value >> 8));
+}
+
+// Keeps 3/8 of the background under a panel, and adds 5/8 white when the
+// text is dark, so text stays readable over any photo.
+static inline uint16_t blendPanel(
+    uint16_t background
+)
+{
+    uint16_t part =
+        ((background >> 2) & 0x39E7) +
+        ((background >> 3) & 0x18E3);
+
+    return themeDarkText ? (uint16_t)(part + 0x9CF3) : part;
+}
+
+static inline uint16_t blendPanelRaw(
+    uint16_t backgroundRaw
+)
+{
+    return swapColorBytes(blendPanel(swapColorBytes(backgroundRaw)));
+}
+
+// Full-width translucent panel behind one row of label, value and buttons.
+static void drawAmoledRowPanel(
+    LGFX_Sprite* lcd,
+    int y,
+    int h
+)
+{
+    lcd->fillRoundRect(18, y, 420, h, 6, OD_PANEL);
+}
 
 
 static void drawUiBackground(
@@ -71,11 +194,22 @@ static void drawUiBackground(
 }
 
 
+// Points at a background loaded from storage, or stays null for the image
+// compiled into the firmware. Every composition path reads through
+// readBackgroundPixel(), so this is the only switch needed.
+static const uint16_t* activeBackgroundPixels = nullptr;
+
+
 static uint16_t readBackgroundPixel(
     int x,
     int y
 )
 {
+    if(activeBackgroundPixels != nullptr)
+    {
+        return activeBackgroundPixels[(y * OD_BACKGROUND_WIDTH) + x];
+    }
+
     const uint16_t* pixels =
         reinterpret_cast<const uint16_t*>(background_map);
 
@@ -150,6 +284,14 @@ static void drawAmoledButton(
     uint8_t textSize = 2
 )
 {
+    lcd->fillRect(
+        x + 1,
+        y + 1,
+        w - 2,
+        h - 2,
+        OD_PANEL
+    );
+
     lcd->drawRect(
         x,
         y,
@@ -454,6 +596,18 @@ static int mapSteeringForDisplay(
 
 
 
+// Text colour for code that both display builds compile: the AMOLED
+// palette follows the theme, the round one is fixed.
+static inline uint16_t uiTextColor()
+{
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    return OD_TEXT;
+    #else
+    return TFT_WHITE;
+    #endif
+}
+
+
 void UI::begin(
     LGFX* display,
     GyroController& gyro,
@@ -468,6 +622,25 @@ void UI::begin(
     steeringServoOutput = &steeringServo;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Boot counts as activity so the panel cannot dim during startup.
+    lastTouchMs = millis();
+
+    bootControlLoopHz = settings.getControlLoopHz();
+
+    syncTheme(
+        settings
+    );
+
+    // begin() draws the first page itself, so the compositor needs the
+    // stored flip now. screenFlipApplied stays false so the first
+    // update() still mirrors the touch driver to match.
+    screenFlipped =
+        settings.getDisplayFlip();
+
+    applyBackground(
+        settings
+    );
+
     bool usePsram =
         psramFound();
 
@@ -806,6 +979,20 @@ void UI::drawPage(
                 settings
             );
             break;
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        case PAGE_DISPLAY:
+            drawDisplayPage(
+                settings
+            );
+            break;
+
+        case PAGE_BACKGROUNDS:
+            drawBackgroundsPage(
+                settings
+            );
+            break;
+        #endif
     }
 }
 
@@ -1337,6 +1524,14 @@ void UI::flushDisplay(
 
         for(int y = 0; y < UI_CANVAS_HEIGHT; y++)
         {
+            // The panel index is linear in x either way, so the
+            // orientation costs one branch per row instead of per pixel.
+            int targetIndex =
+                panelRowStart(y);
+
+            int targetStep =
+                panelColumnStep();
+
             for(int x = 0; x < UI_CANVAS_WIDTH; x++)
             {
                 int sourceX =
@@ -1359,18 +1554,22 @@ void UI::flushDisplay(
                             sourceX
                         ];
 
-                    if(pageColor != 0)
+                    if(pageColor == OD_PANEL_RAW)
+                    {
+                        color =
+                            blendPanelRaw(color);
+                    }
+                    else if(pageColor != 0)
                     {
                         color =
                             pageColor;
                     }
                 }
 
-                target[
-                    ((UI_CANVAS_WIDTH - 1 - x) * UI_CANVAS_HEIGHT) +
-                    y
-                ] =
+                target[targetIndex] =
                     color;
+
+                targetIndex += targetStep;
             }
         }
 
@@ -1417,18 +1616,34 @@ void UI::flushDisplay(
                         y
                     );
 
-                if(pageColor != TFT_BLACK)
+                if(pageColor == OD_PANEL)
+                {
+                    color =
+                        blendPanel((uint16_t)color);
+                }
+                else if(pageColor != TFT_BLACK)
                 {
                     color =
                         pageColor;
                 }
             }
 
-            panelCanvas.drawPixel(
-                y,
-                UI_CANVAS_WIDTH - 1 - x,
-                color
-            );
+            if(screenFlipped)
+            {
+                panelCanvas.drawPixel(
+                    UI_CANVAS_HEIGHT - 1 - y,
+                    x,
+                    color
+                );
+            }
+            else
+            {
+                panelCanvas.drawPixel(
+                    y,
+                    UI_CANVAS_WIDTH - 1 - x,
+                    color
+                );
+            }
         }
     }
 
@@ -1508,6 +1723,12 @@ void UI::flushTransitionDisplay(
 
     for(int y = 0; y < UI_CANVAS_HEIGHT; y++)
     {
+        int targetIndex =
+            panelRowStart(y);
+
+        int targetStep =
+            panelColumnStep();
+
         for(int x = 0; x < UI_CANVAS_WIDTH; x++)
         {
             uint16_t color =
@@ -1551,17 +1772,21 @@ void UI::flushTransitionDisplay(
                 }
             }
 
-            if(pageColor != 0)
+            if(pageColor == OD_PANEL_RAW)
+            {
+                color =
+                    blendPanelRaw(color);
+            }
+            else if(pageColor != 0)
             {
                 color =
                     pageColor;
             }
 
-            target[
-                ((UI_CANVAS_WIDTH - 1 - x) * UI_CANVAS_HEIGHT) +
-                y
-            ] =
+            target[targetIndex] =
                 color;
+
+            targetIndex += targetStep;
         }
     }
 
@@ -1667,6 +1892,8 @@ void UI::drawMainPage(
         "Drive",
         OD_CYAN
     );
+
+    lcd->fillRoundRect(18, 52, 240, 106, 6, OD_PANEL);
 
     lcd->setTextSize(2);
 
@@ -1915,7 +2142,11 @@ void UI::drawCorePage(
         OD_MAGENTA
     );
 
-    lcd->setTextSize(2);
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
+
+    setAmoledLabelSize(lcd);
 
     lcd->setTextColor(
         OD_MUTED
@@ -2134,6 +2365,11 @@ void UI::drawSystemPage(
         OD_BLUE
     );
 
+    drawAmoledRowPanel(lcd, 48, 36);
+    drawAmoledRowPanel(lcd, 89, 36);
+    drawAmoledRowPanel(lcd, 130, 36);
+    drawAmoledRowPanel(lcd, 171, 36);
+
     lcd->setTextSize(2);
 
     lcd->setTextColor(
@@ -2146,22 +2382,24 @@ void UI::drawSystemPage(
         20
     );
 
+    setAmoledLabelSize(lcd);
+
     lcd->drawString(
-        "RATE (REBOOT)",
+        "LOOP RATE",
         22,
-        64
+        58
     );
 
     lcd->drawString(
-        "BUILD",
+        "THEME",
         22,
-        116
+        99
     );
 
     lcd->drawString(
         "BLACKBOX",
         22,
-        168
+        140
     );
 
     lcd->drawString(
@@ -2175,7 +2413,7 @@ void UI::drawSystemPage(
         #endif
         #endif
         22,
-        212
+        181
     );
 
     lcd->setTextSize(3);
@@ -2184,43 +2422,62 @@ void UI::drawSystemPage(
         OD_TEXT
     );
 
+    // The rate only changes at boot, so say so on the button until then.
+    bool rateRestartPending =
+        settings.getControlLoopHz() != bootControlLoopHz;
+
+    const char* rateLabel =
+        settings.getControlLoopHz() == 333
+        ? (rateRestartPending ? "333 HZ RESTART" : "333 HZ")
+        : (rateRestartPending ? "250 HZ RESTART" : "250 HZ");
+
     drawAmoledButton(
         lcd,
         150,
-        54,
+        48,
         240,
-        38,
-        settings.getControlLoopHz() == 333 ? "333 HZ" : "250 HZ",
-        settings.getControlLoopHz() == 333 ? OD_AMBER : OD_CYAN,
+        36,
+        rateLabel,
+        (rateRestartPending || settings.getControlLoopHz() == 333) ? OD_AMBER : OD_CYAN,
         2
     );
 
-    lcd->drawString(
-        #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
-        "CRSF OOPS",
-        #else
-        "CRSF INPUT",
-        #endif
-        #else
-        "PWM INPUT",
-        #endif
+    // The build variant already sits in the header's version string, so
+    // this row picks the theme instead.
+    drawAmoledButton(
+        lcd,
         150,
-        108
+        89,
+        116,
+        36,
+        Settings::themeAccentName(settings.getThemeAccent()),
+        OD_CYAN,
+        2
+    );
+
+    drawAmoledButton(
+        lcd,
+        274,
+        89,
+        116,
+        36,
+        settings.getThemeText() == 1 ? "DARK" : "LIGHT",
+        OD_MUTED,
+        2
     );
 
     lcd->drawString(
         settings.getBlackboxEnabled() ? "ON" : "OFF",
         150,
-        160
+        132
     );
 
     drawAmoledButton(
         lcd,
         150,
-        202,
+        171,
         240,
-        38,
+        36,
         #if defined(OPENDRIFT_INPUT_CRSF)
         #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
         "RC TX17 / RX18",
@@ -2361,9 +2618,13 @@ void UI::drawResponsePage(
     drawUiBackground(lcd);
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    drawAmoledHeader(lcd, "Response", OD_AMBER);
+    drawAmoledHeader(lcd, "Response", OD_WARM);
 
-    lcd->setTextSize(2);
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
+
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("SMOOTH", 22, 58);
     lcd->drawString("PREDICT", 22, 120);
@@ -2378,8 +2639,8 @@ void UI::drawResponsePage(
     for(int row = 0; row < 3; row++)
     {
         int y = 48 + (row * 62);
-        drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_AMBER);
-        drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_AMBER);
+        drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_WARM);
+        drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_WARM);
     }
     #else
     lcd->setTextSize(3);
@@ -2422,7 +2683,11 @@ void UI::drawDriftAssistPage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(lcd, "Assistance", OD_BLUE);
 
-    lcd->setTextSize(2);
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
+
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("COUNTERSTEER", 22, 58);
     lcd->drawString("HOLD ASSIST", 22, 120);
@@ -2478,6 +2743,450 @@ bool UI::isProfilesPage()
 }
 
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+// Idle timeouts users actually want, instead of stepping 0-600 one second
+// at a time. Index 0 is "never dim".
+static const uint16_t DIM_TIMEOUT_STEPS[] =
+{
+    0, 5, 10, 15, 30, 60, 120, 300, 600
+};
+
+static constexpr uint8_t DIM_TIMEOUT_STEP_COUNT =
+    sizeof(DIM_TIMEOUT_STEPS) / sizeof(DIM_TIMEOUT_STEPS[0]);
+
+
+// Nearest step at or below the stored value, so a timeout typed on the web
+// page still lands somewhere sensible on the ladder.
+static uint8_t dimTimeoutStepIndex(
+    uint16_t seconds
+)
+{
+    uint8_t index = 0;
+
+    for(uint8_t i = 0; i < DIM_TIMEOUT_STEP_COUNT; i++)
+    {
+        if(DIM_TIMEOUT_STEPS[i] <= seconds)
+        {
+            index = i;
+        }
+    }
+
+    return index;
+}
+
+
+static uint16_t nextDimTimeout(
+    uint16_t seconds,
+    int8_t direction
+)
+{
+    int8_t index =
+        (int8_t)dimTimeoutStepIndex(seconds) + direction;
+
+    if(index < 0)
+    {
+        index = 0;
+    }
+
+    if(index > (int8_t)DIM_TIMEOUT_STEP_COUNT - 1)
+    {
+        index = DIM_TIMEOUT_STEP_COUNT - 1;
+    }
+
+    return DIM_TIMEOUT_STEPS[index];
+}
+
+
+void UI::drawDisplayPage(
+    Settings& settings
+)
+{
+    drawUiBackground(lcd);
+
+    lcd->setTextColor(
+        TFT_WHITE
+    );
+
+    drawAmoledHeader(
+        lcd,
+        "Display",
+        OD_BLUE
+    );
+
+    drawAmoledRowPanel(lcd, 48, 36);
+    drawAmoledRowPanel(lcd, 89, 36);
+    drawAmoledRowPanel(lcd, 130, 36);
+
+    setAmoledLabelSize(lcd);
+
+    lcd->setTextColor(
+        OD_MUTED
+    );
+
+    lcd->drawString(
+        "SCREEN",
+        22,
+        58
+    );
+
+    lcd->drawString(
+        "BRIGHTNESS",
+        22,
+        99
+    );
+
+    lcd->drawString(
+        "DIM AFTER",
+        22,
+        140
+    );
+
+    bool flipped =
+        settings.getDisplayFlip();
+
+    drawAmoledButton(
+        lcd,
+        150,
+        48,
+        240,
+        36,
+        flipped ? "FLIPPED 180" : "NORMAL",
+        flipped ? OD_AMBER : OD_CYAN,
+        2
+    );
+
+    lcd->setTextSize(3);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    String brightnessLabel =
+        String(settings.getDisplayBrightness()) + "%";
+
+    lcd->drawString(
+        brightnessLabel.c_str(),
+        150,
+        91
+    );
+
+    drawAmoledButton(lcd, 276, 89, 70, 36, "-", OD_BLUE);
+    drawAmoledButton(lcd, 364, 89, 70, 36, "+", OD_BLUE);
+
+    uint16_t dimSeconds =
+        settings.getDisplayDimTimeout();
+
+    // drawAmoledButton leaves the text at the button's own size.
+    lcd->setTextSize(3);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    String dimLabel =
+        dimSeconds == 0
+        ?
+        String("OFF")
+        :
+        String(dimSeconds) + "S";
+
+    lcd->drawString(
+        dimLabel.c_str(),
+        150,
+        132
+    );
+
+    drawAmoledButton(lcd, 276, 130, 70, 36, "-", OD_BLUE);
+    drawAmoledButton(lcd, 364, 130, 70, 36, "+", OD_BLUE);
+
+    drawPageDots();
+}
+
+
+bool UI::isBackgroundsPage()
+{
+    return page == PAGE_BACKGROUNDS;
+}
+
+
+void UI::setBackgroundStore(
+    Backgrounds& store
+)
+{
+    backgroundStore = &store;
+}
+
+
+bool UI::syncTheme(
+    Settings& settings
+)
+{
+    uint8_t textMode =
+        settings.getThemeText();
+
+    uint8_t accent =
+        settings.getThemeAccent();
+
+    if(
+        themeApplied &&
+        textMode == appliedThemeText &&
+        accent == appliedThemeAccent
+    )
+    {
+        return false;
+    }
+
+    themeApplied = true;
+
+    appliedThemeText = textMode;
+
+    appliedThemeAccent = accent;
+
+    applyAmoledTheme(
+        textMode,
+        accent
+    );
+
+    return true;
+}
+
+
+bool UI::syncScreenFlip(
+    Settings& settings,
+    Touch& touch
+)
+{
+    bool flip =
+        settings.getDisplayFlip();
+
+    if(
+        screenFlipApplied &&
+        flip == screenFlipped
+    )
+    {
+        return false;
+    }
+
+    screenFlipApplied = true;
+
+    screenFlipped = flip;
+
+    touch.setFlipped(
+        flip
+    );
+
+    return true;
+}
+
+
+bool UI::applyBackground(
+    Settings& settings
+)
+{
+    const char* name =
+        settings.getBackgroundName();
+
+    uint32_t revision =
+        backgroundStore != nullptr
+        ? backgroundStore->getRevision()
+        : 0;
+
+    if(
+        backgroundApplied &&
+        revision == appliedBackgroundRevision &&
+        strcmp(name, appliedBackgroundName) == 0
+    )
+    {
+        return false;
+    }
+
+    backgroundApplied = true;
+
+    appliedBackgroundRevision = revision;
+
+    snprintf(
+        appliedBackgroundName,
+        sizeof(appliedBackgroundName),
+        "%s",
+        name
+    );
+
+    // Fall back to the flash image while loading; a failed or partial
+    // load then never shows on the panel.
+    activeBackgroundPixels = nullptr;
+
+    if(
+        name[0] != 0 &&
+        backgroundStore != nullptr &&
+        backgroundStore->isReady()
+    )
+    {
+        if(backgroundPixels == nullptr)
+        {
+            backgroundPixels =
+                static_cast<uint16_t*>(
+                    heap_caps_malloc(
+                        Backgrounds::PIXEL_BYTES,
+                        MALLOC_CAP_SPIRAM
+                    )
+                );
+        }
+
+        if(
+            backgroundPixels != nullptr &&
+            backgroundStore->load(
+                name,
+                backgroundPixels
+            )
+        )
+        {
+            activeBackgroundPixels = backgroundPixels;
+        }
+    }
+
+    return true;
+}
+
+
+void UI::drawBackgroundsPage(
+    Settings& settings
+)
+{
+    drawUiBackground(lcd);
+
+    drawAmoledHeader(
+        lcd,
+        "Backgrounds",
+        OD_MAGENTA
+    );
+
+    const uint8_t visibleRows = 4;
+    const int rowStart = 46;
+    const int rowHeight = 47;
+
+    bool storeReady =
+        backgroundStore != nullptr &&
+        backgroundStore->isReady();
+
+    uint8_t storedCount =
+        storeReady ? backgroundStore->getCount() : 0;
+
+    // Row 0 is always the built-in image.
+    uint8_t rowCount =
+        storedCount + 1;
+
+    uint8_t maxScroll =
+        rowCount > visibleRows
+        ?
+        rowCount - visibleRows
+        :
+        0;
+
+    backgroundScroll = min(
+        backgroundScroll,
+        maxScroll
+    );
+
+    const char* activeName =
+        settings.getBackgroundName();
+
+    for(uint8_t slot = 0; slot < visibleRows; slot++)
+    {
+        uint8_t index =
+            backgroundScroll + slot;
+
+        if(index >= rowCount)
+        {
+            break;
+        }
+
+        const char* name =
+            index == 0
+            ? "BUILT-IN"
+            : backgroundStore->getName(index - 1);
+
+        bool active =
+            index == 0
+            ? activeName[0] == 0
+            : strcmp(name, activeName) == 0;
+
+        int y =
+            rowStart + (slot * rowHeight);
+
+        uint16_t accent =
+            active ? OD_GREEN : OD_DIM;
+
+        lcd->fillRoundRect(18, y, 420, 41, 6, OD_PANEL);
+
+        lcd->drawRoundRect(
+            18,
+            y,
+            420,
+            41,
+            6,
+            accent
+        );
+
+        lcd->setTextSize(2);
+        lcd->setTextColor(
+            active ? OD_GREEN : OD_TEXT
+        );
+        lcd->drawString(
+            name,
+            30,
+            y + 10
+        );
+
+        if(active)
+        {
+            lcd->setTextSize(1);
+            lcd->setTextColor(OD_MUTED);
+            lcd->drawRightString(
+                "ACTIVE",
+                426,
+                y + 14
+            );
+        }
+    }
+
+    if(storedCount == 0)
+    {
+        lcd->setTextSize(1);
+        lcd->setTextColor(OD_MUTED);
+        lcd->drawCenterString(
+            storeReady
+            ? "Upload images in the web configurator"
+            : "Background storage unavailable",
+            UI_CENTER_X,
+            rowStart + rowHeight + 12
+        );
+    }
+
+    if(rowCount > visibleRows)
+    {
+        int trackHeight = 182;
+        int thumbHeight = max(
+            24,
+            (trackHeight * visibleRows) / rowCount
+        );
+
+        int thumbY =
+            47 +
+            (
+                (trackHeight - thumbHeight) *
+                backgroundScroll
+            ) /
+            max(1, (int)maxScroll);
+
+        lcd->drawFastVLine(446, 47, trackHeight, OD_DIM);
+        lcd->fillRect(443, thumbY, 7, thumbHeight, OD_MAGENTA);
+    }
+
+    drawPageDots();
+}
+#endif
+
+
 void UI::drawExperimentalPage(
     Settings& settings
 )
@@ -2491,7 +3200,10 @@ void UI::drawExperimentalPage(
         OD_MAGENTA
     );
 
-    lcd->setTextSize(2);
+    drawAmoledRowPanel(lcd, 48, 48);
+    drawAmoledRowPanel(lcd, 124, 66);
+
+    setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("TRANS SPEED", 22, 58);
 
@@ -2618,6 +3330,8 @@ void UI::drawProfilesPage(
 
             uint16_t accent =
                 active ? OD_GREEN : OD_DIM;
+
+            lcd->fillRoundRect(18, y, 420, 41, 6, OD_PANEL);
 
             lcd->drawRoundRect(
                 18,
@@ -2784,6 +3498,9 @@ void UI::drawWifiPage(
     Settings& settings
 )
 {
+    lastDrawnWifiClients = wifi.getClientCount();
+    lastDrawnWifiEnabled = wifi.isEnabled();
+
     #if !defined(OPENDRIFT_BOARD_AMOLED_164)
     drawUiBackground(lcd);
 
@@ -2847,6 +3564,8 @@ void UI::drawWifiPage(
         "WiFi",
         wifi.isEnabled() ? OD_GREEN : OD_RED
     );
+
+    lcd->fillRoundRect(18, 48, 264, 200, 6, OD_PANEL);
 
     if(wifi.isEnabled())
     {
@@ -2914,7 +3633,7 @@ void UI::drawWifiPage(
     );
 
     lcd->drawNumber(
-        wifi.isEnabled() ? WiFi.softAPgetStationNum() : 0,
+        wifi.getClientCount(),
         150,
         108
     );
@@ -3029,7 +3748,7 @@ void UI::drawWifiPage(
     if(wifi.isEnabled())
     {
         lcd->drawNumber(
-            WiFi.softAPgetStationNum(),
+            wifi.getClientCount(),
             140,
             110
         );
@@ -3318,7 +4037,7 @@ void UI::drawSteeringCalibrationPage(
     drawAmoledHeader(
         lcd,
         "Physical Endpoints",
-        OD_AMBER
+        OD_WARM
     );
 
     const bool steeringSignal =
@@ -3461,7 +4180,7 @@ void UI::drawRadioPage(
     drawUiBackground(lcd);
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -3469,7 +4188,7 @@ void UI::drawRadioPage(
     drawAmoledHeader(
         lcd,
         radioSection == 0 ? "Radio" : "Steering",
-        radioSection == 0 ? OD_CYAN : OD_AMBER
+        radioSection == 0 ? OD_CYAN : OD_WARM
     );
 
     lcd->setTextSize(2);
@@ -3534,7 +4253,7 @@ void UI::drawRadioPage(
             34,
             40,
             "-",
-            OD_AMBER
+            OD_WARM
         );
 
         drawAmoledButton(
@@ -3544,7 +4263,7 @@ void UI::drawRadioPage(
             34,
             40,
             "+",
-            OD_AMBER
+            OD_WARM
         );
 
         drawAmoledButton(
@@ -3575,7 +4294,7 @@ void UI::drawRadioPage(
             176
         );
 
-        lcd->setTextColor(OD_AMBER);
+        lcd->setTextColor(OD_WARM);
         lcd->drawCenterString(
             "ENDPOINTS",
             361,
@@ -3841,7 +4560,7 @@ void UI::drawRadioPage(
         20
     );
 
-    lcd->setTextColor(TFT_WHITE);
+    lcd->setTextColor(uiTextColor());
 
     if(radioSection == 1)
     {
@@ -3868,7 +4587,7 @@ void UI::drawRadioPage(
             95,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -3882,7 +4601,7 @@ void UI::drawRadioPage(
             135,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -3896,7 +4615,7 @@ void UI::drawRadioPage(
             175,
             170,
             32,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -3910,7 +4629,7 @@ void UI::drawRadioPage(
             210,
             50,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -3924,7 +4643,7 @@ void UI::drawRadioPage(
             210,
             28,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -3950,7 +4669,7 @@ void UI::drawRadioPage(
             210,
             28,
             24,
-            TFT_WHITE
+            uiTextColor()
         );
 
         lcd->drawCenterString(
@@ -4058,14 +4777,14 @@ void UI::drawRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 3,
         steeringBarH + 6,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4132,7 +4851,7 @@ void UI::drawRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4227,7 +4946,7 @@ void UI::updateRadioPage(
     #endif
 
     lcd->setTextColor(
-        TFT_WHITE,
+        uiTextColor(),
         TFT_BLACK
     );
 
@@ -4303,7 +5022,7 @@ void UI::updateRadioPage(
         );
 
         lcd->setTextColor(
-            TFT_WHITE
+            uiTextColor()
         );
 
         flushDisplay();
@@ -4406,14 +5125,14 @@ void UI::updateRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 4,
         steeringBarH + 8,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4502,7 +5221,7 @@ void UI::updateRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4531,7 +5250,7 @@ void UI::updateRadioPage(
     );
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     flushDisplay();
@@ -4640,7 +5359,7 @@ void UI::updateRadioPage(
         );
 
         lcd->setTextColor(
-            TFT_WHITE
+            uiTextColor()
         );
 
         flushDisplay();
@@ -4733,14 +5452,14 @@ void UI::updateRadioPage(
         steeringBarY,
         steeringBarW,
         steeringBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->drawFastVLine(
         steeringCenterPos,
         steeringBarY - 3,
         steeringBarH + 6,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4817,7 +5536,7 @@ void UI::updateRadioPage(
         gainBarY,
         gainBarW,
         gainBarH,
-        TFT_WHITE
+        uiTextColor()
     );
 
     lcd->fillRect(
@@ -4884,7 +5603,7 @@ void UI::updateRadioPage(
     );
 
     lcd->setTextColor(
-        TFT_WHITE
+        uiTextColor()
     );
 
     flushDisplay();
@@ -4994,11 +5713,20 @@ void UI::drawFixedPageDots()
         int landscapeX =
             startX + (i * spacing);
 
-        // The AMOLED panel canvas is the landscape UI rotated clockwise.
+        // The AMOLED panel canvas is the landscape UI rotated clockwise,
+        // or the same rotation mirrored when the screen is flipped.
         int panelX =
+            screenFlipped
+            ?
+            UI_CANVAS_HEIGHT - 1 - UI_DOTS_Y
+            :
             UI_DOTS_Y;
 
         int panelY =
+            screenFlipped
+            ?
+            landscapeX
+            :
             UI_CANVAS_WIDTH - 1 - landscapeX;
 
         if(i == page)
@@ -5220,6 +5948,21 @@ int8_t UI::repeatButtonAt(
             return 30;
     }
 
+    if(page == PAGE_DISPLAY)
+    {
+        if(buttonPressed(x, y, 276, 89, 70, 36))
+            return 35;
+
+        if(buttonPressed(x, y, 364, 89, 70, 36))
+            return 36;
+
+        if(buttonPressed(x, y, 276, 130, 70, 36))
+            return 37;
+
+        if(buttonPressed(x, y, 364, 130, 70, 36))
+            return 38;
+    }
+
     return 0;
     #endif
 
@@ -5350,7 +6093,19 @@ bool UI::actionButtonAt(
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 296, 70, 130, 92);
 
-    if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 54, 240, 38))
+    if(page == PAGE_DISPLAY)
+        return buttonPressed(x, y, 150, 48, 240, 36);
+
+    if(page == PAGE_SYSTEM && buttonPressed(x, y, 150, 48, 240, 36))
+        return true;
+
+    if(
+        page == PAGE_SYSTEM &&
+        (
+            buttonPressed(x, y, 150, 89, 116, 36) ||
+            buttonPressed(x, y, 274, 89, 116, 36)
+        )
+    )
         return true;
 
     if(
@@ -5359,7 +6114,7 @@ bool UI::actionButtonAt(
         && false
         #endif
     )
-        return buttonPressed(x, y, 150, 202, 240, 38);
+        return buttonPressed(x, y, 150, 171, 240, 36);
     #else
     if(page == PAGE_DRIVE)
         return buttonPressed(x, y, 55, 164, 130, 38);
@@ -5648,6 +6403,38 @@ bool UI::applyRepeatButton(
             settings.setControlLoopHz(333);
             break;
 
+        case 35:
+            settings.setDisplayBrightness(
+                settings.getDisplayBrightness() - 10
+            );
+            break;
+
+        case 36:
+            settings.setDisplayBrightness(
+                settings.getDisplayBrightness() + 10
+            );
+            break;
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 37:
+            settings.setDisplayDimTimeout(
+                nextDimTimeout(
+                    settings.getDisplayDimTimeout(),
+                    -1
+                )
+            );
+            break;
+
+        case 38:
+            settings.setDisplayDimTimeout(
+                nextDimTimeout(
+                    settings.getDisplayDimTimeout(),
+                    1
+                )
+            );
+            break;
+        #endif
+
         default:
             return false;
     }
@@ -5659,6 +6446,20 @@ bool UI::applyRepeatButton(
             settings
         );
     }
+    else if(page == PAGE_SYSTEM)
+    {
+        drawSystemPage(
+            settings
+        );
+    }
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    else if(page == PAGE_DISPLAY)
+    {
+        drawDisplayPage(
+            settings
+        );
+    }
+    #endif
     else if(page == PAGE_DRIFT_ASSIST)
     {
         drawDriftAssistPage(
@@ -5683,9 +6484,94 @@ bool UI::applyRepeatButton(
 
 
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+bool UI::updateDisplayBrightness(
+    Settings& settings,
+    bool touched
+)
+{
+    unsigned long now =
+        millis();
 
+    uint16_t dimTimeoutSeconds =
+        settings.getDisplayDimTimeout();
 
+    uint8_t brightnessPercent =
+        settings.getDisplayBrightness();
 
+    // A new timeout counts from now, and a brightness change from the web
+    // or the System page counts as activity so its result is visible.
+    if(
+        dimTimeoutSeconds != lastDimTimeoutSeconds ||
+        brightnessPercent != lastBrightnessPercent
+    )
+    {
+        lastDimTimeoutSeconds = dimTimeoutSeconds;
+
+        lastBrightnessPercent = brightnessPercent;
+
+        lastTouchMs = now;
+    }
+
+    if(touched)
+    {
+        if(displayDimmed)
+        {
+            // Wake-up touch: restore the panel and keep this press away
+            // from the buttons until the finger lifts.
+            swallowTouchUntilRelease = true;
+        }
+
+        lastTouchMs = now;
+    }
+
+    displayDimmed =
+        dimTimeoutSeconds > 0 &&
+        now - lastTouchMs >= (unsigned long)dimTimeoutSeconds * 1000UL;
+
+    uint8_t level =
+        opendriftBrightnessLevel(
+            brightnessPercent
+        );
+
+    if(displayDimmed)
+    {
+        // A tenth of the configured level, floored so the AMOLED never
+        // reads as switched off.
+        uint8_t dimmedLevel =
+            level / 10;
+
+        level =
+            dimmedLevel > DIM_FLOOR_LEVEL
+            ? dimmedLevel
+            : DIM_FLOOR_LEVEL;
+    }
+
+    if(
+        display != nullptr &&
+        level != appliedBrightnessLevel
+    )
+    {
+        display->setBrightness(
+            level
+        );
+
+        appliedBrightnessLevel = level;
+    }
+
+    if(swallowTouchUntilRelease)
+    {
+        if(touched)
+        {
+            return true;
+        }
+
+        swallowTouchUntilRelease = false;
+    }
+
+    return false;
+}
+#endif
 
 
 
@@ -5705,6 +6591,49 @@ void UI::update(
 
     uint8_t gesture =
         touch.getGesture();
+
+    wifi.holdAutoOff(
+        page == PAGE_WIFI
+    );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(
+        updateDisplayBrightness(
+            settings,
+            touched
+        )
+    )
+    {
+        // Wake-up touch: the panel is back, nothing gets pressed.
+        lastTouchState = false;
+
+        return;
+    }
+
+    // A background chosen on the web, or an upload replacing the active
+    // file, lands here on the next loop. So does a theme change.
+    if(applyBackground(settings))
+    {
+        refreshRequested = true;
+    }
+
+    if(syncTheme(settings))
+    {
+        refreshRequested = true;
+    }
+
+    // A flip chosen on the Display page, or restored from NVS on the
+    // first loop, rotates the compositor and the touch mapping together.
+    if(
+        syncScreenFlip(
+            settings,
+            touch
+        )
+    )
+    {
+        refreshRequested = true;
+    }
+    #endif
 
     if(
         refreshRequested &&
@@ -5797,7 +6726,8 @@ void UI::update(
         (
             page == PAGE_DRIVE ||
             page == PAGE_RADIO ||
-            page == PAGE_STEERING
+            page == PAGE_STEERING ||
+            page == PAGE_WIFI
         ) &&
         !touched &&
         !lastTouchState &&
@@ -5817,6 +6747,20 @@ void UI::update(
             {
                 drawMainPage(
                     gyro,
+                    settings
+                );
+            }
+        }
+        else if(page == PAGE_WIFI)
+        {
+            // Client count and state change without a touch.
+            if(
+                wifi.getClientCount() != lastDrawnWifiClients ||
+                wifi.isEnabled() != lastDrawnWifiEnabled
+            )
+            {
+                drawWifiPage(
+                    wifi,
                     settings
                 );
             }
@@ -6130,6 +7074,96 @@ void UI::update(
 
                 drawProfilesPage(settings);
             }
+            #if defined(OPENDRIFT_BOARD_AMOLED_164)
+            else if(
+                isBackgroundsPage() &&
+                abs(deltaY) > 34 &&
+                abs(deltaY) > abs(delta)
+            )
+            {
+                if(swipePreviewActive)
+                {
+                    finishSwipePreview(false);
+                }
+
+                uint8_t rowCount =
+                    backgroundStore != nullptr && backgroundStore->isReady()
+                    ? backgroundStore->getCount() + 1
+                    : 1;
+
+                uint8_t maxScroll =
+                    rowCount > 4
+                    ?
+                    rowCount - 4
+                    :
+                    0;
+
+                uint8_t steps = max(
+                    1,
+                    abs(deltaY) / 47
+                );
+
+                if(deltaY < 0)
+                {
+                    backgroundScroll = min(
+                        (int)maxScroll,
+                        (int)backgroundScroll + steps
+                    );
+                }
+                else
+                {
+                    backgroundScroll = max(
+                        0,
+                        (int)backgroundScroll - steps
+                    );
+                }
+
+                drawBackgroundsPage(settings);
+            }
+            else if(
+                isBackgroundsPage() &&
+                abs(delta) < 22 &&
+                abs(deltaY) < 22
+            )
+            {
+                if(swipePreviewActive)
+                {
+                    finishSwipePreview(false);
+                }
+
+                const int rowStart = 46;
+                const int rowHeight = 47;
+                const int rowEnd = rowStart + (4 * rowHeight);
+
+                if(
+                    touchStartY >= rowStart &&
+                    touchStartY < rowEnd
+                )
+                {
+                    uint8_t index =
+                        backgroundScroll +
+                        ((touchStartY - rowStart) / rowHeight);
+
+                    if(index == 0)
+                    {
+                        settings.setBackgroundName("");
+                    }
+                    else if(
+                        backgroundStore != nullptr &&
+                        index - 1 < backgroundStore->getCount()
+                    )
+                    {
+                        settings.setBackgroundName(
+                            backgroundStore->getName(index - 1)
+                        );
+                    }
+
+                    applyBackground(settings);
+                }
+
+                drawBackgroundsPage(settings);
+            }
+            #endif
             else
             {
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -6423,20 +7457,74 @@ void UI::update(
         }
 
         if(
+            page == PAGE_DISPLAY &&
+            buttonPressed(x, y, 150, 48, 240, 36)
+        )
+        {
+            settings.setDisplayFlip(
+                !settings.getDisplayFlip()
+            );
+
+            syncScreenFlip(
+                settings,
+                touch
+            );
+
+            drawDisplayPage(settings);
+
+            lastTouchState = touched;
+            return;
+        }
+
+        if(
             page == PAGE_SYSTEM &&
             buttonPressed(
                 x,
                 y,
                 150,
-                54,
+                48,
                 240,
-                38
+                36
             )
         )
         {
             settings.setControlLoopHz(
                 settings.getControlLoopHz() == 250 ? 333 : 250
             );
+
+            drawSystemPage(settings);
+
+            lastTouchState = touched;
+            return;
+        }
+
+        if(
+            page == PAGE_SYSTEM &&
+            buttonPressed(x, y, 150, 89, 116, 36)
+        )
+        {
+            settings.setThemeAccent(
+                (settings.getThemeAccent() + 1) % Settings::THEME_ACCENT_COUNT
+            );
+
+            syncTheme(settings);
+
+            drawSystemPage(settings);
+
+            lastTouchState = touched;
+            return;
+        }
+
+        if(
+            page == PAGE_SYSTEM &&
+            buttonPressed(x, y, 274, 89, 116, 36)
+        )
+        {
+            settings.setThemeText(
+                settings.getThemeText() == 1 ? 0 : 1
+            );
+
+            syncTheme(settings);
 
             drawSystemPage(settings);
 
@@ -6453,9 +7541,9 @@ void UI::update(
                 x,
                 y,
                 150,
-                202,
+                171,
                 240,
-                38
+                36
             )
         )
         {

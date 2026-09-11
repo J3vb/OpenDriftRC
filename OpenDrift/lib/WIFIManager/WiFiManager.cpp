@@ -4,6 +4,48 @@
 #include <string.h>
 
 
+WiFiManager* WiFiManager::eventTarget = nullptr;
+
+
+// Runs on the WiFi event task. It only counts stations and stamps a
+// timestamp, so nothing here touches the access point or the settings.
+void WiFiManager::onWifiEvent(
+    arduino_event_id_t event,
+    arduino_event_info_t info
+)
+{
+    (void)info;
+
+    switch(event)
+    {
+        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+            if(eventTarget != nullptr && eventTarget->eventStationCount < 16)
+            {
+                eventTarget->eventStationCount++;
+            }
+            break;
+
+        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+            if(eventTarget != nullptr && eventTarget->eventStationCount > 0)
+            {
+                eventTarget->eventStationCount--;
+            }
+            break;
+
+        case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
+            break;
+
+        default:
+            return;
+    }
+
+    if(eventTarget != nullptr)
+    {
+        eventTarget->lastStationEventMs = millis();
+    }
+}
+
+
 
 
 void WiFiManager::begin(
@@ -21,6 +63,12 @@ void WiFiManager::begin(
     wifiHostname = hostname;
 
     localName = String(hostname) + ".local";
+
+    eventTarget = this;
+
+    WiFi.onEvent(
+        onWifiEvent
+    );
 
 
     if(startEnabled)
@@ -98,6 +146,8 @@ void WiFiManager::enable()
 
     noClientSince = millis();
     clientWasPresent = false;
+    lastStationEventMs = 0;
+    eventStationCount = 0;
 
 
 
@@ -154,6 +204,8 @@ void WiFiManager::disable()
     enabled = false;
     noClientSince = 0;
     clientWasPresent = false;
+    lastStationEventMs = 0;
+    eventStationCount = 0;
 
 
 
@@ -179,15 +231,22 @@ void WiFiManager::update()
 
 
     unsigned long now = millis();
-    bool clientPresent = hasClient();
+
+    // A station that is still handshaking, fetching its address, or
+    // reconnecting after a brief drop is not in the station list yet, but
+    // its events are. Treat recent activity as presence.
+    unsigned long stationEventMs = lastStationEventMs;
+
+    bool stationActivity =
+        stationEventMs != 0 &&
+        now - stationEventMs < STATION_GRACE_MS;
+
+    bool clientPresent =
+        hasClient() ||
+        stationActivity;
 
     if(clientPresent)
     {
-        if(!clientWasPresent)
-        {
-            Serial.println("WiFi client connected; auto-off paused");
-        }
-
         clientWasPresent = true;
         noClientSince = 0;
         return;
@@ -195,7 +254,6 @@ void WiFiManager::update()
 
     if(clientWasPresent)
     {
-        Serial.println("WiFi client disconnected; auto-off timer started");
         clientWasPresent = false;
         noClientSince = now;
     }
@@ -205,6 +263,14 @@ void WiFiManager::update()
     }
 
 
+
+    // The WiFi page is where someone goes to connect. Do not switch off
+    // while it is on screen; the timer starts fresh once it is left.
+    if(autoOffHold)
+    {
+        noClientSince = now;
+        return;
+    }
 
     if(
         timeout > 0 &&
@@ -225,12 +291,43 @@ void WiFiManager::update()
 
 bool WiFiManager::hasClient()
 {
+    return getClientCount() > 0;
+}
 
-    return (
-        WiFi.softAPgetStationNum()
-        > 0
-    );
 
+
+uint8_t WiFiManager::getClientCount()
+{
+    if(!enabled)
+    {
+        return 0;
+    }
+
+    uint8_t reported =
+        WiFi.softAPgetStationNum();
+
+    uint8_t counted =
+        getEventClientCount();
+
+    return counted > reported ? counted : reported;
+}
+
+
+
+uint8_t WiFiManager::getEventClientCount()
+{
+    int8_t count = eventStationCount;
+
+    return count > 0 ? (uint8_t)count : 0;
+}
+
+
+
+void WiFiManager::holdAutoOff(
+    bool hold
+)
+{
+    autoOffHold = hold;
 }
 
 

@@ -10,6 +10,7 @@ public:
     static constexpr uint8_t MAX_PROFILES = 12;
     static constexpr size_t PROFILE_NAME_LENGTH = 24;
     static constexpr size_t WIFI_SSID_LENGTH = 33;   // 32 characters + NUL
+    static constexpr size_t BACKGROUND_NAME_LENGTH = 24;   // 23 characters + NUL
 
     struct DrivingProfile
     {
@@ -34,6 +35,17 @@ public:
     bool begin();
 
     void update();
+
+    // Write pending changes now instead of waiting for the deferred
+    // save. Used right before a restart.
+    void flush();
+
+    // Erase every key in the open preferences namespace. The caller must
+    // restart immediately: the in-memory copy is left as is and would be
+    // written back by the next save.
+    void factoryReset();
+
+    static const char* defaultWifiSsid();
 
     // Gyro
     float getGain();
@@ -111,6 +123,36 @@ public:
     bool getBlackboxEnabled();
     void setBlackboxEnabled(bool value);
 
+    // Display (AMOLED). Brightness in percent, steps of 10, 10-100.
+    uint8_t getDisplayBrightness();
+    void setDisplayBrightness(int value);
+
+    // Seconds without a touch before the AMOLED dims. 0 = never.
+    uint16_t getDisplayDimTimeout();
+    void setDisplayDimTimeout(int value);
+
+    // Rotates the rendered UI and the touch input by 180 degrees, for a
+    // board mounted upside down. Purely cosmetic: the gyro has its own
+    // reverse setting and must not be changed with this one.
+    bool getDisplayFlip();
+    void setDisplayFlip(bool value);
+
+    // Name of the stored AMOLED background image, "" for the built-in
+    // one. Letters, digits, - and _ only; the returned pointer is stable.
+    const char* getBackgroundName();
+    void setBackgroundName(const String& value);
+    static String sanitizeBackgroundName(const String& value);
+
+    // AMOLED theme. Text 0 = light text (default), 1 = dark text for light
+    // backgrounds. Accent selects a preset for headers, buttons and
+    // highlights; 0 keeps the original mixed colours.
+    static constexpr uint8_t THEME_ACCENT_COUNT = 7;
+    static const char* themeAccentName(uint8_t accent);
+    uint8_t getThemeText();
+    void setThemeText(int value);
+    uint8_t getThemeAccent();
+    void setThemeAccent(int value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -166,6 +208,16 @@ public:
     bool activateProfile(uint8_t index);
     bool deleteProfile(uint8_t index);
 
+    // Stores a profile with the given values, replacing one of the same
+    // name. Values are clamped to the setter ranges. Replacing the active
+    // profile deactivates it, because save() would otherwise overwrite the
+    // import with the live tune. Returns the index, -1 for an unusable
+    // name, -2 when the list is full.
+    int8_t importProfile(
+        const DrivingProfile& incoming,
+        bool& replaced
+    );
+
 private:
 
     Preferences prefs;
@@ -219,6 +271,18 @@ private:
     char wifiSsid[WIFI_SSID_LENGTH] = {0};
 
     bool blackboxEnabled = false;
+
+    uint8_t displayBrightness = 100;
+
+    uint16_t displayDimTimeout = 0;
+
+    bool displayFlip = false;
+
+    char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
+
+    uint8_t themeText = 0;
+
+    uint8_t themeAccent = 0;
 
     int steeringMin = 1000;
 

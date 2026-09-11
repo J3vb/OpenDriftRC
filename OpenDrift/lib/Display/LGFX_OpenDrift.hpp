@@ -272,3 +272,13 @@ public:
 };
 
 #endif
+
+// Maps a brightness percentage to the panel's 0-255 brightness register.
+// 100 gives 255, the level the AMOLED init sequence already sets, so the
+// default is exactly the previous behaviour.
+inline uint8_t opendriftBrightnessLevel(
+    uint8_t percent
+)
+{
+    return (uint8_t)((percent * 255 + 50) / 100);
+}

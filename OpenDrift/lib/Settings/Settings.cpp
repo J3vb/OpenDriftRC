@@ -374,6 +374,64 @@ bool Settings::begin()
         false
     );
 
+    displayBrightness = constrain(
+        prefs.getUChar(
+            "dispBright",
+            100
+        ),
+        10,
+        100
+    );
+
+    displayDimTimeout = constrain(
+        prefs.getUShort(
+            "dispDimS",
+            0
+        ),
+        0,
+        600
+    );
+
+    displayFlip = prefs.getBool(
+        "dispFlip",
+        false
+    );
+
+    {
+        String storedBackground =
+            sanitizeBackgroundName(
+                prefs.getString(
+                    "bgName",
+                    ""
+                )
+            );
+
+        snprintf(
+            backgroundName,
+            sizeof(backgroundName),
+            "%s",
+            storedBackground.c_str()
+        );
+    }
+
+    themeText = constrain(
+        prefs.getUChar(
+            "thmText",
+            0
+        ),
+        0,
+        1
+    );
+
+    themeAccent = constrain(
+        prefs.getUChar(
+            "thmAccent",
+            0
+        ),
+        0,
+        THEME_ACCENT_COUNT - 1
+    );
+
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
@@ -506,6 +564,25 @@ void Settings::update()
     }
 }
 
+void Settings::flush()
+{
+    if(dirty)
+    {
+        save();
+    }
+}
+
+void Settings::factoryReset()
+{
+    prefs.clear();
+    dirty = false;
+}
+
+const char* Settings::defaultWifiSsid()
+{
+    return DEFAULT_WIFI_SSID;
+}
+
 void Settings::save()
 {
     prefs.putFloat(
@@ -616,6 +693,36 @@ void Settings::save()
     prefs.putBool(
         "blackbox",
         blackboxEnabled
+    );
+
+    prefs.putUChar(
+        "dispBright",
+        displayBrightness
+    );
+
+    prefs.putUShort(
+        "dispDimS",
+        displayDimTimeout
+    );
+
+    prefs.putBool(
+        "dispFlip",
+        displayFlip
+    );
+
+    prefs.putString(
+        "bgName",
+        backgroundName
+    );
+
+    prefs.putUChar(
+        "thmText",
+        themeText
+    );
+
+    prefs.putUChar(
+        "thmAccent",
+        themeAccent
     );
 
     prefs.putBool("servoEndV1", true);
@@ -1082,6 +1189,163 @@ void Settings::setBlackboxEnabled(bool value)
     dirty = true;
 }
 
+uint8_t Settings::getDisplayBrightness()
+{
+    return displayBrightness;
+}
+
+void Settings::setDisplayBrightness(int value)
+{
+    // Round to the nearest 10 so the display's -/+ buttons and the web
+    // select always agree, then keep the panel readable.
+    int rounded =
+        ((value + 5) / 10) * 10;
+
+    displayBrightness =
+        constrain(
+            rounded,
+            10,
+            100
+        );
+
+    dirty = true;
+}
+
+uint16_t Settings::getDisplayDimTimeout()
+{
+    return displayDimTimeout;
+}
+
+void Settings::setDisplayDimTimeout(int value)
+{
+    displayDimTimeout =
+        constrain(
+            value,
+            0,
+            600
+        );
+
+    dirty = true;
+}
+
+bool Settings::getDisplayFlip()
+{
+    return displayFlip;
+}
+
+void Settings::setDisplayFlip(bool value)
+{
+    displayFlip = value;
+
+    dirty = true;
+}
+
+const char* Settings::getBackgroundName()
+{
+    return backgroundName;
+}
+
+void Settings::setBackgroundName(const String& value)
+{
+    String clean =
+        sanitizeBackgroundName(value);
+
+    snprintf(
+        backgroundName,
+        sizeof(backgroundName),
+        "%s",
+        clean.c_str()
+    );
+
+    dirty = true;
+}
+
+const char* Settings::themeAccentName(
+    uint8_t accent
+)
+{
+    static const char* const names[THEME_ACCENT_COUNT] =
+    {
+        "MIXED",
+        "CYAN",
+        "BLUE",
+        "MAGENTA",
+        "AMBER",
+        "GREEN",
+        "WHITE"
+    };
+
+    return accent < THEME_ACCENT_COUNT ? names[accent] : names[0];
+}
+
+uint8_t Settings::getThemeText()
+{
+    return themeText;
+}
+
+void Settings::setThemeText(int value)
+{
+    themeText =
+        constrain(
+            value,
+            0,
+            1
+        );
+
+    dirty = true;
+}
+
+uint8_t Settings::getThemeAccent()
+{
+    return themeAccent;
+}
+
+void Settings::setThemeAccent(int value)
+{
+    themeAccent =
+        constrain(
+            value,
+            0,
+            THEME_ACCENT_COUNT - 1
+        );
+
+    dirty = true;
+}
+
+// Same rules as Backgrounds::sanitizeName so a stored name always maps to
+// a valid file name and is safe inside the web page.
+String Settings::sanitizeBackgroundName(
+    const String& value
+)
+{
+    String name = value;
+    name.trim();
+
+    String clean;
+    clean.reserve(BACKGROUND_NAME_LENGTH - 1);
+
+    for(
+        size_t i = 0;
+        i < name.length() &&
+        clean.length() < BACKGROUND_NAME_LENGTH - 1;
+        i++
+    )
+    {
+        char character = name.charAt(i);
+
+        if(
+            isAlphaNumeric(character) ||
+            character == '-' ||
+            character == '_'
+        )
+        {
+            clean += character;
+        }
+    }
+
+    return clean;
+}
+
 // --------------------
 // Radio
 // --------------------
@@ -1480,6 +1744,95 @@ int8_t Settings::createProfile(
     );
 
     return activeProfileIndex;
+}
+
+int8_t Settings::importProfile(
+    const DrivingProfile& incoming,
+    bool& replaced
+)
+{
+    replaced = false;
+
+    String name =
+        sanitizeProfileName(String(incoming.name));
+
+    if(name.length() == 0)
+    {
+        return -1;
+    }
+
+    if(dirty)
+    {
+        save();
+    }
+
+    int8_t index = -1;
+
+    for(uint8_t i = 0; i < profileCount; i++)
+    {
+        if(name.equalsIgnoreCase(profiles[i].name))
+        {
+            index = i;
+            break;
+        }
+    }
+
+    if(index < 0)
+    {
+        if(profileCount >= MAX_PROFILES)
+        {
+            return -2;
+        }
+
+        index = profileCount;
+        profileCount++;
+    }
+    else
+    {
+        replaced = true;
+
+        if(activeProfileIndex == index)
+        {
+            activeProfileIndex = -1;
+        }
+    }
+
+    DrivingProfile& profile =
+        profiles[index];
+
+    profile = DrivingProfile();
+
+    name.toCharArray(
+        profile.name,
+        PROFILE_NAME_LENGTH
+    );
+
+    profile.gain = constrain(incoming.gain, 0.0f, 6.0f);
+    profile.deadband = constrain(incoming.deadband, 0.0f, 100.0f);
+    profile.gyroSmoothing = constrain(incoming.gyroSmoothing, 0.0f, 1.0f);
+    profile.gyroIntegralGain = constrain(incoming.gyroIntegralGain, 0.0f, 20.0f);
+    profile.gyroMaxCorrection = constrain(incoming.gyroMaxCorrection, 0, 100);
+    profile.gyroIntegralLimit = constrain(incoming.gyroIntegralLimit, 0, 500);
+    profile.gyroHoldBoost = constrain(incoming.gyroHoldBoost, 0, 100);
+    profile.predictionStrength = constrain(incoming.predictionStrength, 0, 100);
+    profile.radioSteeringTravel = constrain(incoming.radioSteeringTravel, 0, 100);
+    profile.gyroCounterSteerAssist = constrain(incoming.gyroCounterSteerAssist, 0, 100);
+    profile.gyroTransitionSpeed = constrain(incoming.gyroTransitionSpeed, 0, 100);
+    profile.gyroHuntStrength = constrain(incoming.gyroHuntStrength, 0, 100);
+
+    persistProfile(index);
+
+    prefs.putUChar(
+        "profCnt",
+        profileCount
+    );
+
+    prefs.putChar(
+        "profAct",
+        activeProfileIndex
+    );
+
+    return index;
 }
 
 bool Settings::activateProfile(
