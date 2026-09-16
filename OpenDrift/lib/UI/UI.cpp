@@ -1028,6 +1028,15 @@ void UI::setImuHealthy(
 
 
 
+void UI::setCalibrationCallback(
+    void (*callback)()
+)
+{
+    calibrationCallback = callback;
+}
+
+
+
 void UI::changePage(
     int8_t direction,
     GyroController& gyro,
@@ -5947,7 +5956,7 @@ bool UI::captureSteeringCalibration(
         return false;
     }
 
-    int pulse = steeringServoOutput->getPosition();
+    int pulse = steeringServoOutput->getCommandPosition();
 
     if(pulse < 900 || pulse > 2100)
     {
@@ -7382,11 +7391,10 @@ void UI::update(
             )
         )
         {
-            imu.update();
-
-            gyro.calibrate(
-                imu.getYawRate()
-            );
+            if(calibrationCallback != nullptr)
+            {
+                calibrationCallback();
+            }
 
             drawMainPage(
                 gyro,
@@ -7727,11 +7735,10 @@ void UI::update(
             ))
             {
 
-                imu.update();
-
-                gyro.calibrate(
-                    imu.getYawRate()
-                );
+                if(calibrationCallback != nullptr)
+                {
+                    calibrationCallback();
+                }
 
             }
 

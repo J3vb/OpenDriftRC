@@ -1421,9 +1421,14 @@ void Settings::setSteeringMin(int value)
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
+
     steeringMin = value;
     steeringCapturedPulses[0] = value;
     steeringCalibrationMask = 0;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 }
 
@@ -1439,9 +1444,14 @@ void Settings::setSteeringCenter(int value)
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
+
     steeringCenter = value;
     steeringCapturedPulses[1] = value;
     steeringCalibrationMask = 0;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 }
 
@@ -1457,9 +1467,14 @@ void Settings::setSteeringMax(int value)
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
+
     steeringMax = value;
     steeringCapturedPulses[2] = value;
     steeringCalibrationMask = 0;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 }
 
@@ -1478,6 +1493,28 @@ bool Settings::isSteeringCalibrated()
         abs(leftDelta) >= 10 &&
         abs(rightDelta) >= 10 &&
         leftDelta * rightDelta < 0;
+}
+
+void Settings::getSteeringCalibration(
+    SteeringCalibration& out
+)
+{
+    portENTER_CRITICAL(&settingsMux);
+
+    int leftDelta = steeringMin - steeringCenter;
+    int rightDelta = steeringMax - steeringCenter;
+
+    out.calibrated =
+        (steeringCalibrationMask & 0x07) == 0x07 &&
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
+
+    out.min = steeringMin;
+    out.center = steeringCenter;
+    out.max = steeringMax;
+
+    portEXIT_CRITICAL(&settingsMux);
 }
 
 int Settings::getSteeringCapturedPulse(
@@ -1552,9 +1589,13 @@ bool Settings::captureSteeringCalibrationPoint(
         return false;
     }
 
+    portENTER_CRITICAL(&settingsMux);
+
     steeringMin = steeringCapturedPulses[0];
     steeringCenter = steeringCapturedPulses[1];
     steeringMax = steeringCapturedPulses[2];
+
+    portEXIT_CRITICAL(&settingsMux);
 
     return true;
 }
@@ -1571,15 +1612,25 @@ bool Settings::confirmStoredSteeringCalibration()
 
     if(!validCalibration)
     {
+        portENTER_CRITICAL(&settingsMux);
+
         steeringCalibrationMask = 0;
+
+        portEXIT_CRITICAL(&settingsMux);
+
         dirty = true;
         return false;
     }
+
+    portENTER_CRITICAL(&settingsMux);
 
     steeringCapturedPulses[0] = steeringMin;
     steeringCapturedPulses[1] = steeringCenter;
     steeringCapturedPulses[2] = steeringMax;
     steeringCalibrationMask = 0x07;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 
     return true;
@@ -1601,11 +1652,16 @@ void Settings::applyFallbackSteeringEndpoints()
 
 void Settings::clearSteeringCalibration()
 {
+    portENTER_CRITICAL(&settingsMux);
+
     steeringCalibrationMask = 0;
     applyFallbackSteeringEndpoints();
     steeringCapturedInputPulses[0] = 1000;
     steeringCapturedInputPulses[1] = 1500;
     steeringCapturedInputPulses[2] = 2000;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 }
 
@@ -2399,6 +2455,8 @@ void Settings::applyProfile(
     const DrivingProfile& profile
 )
 {
+    portENTER_CRITICAL(&settingsMux);
+
     gain = constrain(profile.gain, 0.0f, 6.0f);
     deadband = constrain(profile.deadband, 0.0f, 100.0f);
     gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
@@ -2411,6 +2469,8 @@ void Settings::applyProfile(
     gyroCounterSteerAssist = profile.gyroCounterSteerAssist;
     gyroTransitionSpeed = profile.gyroTransitionSpeed;
     gyroHuntStrength = profile.gyroHuntStrength;
+
+    portEXIT_CRITICAL(&settingsMux);
 }
 
 bool Settings::persistProfile(

@@ -99,6 +99,7 @@ struct ControlTelemetry
     int servoCommand = 1500;
     bool steeringSignal = false;
     bool throttleSignal = false;
+    bool imuHealthy = true;
 };
 
 ControlTelemetry controlTelemetry;
@@ -156,9 +157,9 @@ static constexpr int CRSF_THROTTLE_NEUTRAL_BAND_US = 50;
 
 bool pin18ModeConfigured = false;
 
-bool pin18ThrottleOutputMode = false;
+volatile bool pin18ThrottleOutputMode = false;
 
-bool throttleOutputActive = false;
+volatile bool throttleOutputActive = false;
 
 #if defined(OPENDRIFT_INPUT_CRSF)
 bool crsfThrottleArmed = false;
@@ -166,7 +167,16 @@ bool lastCrsfSignal = false;
 uint32_t crsfThrottleNeutralSinceMs = 0;
 volatile bool crsfThrottleSignalSnapshot = false;
 volatile int crsfThrottlePulseSnapshot = 1500;
+volatile bool crsfThrottleOutputArmed = false;
 #endif
+
+volatile bool gyroCalibrationRequested = false;
+
+
+void requestGyroCalibration()
+{
+    gyroCalibrationRequested = true;
+}
 
 const char* password = "opendrift";
 const char* hostname = "opendrift";
@@ -603,14 +613,10 @@ void updateCrsfThrottleOutput(
 {
     if(!signalValid)
     {
-        if(throttleOutputActive)
-        {
-            // Active neutral is deterministic and does not depend on the
-            // receiver or ESC having matching failsafe configuration.
-            throttleOutput.writeMicroseconds(1500);
-        }
-
+        // The control task writes active neutral. It is deterministic and does
+        // not depend on the receiver or ESC having matching failsafe setup.
         crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
         crsfThrottleNeutralSinceMs = 0;
 
         return;
@@ -625,11 +631,7 @@ void updateCrsfThrottleOutput(
         if(!throttleNeutral)
         {
             crsfThrottleNeutralSinceMs = 0;
-
-            if(throttleOutputActive)
-            {
-                throttleOutput.writeMicroseconds(1500);
-            }
+            crsfThrottleOutputArmed = false;
 
             return;
         }
@@ -672,18 +674,12 @@ void updateCrsfThrottleOutput(
             return;
         }
 
+        crsfThrottleOutputArmed = true;
+
         Serial.println(
             "CRSF throttle output armed after neutral hold"
         );
     }
-
-    throttleOutput.writeMicroseconds(
-        constrain(
-            throttlePulse,
-            1000,
-            2000
-        )
-    );
 }
 #endif
 
@@ -901,6 +897,15 @@ void runControlIteration()
 
     imu.update();
 
+    if(gyroCalibrationRequested)
+    {
+        gyro.calibrate(
+            imu.getYawRate()
+        );
+
+        gyroCalibrationRequested = false;
+    }
+
     if(i2cBusMutex != nullptr)
     {
         xSemaphoreGive(
@@ -937,8 +942,13 @@ void runControlIteration()
                 settings
             );
     }
+    bool imuHealthy =
+        imu.isHealthy();
+
     float yaw =
-        imu.getYawRate();
+        imuHealthy
+        ? imu.getYawRate()
+        : 0.0f;
 
     int gyroCorrection =
         gyro.update(
@@ -986,19 +996,29 @@ void runControlIteration()
             correctionSaturated ||
             appliedGyroCorrection != limitedGyroCorrection;
 
+        Settings::SteeringCalibration calibration;
+
+        settings.getSteeringCalibration(
+            calibration
+        );
+
         steeringServo.configure(
             settings.getServoCenter(),
             settings.getServoReverse(),
             settings.getServoTravel(),
             settings.getServoQuiet(),
-            settings.isSteeringCalibrated(),
-            settings.getSteeringMin(),
-            settings.getSteeringCenter(),
-            settings.getSteeringMax()
+            calibration.calibrated,
+            calibration.min,
+            calibration.center,
+            calibration.max
         );
 
         steeringServo.writeMicroseconds(
             servoCommand
+        );
+
+        steeringServo.noteCommandPulse(
+            steeringCommand
         );
 
         servoCommand = steeringServo.getPosition();
@@ -1018,6 +1038,34 @@ void runControlIteration()
     // dynamic LEDC allocation must not run inside this high-priority task.
     crsfThrottlePulseSnapshot = throttlePulse;
     crsfThrottleSignalSnapshot = throttleSignal;
+
+    // The loop may detach the ESC between these checks. writeMicroseconds
+    // returns early when inactive and a stray LEDC write is harmless.
+    if(throttleOutputActive)
+    {
+        throttleOutput.writeMicroseconds(
+            (!throttleSignal || !crsfThrottleOutputArmed)
+            ? 1500
+            : constrain(
+                throttlePulse,
+                1000,
+                2000
+            )
+        );
+    }
+    #else
+    // The loop may detach the ESC between these checks. writeMicroseconds
+    // returns early when inactive and a stray LEDC write is harmless.
+    if(
+        pin18ThrottleOutputMode &&
+        throttleOutputActive &&
+        throttleSignal
+    )
+    {
+        throttleOutput.writeMicroseconds(
+            throttleRadio.getPulseWidth()
+        );
+    }
     #endif
 
     ControlTelemetry nextTelemetry;
@@ -1039,6 +1087,8 @@ void runControlIteration()
         steeringSignal;
     nextTelemetry.throttleSignal =
         throttleSignal;
+    nextTelemetry.imuHealthy =
+        imuHealthy;
 
     portENTER_CRITICAL(
         &controlTelemetryMux
@@ -1269,6 +1319,15 @@ void setup()
 
     bool settingsOk =
         settings.begin();
+
+    if(!settingsOk)
+    {
+        bootConsole.log(
+            "nvs: settings store unavailable",
+            "[WARN]",
+            TFT_YELLOW
+        );
+    }
 
     controlLoopHz = settings.getControlLoopHz();
     controlLoopPeriodMs = 1000 / controlLoopHz;
@@ -1869,6 +1928,10 @@ void setup()
         steeringServo
     );
 
+    ui.setCalibrationCallback(
+        requestGyroCalibration
+    );
+
     #if defined(OPENDRIFT_INPUT_CRSF)
     ui.setThrottleRadio(
         throttleRadio
@@ -2075,13 +2138,6 @@ void loop()
                     SHARED_GAIN_THROTTLE_PIN
                 );
         }
-
-        if(throttleOutputActive)
-        {
-            throttleOutput.writeMicroseconds(
-                throttleRadio.getPulseWidth()
-            );
-        }
     }
     else if(
         pin18ThrottleOutputMode &&
@@ -2125,6 +2181,10 @@ void loop()
 
     portEXIT_CRITICAL(
         &controlTelemetryMux
+    );
+
+    ui.setImuHealthy(
+        telemetry.imuHealthy
     );
 
     //-------------------

@@ -101,11 +101,19 @@ void IMU::update()
 
     lastUpdateMicros = now;
 
-    qmi.getGyroscope(
+    if(!qmi.getGyroscope(
         gyroX,
         gyroY,
         gyroZ
-    );
+    ))
+    {
+        if(consecutiveReadFailures < 255)
+        {
+            consecutiveReadFailures++;
+        }
+
+        return;
+    }
 
     if(!qmi.getAccelerometer(
         accelX,
@@ -113,8 +121,15 @@ void IMU::update()
         accelZ
     ))
     {
+        if(consecutiveReadFailures < 255)
+        {
+            consecutiveReadFailures++;
+        }
+
         return;
     }
+
+    consecutiveReadFailures = 0;
 
     accelMagnitude = sqrtf(
         (accelX * accelX) +
@@ -204,6 +219,13 @@ void IMU::update()
         0.0f,
         1.0f
     );
+}
+
+
+
+bool IMU::isHealthy() const
+{
+    return consecutiveReadFailures < 25;
 }
 
 

@@ -16,6 +16,8 @@ public:
 
     void update();
 
+    bool isHealthy() const;
+
 
     float getGyroX();
     float getGyroY();
@@ -52,6 +54,8 @@ private:
     float surfaceDisturbanceScore = 0;
 
     bool accelFilterReady = false;
+
+    uint8_t consecutiveReadFailures = 0;
 
     uint8_t gyroLpfMode = 0;
 

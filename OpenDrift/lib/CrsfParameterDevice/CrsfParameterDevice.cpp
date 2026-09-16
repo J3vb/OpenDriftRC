@@ -567,7 +567,7 @@ void CrsfParameterDevice::setScaledValue(
             {
                 settings->captureSteeringCalibrationPoint(
                     parameter - 28,
-                    steeringServo->getPosition(),
+                    steeringServo->getCommandPosition(),
                     steeringRadio->getPulseWidth()
                 );
             }

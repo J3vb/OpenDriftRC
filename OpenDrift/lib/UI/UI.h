@@ -49,6 +49,10 @@ public:
         bool healthy
     );
 
+    void setCalibrationCallback(
+        void (*callback)()
+    );
+
 
     void update(
         Touch& touch,
@@ -164,6 +168,8 @@ private:
     uint32_t servoLockNoticeUntil = 0;
 
     bool imuHealthy = true;
+
+    void (*calibrationCallback)() = nullptr;
 
     int8_t heldRepeatButton = 0;
 

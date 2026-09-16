@@ -165,8 +165,17 @@ public:
     int getSteeringMax();
     void setSteeringMax(int value);
 
+    struct SteeringCalibration
+    {
+        bool calibrated;
+        int min;
+        int center;
+        int max;
+    };
+
     uint8_t getSteeringCalibrationMask();
     bool isSteeringCalibrated();
+    void getSteeringCalibration(SteeringCalibration& out);
     int getSteeringCapturedPulse(uint8_t point);
     int getSteeringCapturedInputPulse(uint8_t point);
     bool captureSteeringCalibrationPoint(
@@ -293,6 +302,10 @@ private:
     int steeringMax = 2000;
 
     uint8_t steeringCalibrationMask = 0;
+
+    // Guards the steering endpoint members so the control task always reads
+    // a consistent set while the UI or web writes a new calibration.
+    portMUX_TYPE settingsMux = portMUX_INITIALIZER_UNLOCKED;
 
     int steeringCapturedPulses[3] = {1000, 1500, 2000};
 

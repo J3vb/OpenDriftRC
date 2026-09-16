@@ -2171,7 +2171,7 @@ void WebConfigurator::handleEndpointCapture()
     else
     {
         int pulse =
-            steeringServo->getPosition();
+            steeringServo->getCommandPosition();
 
         if(pulse < 900 || pulse > 2100)
         {
