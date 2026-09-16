@@ -19,16 +19,30 @@ void WiFiManager::onWifiEvent(
     switch(event)
     {
         case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
-            if(eventTarget != nullptr && eventTarget->eventStationCount < 16)
+            if(eventTarget != nullptr)
             {
-                eventTarget->eventStationCount++;
+                portENTER_CRITICAL(&eventTarget->stationMux);
+
+                if(eventTarget->eventStationCount < 16)
+                {
+                    eventTarget->eventStationCount++;
+                }
+
+                portEXIT_CRITICAL(&eventTarget->stationMux);
             }
             break;
 
         case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
-            if(eventTarget != nullptr && eventTarget->eventStationCount > 0)
+            if(eventTarget != nullptr)
             {
-                eventTarget->eventStationCount--;
+                portENTER_CRITICAL(&eventTarget->stationMux);
+
+                if(eventTarget->eventStationCount > 0)
+                {
+                    eventTarget->eventStationCount--;
+                }
+
+                portEXIT_CRITICAL(&eventTarget->stationMux);
             }
             break;
 
@@ -130,6 +144,12 @@ void WiFiManager::enable()
     {
         MDNS.addService("http", "tcp", 80);
     }
+    else
+    {
+        // A failed begin() can leave the responder allocated, which makes
+        // every later begin() fail with INVALID_STATE.
+        MDNS.end();
+    }
 
     // Android browsers do not resolve .local through mDNS. The access point
     // is already the DHCP-assigned DNS server, so answer the same name here.
@@ -147,7 +167,12 @@ void WiFiManager::enable()
     noClientSince = millis();
     clientWasPresent = false;
     lastStationEventMs = 0;
+
+    portENTER_CRITICAL(&stationMux);
+
     eventStationCount = 0;
+
+    portEXIT_CRITICAL(&stationMux);
 
 
 
@@ -182,11 +207,10 @@ void WiFiManager::disable()
 
     dnsServer.stop();
 
-    if(mdnsRunning)
-    {
-        MDNS.end();
-        mdnsRunning = false;
-    }
+    // Safe when nothing is running, and the only way to release a responder
+    // a failed begin() left behind.
+    MDNS.end();
+    mdnsRunning = false;
 
     activeSsid[0] = 0;
 
@@ -205,7 +229,12 @@ void WiFiManager::disable()
     noClientSince = 0;
     clientWasPresent = false;
     lastStationEventMs = 0;
+
+    portENTER_CRITICAL(&stationMux);
+
     eventStationCount = 0;
+
+    portEXIT_CRITICAL(&stationMux);
 
 
 

@@ -19,7 +19,7 @@ namespace
         {"Prediction",        0,  100,   0, 0,   1, "%"},
         {"Servo Quiet",       0,   50,   0, 0,   1, "us"},
         {"Steering Travel",   0,  100, 100, 0,   1, "%"},
-        {"Servo Travel",     10,  150, 100, 0,   1, "%"},
+        {"Servo Travel",     10,  100, 100, 0,   1, "%"},
         {"Servo Center",   1000, 2000,1500, 0,   1, "us"}
     };
 
@@ -341,7 +341,7 @@ void CrsfParameterDevice::writeParameter(
 
     if(
         (
-            parameter >= 1 && parameter <= 14
+            (parameter >= 1 && parameter <= 14)
             || parameter == 26
             || parameter == 33
             || parameter == 34

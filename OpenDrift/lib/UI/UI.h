@@ -151,6 +151,10 @@ private:
 
     int16_t lastDrawnGainHundredths = -1;
 
+    // Set while a gain channel is driving the live gain. The Drive page then
+    // shows the controller value; without a channel it shows the stored one.
+    bool liveGainFromChannel = false;
+
     // WiFi page live refresh: redraw only when these change.
     uint8_t lastDrawnWifiClients = 255;
 
@@ -166,6 +170,12 @@ private:
     // because physical endpoint calibration is active. The Steering page
     // shows a notice until this timestamp.
     uint32_t servoLockNoticeUntil = 0;
+
+    // Gyro calibration feedback on the Drive page. The result is held on
+    // screen for a moment after the averaging window ends.
+    uint8_t lastCalibrationState = 0;
+
+    uint32_t calibrationNoticeUntil = 0;
 
     bool imuHealthy = true;
 

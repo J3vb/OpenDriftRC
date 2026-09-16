@@ -465,8 +465,9 @@ void Backgrounds::eraseAll()
     }
 
     // Collect names first so the directory is never modified while it is
-    // being read, then repeat in case one pass could not hold them all.
-    for(uint8_t pass = 0; pass < 4; pass++)
+    // being read, then repeat until a pass finds nothing left. The pass
+    // limit only guards against entries that refuse to be removed.
+    for(uint8_t pass = 0; pass < 32; pass++)
     {
         char paths[16][48];
         uint8_t found = 0;
@@ -526,7 +527,7 @@ void Backgrounds::eraseAll()
             FFat.remove(paths[i]);
         }
 
-        if(found < 16)
+        if(found == 0)
         {
             break;
         }

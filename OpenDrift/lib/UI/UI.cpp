@@ -1877,8 +1877,15 @@ void UI::drawMainPage(
     Settings& settings
 )
 {
+    // The gain buttons write Settings, so only a live gain channel makes the
+    // controller value the one worth showing.
+    float displayedGain =
+        liveGainFromChannel
+        ? gyro.getGain()
+        : settings.getGain();
+
     lastDrawnGainHundredths =
-        (int16_t)(gyro.getGain() * 100.0f + 0.5f);
+        (int16_t)(displayedGain * 100.0f + 0.5f);
 
     #if !defined(OPENDRIFT_BOARD_AMOLED_164)
     drawUiBackground(lcd);
@@ -1899,9 +1906,9 @@ void UI::drawMainPage(
     lcd->drawCenterString("GYRO GAIN", 120, 57);
     lcd->setTextSize(3);
     lcd->setTextColor(TFT_WHITE);
-    lcd->drawFloat(gyro.getGain(), 2, 89, 72);
+    lcd->drawFloat(displayedGain, 2, 89, 72);
 
-    if(fabsf(gyro.getGain() - settings.getGain()) > 0.005f)
+    if(liveGainFromChannel)
     {
         String savedGain = "SAVED ";
 
@@ -1922,6 +1929,27 @@ void UI::drawMainPage(
 
     lcd->drawRect(55, 164, 130, 38, TFT_YELLOW);
     lcd->drawCenterString("CALIBRATE", 120, 174);
+
+    if(lastCalibrationState == GyroController::CALIBRATION_RUNNING)
+    {
+        lcd->setTextSize(1);
+        lcd->setTextColor(0xBDF7);
+        lcd->drawCenterString("CAL...", 120, 203);
+    }
+    else if(calibrationNoticeUntil != 0)
+    {
+        bool accepted =
+            lastCalibrationState == GyroController::CALIBRATION_OK;
+
+        lcd->setTextSize(1);
+        lcd->setTextColor(accepted ? TFT_GREEN : TFT_RED);
+
+        lcd->drawCenterString(
+            accepted ? "CAL OK" : "HOLD STILL",
+            120,
+            203
+        );
+    }
 
     drawPageDots();
     return;
@@ -1974,13 +2002,13 @@ void UI::drawMainPage(
     );
 
     lcd->drawFloat(
-        gyro.getGain(),
+        displayedGain,
         2,
         22,
         82
     );
 
-    if(fabsf(gyro.getGain() - settings.getGain()) > 0.005f)
+    if(liveGainFromChannel)
     {
         String savedGain = "SAVED ";
 
@@ -2043,6 +2071,38 @@ void UI::drawMainPage(
         OD_AMBER,
         2
     );
+
+    if(lastCalibrationState == GyroController::CALIBRATION_RUNNING)
+    {
+        lcd->setTextSize(2);
+
+        lcd->setTextColor(
+            OD_MUTED
+        );
+
+        lcd->drawCenterString(
+            "CAL...",
+            355,
+            210
+        );
+    }
+    else if(calibrationNoticeUntil != 0)
+    {
+        bool accepted =
+            lastCalibrationState == GyroController::CALIBRATION_OK;
+
+        lcd->setTextSize(2);
+
+        lcd->setTextColor(
+            accepted ? OD_GREEN : OD_AMBER
+        );
+
+        lcd->drawCenterString(
+            accepted ? "CAL OK" : "HOLD STILL",
+            355,
+            210
+        );
+    }
 
     drawPageDots();
 
@@ -6691,6 +6751,40 @@ void UI::update(
         page == PAGE_WIFI
     );
 
+    // Without a gain channel the controller only learns the stored gain on
+    // the next control tick, so the Drive page reads Settings instead.
+    liveGainFromChannel =
+        gainRadio.hasSignal();
+
+    uint8_t calibrationState =
+        (uint8_t)gyro.getCalibrationState();
+
+    if(calibrationState != lastCalibrationState)
+    {
+        lastCalibrationState = calibrationState;
+
+        if(
+            calibrationState == GyroController::CALIBRATION_OK ||
+            calibrationState == GyroController::CALIBRATION_REJECTED
+        )
+        {
+            calibrationNoticeUntil =
+                millis() + 2000;
+        }
+
+        requestRefresh();
+    }
+
+    if(
+        calibrationNoticeUntil != 0 &&
+        millis() >= calibrationNoticeUntil
+    )
+    {
+        calibrationNoticeUntil = 0;
+
+        requestRefresh();
+    }
+
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     if(
         updateDisplayBrightness(
@@ -6853,7 +6947,13 @@ void UI::update(
         if(page == PAGE_DRIVE)
         {
             int16_t activeGainHundredths =
-                (int16_t)(gyro.getGain() * 100.0f + 0.5f);
+                (int16_t)(
+                    (
+                        liveGainFromChannel
+                        ? gyro.getGain()
+                        : settings.getGain()
+                    ) * 100.0f + 0.5f
+                );
 
             if(activeGainHundredths != lastDrawnGainHundredths)
             {

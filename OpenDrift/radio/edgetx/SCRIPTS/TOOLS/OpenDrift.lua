@@ -26,7 +26,7 @@ local fields = {
   {29, "Capture Center",   0,    1,   1, 0, true, false, false, false, true},
   {30, "Capture Right",    0,    1,   1, 0, true, false, false, false, true},
   {31, "Reset Cal",        0,    1,   1, 0, true, false, false, false, true},
-  {13, "Servo Travel",    10,  150,   1, 0 },
+  {13, "Servo Travel",    10,  100,   1, 0 },
   {14, "Servo Center",  1000, 2000,   1, 0 },
   {15, "Servo Reverse",    0,    1,   1, 0, true},
   {16, "Gyro Reverse",     0,    1,   1, 0, true},
@@ -222,7 +222,8 @@ local function run(event)
   local right = event == EVT_ROT_RIGHT or event == EVT_VIRTUAL_NEXT
   local left = event == EVT_ROT_LEFT or event == EVT_VIRTUAL_PREV
   local enter = event == EVT_ENTER_BREAK or event == EVT_VIRTUAL_ENTER
-  local back = EVT_EXIT_BREAK ~= nil and event == EVT_EXIT_BREAK
+  local back = (EVT_EXIT_BREAK ~= nil and event == EVT_EXIT_BREAK)
+            or (EVT_VIRTUAL_EXIT ~= nil and event == EVT_VIRTUAL_EXIT)
 
   if back then
     if editing then

@@ -171,6 +171,9 @@ public:
         int min;
         int center;
         int max;
+        int inputMin;
+        int inputCenter;
+        int inputMax;
     };
 
     uint8_t getSteeringCalibrationMask();

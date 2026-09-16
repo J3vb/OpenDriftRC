@@ -368,9 +368,13 @@ bool Settings::begin()
         if(prefs.isKey(key)) prefs.remove(key);
     }
 
-    servoCenter = prefs.getInt(
-        "center",
-        1500
+    servoCenter = constrain(
+        prefs.getInt(
+            "center",
+            1500
+        ),
+        1000,
+        2000
     );
 
     servoReverse = prefs.getBool(
@@ -378,8 +382,12 @@ bool Settings::begin()
         false
     );
 
-    servoTravel = prefs.getInt(
-        "travel",
+    servoTravel = constrain(
+        prefs.getInt(
+            "travel",
+            100
+        ),
+        1,
         100
     );
 
@@ -402,6 +410,16 @@ bool Settings::begin()
         "timeout",
         40000
     );
+
+    if(wifiTimeout != 0)
+    {
+        wifiTimeout =
+            constrain(
+                wifiTimeout,
+                5000UL,
+                3600000UL
+            );
+    }
 
     applyWifiSsid(
         prefs.getString(
@@ -477,14 +495,26 @@ bool Settings::begin()
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
     applyFallbackSteeringEndpoints();
-    steeringCenter = prefs.getInt("servoCalC", steeringCenter);
-    steeringMin = prefs.getInt(
-        "servoCalL",
-        steeringMin
+    steeringCenter = constrain(
+        prefs.getInt("servoCalC", steeringCenter),
+        900,
+        2100
     );
-    steeringMax = prefs.getInt(
-        "servoCalR",
-        steeringMax
+    steeringMin = constrain(
+        prefs.getInt(
+            "servoCalL",
+            steeringMin
+        ),
+        900,
+        2100
+    );
+    steeringMax = constrain(
+        prefs.getInt(
+            "servoCalR",
+            steeringMax
+        ),
+        900,
+        2100
     );
     steeringCapturedPulses[0] = steeringMin;
     steeringCapturedPulses[1] = steeringCenter;
@@ -501,14 +531,22 @@ bool Settings::begin()
         100
     );
 
-    gainMin = prefs.getInt(
-        "gainMin",
-        1000
+    gainMin = constrain(
+        prefs.getInt(
+            "gainMin",
+            1000
+        ),
+        800,
+        2200
     );
 
-    gainMax = prefs.getInt(
-        "gainMax",
-        2000
+    gainMax = constrain(
+        prefs.getInt(
+            "gainMax",
+            2000
+        ),
+        800,
+        2200
     );
 
     channel3GainMin = constrain(
@@ -1046,7 +1084,14 @@ int Settings::getServoCenter()
 
 bool Settings::setServoCenter(int value)
 {
-    if(servoCenter == value)
+    int clamped =
+        constrain(
+            value,
+            1000,
+            2000
+        );
+
+    if(servoCenter == clamped)
     {
         return true;
     }
@@ -1056,7 +1101,7 @@ bool Settings::setServoCenter(int value)
         return false;
     }
 
-    servoCenter = value;
+    servoCenter = clamped;
     dirty = true;
 
     return true;
@@ -1092,7 +1137,14 @@ int Settings::getServoTravel()
 
 bool Settings::setServoTravel(int value)
 {
-    if(servoTravel == value)
+    int clamped =
+        constrain(
+            value,
+            1,
+            100
+        );
+
+    if(servoTravel == clamped)
     {
         return true;
     }
@@ -1102,7 +1154,7 @@ bool Settings::setServoTravel(int value)
         return false;
     }
 
-    servoTravel = value;
+    servoTravel = clamped;
     dirty = true;
 
     return true;
@@ -1158,7 +1210,16 @@ uint32_t Settings::getWifiTimeout()
 
 void Settings::setWifiTimeout(uint32_t value)
 {
-    wifiTimeout = value;
+    // Zero keeps the access point running for as long as the car is on.
+    wifiTimeout =
+        value == 0
+        ? 0UL
+        : constrain(
+            value,
+            5000UL,
+            3600000UL
+        );
+
     dirty = true;
 }
 
@@ -1416,15 +1477,22 @@ int Settings::getSteeringMin()
 
 void Settings::setSteeringMin(int value)
 {
-    if(steeringMin == value)
+    int clamped =
+        constrain(
+            value,
+            900,
+            2100
+        );
+
+    if(steeringMin == clamped)
     {
         return;
     }
 
     portENTER_CRITICAL(&settingsMux);
 
-    steeringMin = value;
-    steeringCapturedPulses[0] = value;
+    steeringMin = clamped;
+    steeringCapturedPulses[0] = clamped;
     steeringCalibrationMask = 0;
 
     portEXIT_CRITICAL(&settingsMux);
@@ -1439,15 +1507,22 @@ int Settings::getSteeringCenter()
 
 void Settings::setSteeringCenter(int value)
 {
-    if(steeringCenter == value)
+    int clamped =
+        constrain(
+            value,
+            900,
+            2100
+        );
+
+    if(steeringCenter == clamped)
     {
         return;
     }
 
     portENTER_CRITICAL(&settingsMux);
 
-    steeringCenter = value;
-    steeringCapturedPulses[1] = value;
+    steeringCenter = clamped;
+    steeringCapturedPulses[1] = clamped;
     steeringCalibrationMask = 0;
 
     portEXIT_CRITICAL(&settingsMux);
@@ -1462,15 +1537,22 @@ int Settings::getSteeringMax()
 
 void Settings::setSteeringMax(int value)
 {
-    if(steeringMax == value)
+    int clamped =
+        constrain(
+            value,
+            900,
+            2100
+        );
+
+    if(steeringMax == clamped)
     {
         return;
     }
 
     portENTER_CRITICAL(&settingsMux);
 
-    steeringMax = value;
-    steeringCapturedPulses[2] = value;
+    steeringMax = clamped;
+    steeringCapturedPulses[2] = clamped;
     steeringCalibrationMask = 0;
 
     portEXIT_CRITICAL(&settingsMux);
@@ -1513,6 +1595,9 @@ void Settings::getSteeringCalibration(
     out.min = steeringMin;
     out.center = steeringCenter;
     out.max = steeringMax;
+    out.inputMin = steeringCapturedInputPulses[0];
+    out.inputCenter = steeringCapturedInputPulses[1];
+    out.inputMax = steeringCapturedInputPulses[2];
 
     portEXIT_CRITICAL(&settingsMux);
 }
@@ -1556,52 +1641,60 @@ bool Settings::captureSteeringCalibrationPoint(
         return false;
     }
 
+    // The mask and the endpoints move together so the control task never
+    // sees a complete calibration paired with the previous endpoints.
+    bool accepted = true;
+
+    portENTER_CRITICAL(&settingsMux);
+
     steeringCapturedPulses[point] = physicalPulse;
 
     if(inputPulse >= 800 && inputPulse <= 2200)
     {
         steeringCapturedInputPulses[point] = inputPulse;
     }
+
     steeringCalibrationMask |= (1U << point);
-    dirty = true;
 
-    if(getSteeringCalibrationMask() != 0x07)
+    if((steeringCalibrationMask & 0x07) == 0x07)
     {
-        return true;
+        int leftDelta =
+            steeringCapturedPulses[0] - steeringCapturedPulses[1];
+
+        int rightDelta =
+            steeringCapturedPulses[2] - steeringCapturedPulses[1];
+
+        bool validCalibration =
+            abs(leftDelta) >= 10 &&
+            abs(rightDelta) >= 10 &&
+            leftDelta * rightDelta < 0;
+
+        if(validCalibration)
+        {
+            steeringMin = steeringCapturedPulses[0];
+            steeringCenter = steeringCapturedPulses[1];
+            steeringMax = steeringCapturedPulses[2];
+        }
+        else
+        {
+            // Keep the two known-good captures and make the rejected position
+            // visibly incomplete on both the display and radio tool.
+            steeringCalibrationMask &= ~(1U << point);
+            accepted = false;
+        }
     }
-
-    int leftDelta =
-        steeringCapturedPulses[0] - steeringCapturedPulses[1];
-
-    int rightDelta =
-        steeringCapturedPulses[2] - steeringCapturedPulses[1];
-
-    bool validCalibration =
-        abs(leftDelta) >= 10 &&
-        abs(rightDelta) >= 10 &&
-        leftDelta * rightDelta < 0;
-
-    if(!validCalibration)
-    {
-        // Keep the two known-good captures and make the rejected position
-        // visibly incomplete on both the display and radio tool.
-        steeringCalibrationMask &= ~(1U << point);
-        return false;
-    }
-
-    portENTER_CRITICAL(&settingsMux);
-
-    steeringMin = steeringCapturedPulses[0];
-    steeringCenter = steeringCapturedPulses[1];
-    steeringMax = steeringCapturedPulses[2];
 
     portEXIT_CRITICAL(&settingsMux);
 
-    return true;
+    dirty = true;
+
+    return accepted;
 }
 
 bool Settings::confirmStoredSteeringCalibration()
 {
+    portENTER_CRITICAL(&settingsMux);
+
     int leftDelta = steeringMin - steeringCenter;
     int rightDelta = steeringMax - steeringCenter;
 
@@ -1610,30 +1703,23 @@ bool Settings::confirmStoredSteeringCalibration()
         abs(rightDelta) >= 10 &&
         leftDelta * rightDelta < 0;
 
-    if(!validCalibration)
+    if(validCalibration)
     {
-        portENTER_CRITICAL(&settingsMux);
-
-        steeringCalibrationMask = 0;
-
-        portEXIT_CRITICAL(&settingsMux);
-
-        dirty = true;
-        return false;
+        steeringCapturedPulses[0] = steeringMin;
+        steeringCapturedPulses[1] = steeringCenter;
+        steeringCapturedPulses[2] = steeringMax;
+        steeringCalibrationMask = 0x07;
     }
-
-    portENTER_CRITICAL(&settingsMux);
-
-    steeringCapturedPulses[0] = steeringMin;
-    steeringCapturedPulses[1] = steeringCenter;
-    steeringCapturedPulses[2] = steeringMax;
-    steeringCalibrationMask = 0x07;
+    else
+    {
+        steeringCalibrationMask = 0;
+    }
 
     portEXIT_CRITICAL(&settingsMux);
 
     dirty = true;
 
-    return true;
+    return validCalibration;
 }
 
 void Settings::applyFallbackSteeringEndpoints()
@@ -1641,10 +1727,16 @@ void Settings::applyFallbackSteeringEndpoints()
     int fallbackOffset = (500 * constrain(servoTravel, 1, 100)) / 100;
 
     steeringCenter = servoCenter;
-    steeringMin =
-        servoCenter + (servoReverse ? fallbackOffset : -fallbackOffset);
-    steeringMax =
-        servoCenter + (servoReverse ? -fallbackOffset : fallbackOffset);
+    steeringMin = constrain(
+        servoCenter + (servoReverse ? fallbackOffset : -fallbackOffset),
+        900,
+        2100
+    );
+    steeringMax = constrain(
+        servoCenter + (servoReverse ? -fallbackOffset : fallbackOffset),
+        900,
+        2100
+    );
     steeringCapturedPulses[0] = steeringMin;
     steeringCapturedPulses[1] = steeringCenter;
     steeringCapturedPulses[2] = steeringMax;
@@ -1689,7 +1781,13 @@ int Settings::getGainMin()
 
 void Settings::setGainMin(int value)
 {
-    gainMin = value;
+    gainMin =
+        constrain(
+            value,
+            800,
+            2200
+        );
+
     dirty = true;
 }
 
@@ -1700,7 +1798,13 @@ int Settings::getGainMax()
 
 void Settings::setGainMax(int value)
 {
-    gainMax = value;
+    gainMax =
+        constrain(
+            value,
+            800,
+            2200
+        );
+
     dirty = true;
 }
 

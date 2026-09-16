@@ -111,6 +111,10 @@ private:
 
     volatile int8_t eventStationCount = 0;
 
+    // The WiFi event task counts stations while the loop task resets the
+    // count, so both sides take this lock around it.
+    portMUX_TYPE stationMux = portMUX_INITIALIZER_UNLOCKED;
+
     bool autoOffHold = false;
 
     static WiFiManager* eventTarget;
