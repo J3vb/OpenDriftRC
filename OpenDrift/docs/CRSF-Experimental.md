@@ -8,8 +8,9 @@ variant only when the receiver is wired through OpenDrift.
 - `waveshare_amoled_164_crsf`: full-duplex AMOLED target
 - `waveshare_amoled_164_v2_crsf`: full-duplex AMOLED V2 target
 
-The Waveshare round-display target is frozen and is no longer part of current
-builds or releases.
+The Waveshare round-display CRSF environments (`waveshare_128_crsf`, and the
+PWM `waveshare_128`) still exist in `platformio.ini`, but they are frozen:
+they are kept for existing hardware and are untested against new features.
 
 CRSF settings are stored in the separate `OpenDriftCRSF` NVS namespace, so
 they do not overwrite the corresponding PWM tune.
@@ -71,6 +72,8 @@ outputs; use external power and a common ground for lights and controllers.
 ## Failsafes
 
 - A CRSF channel frame older than 50 ms is treated as signal loss.
+- Signal loss is also declared once link statistics have been received and
+  report an uplink link quality of 0, even while channel frames keep arriving.
 - Steering centers when the link is lost.
 - GPIO 16 emits no throttle PWM until a valid link has held throttle within
   50 microseconds of center for 500 ms.
@@ -83,7 +86,10 @@ Download [`OpenDrift.lua`](https://github.com/doublej380-pixel/OpenDriftRC/relea
 card, then open **OpenDrift** from the [EdgeTX Tools menu](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua). The current tool reads
 and writes the controller settings over full-duplex CRSF:
 
-- saved gain, deadband, Max Correction percentage, and smoothing;
+- saved gain, plus a read-only Live Gain field next to it that shows the gain
+  the controller is actually running, which differs from the saved value while
+  CRSF channel 3 drives the gain;
+- deadband, Max Correction percentage, and smoothing;
 - Drift Memory, memory limit, Hold Assist, and Countersteer Assist;
 - Transition Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, Servo Travel,
   and Servo Center;

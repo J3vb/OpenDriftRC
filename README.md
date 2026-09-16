@@ -172,7 +172,24 @@ Keep the car still during startup so gyro calibration can capture a clean yaw-ra
 
 ## Onboard UI Pages
 
-Swipe left/right to move between pages.
+Swipe left/right to move between pages. The order on screen is:
+
+1. `Drive`
+2. `Core`
+3. `Response`
+4. `Assistance`
+5. `Transition`
+6. `Profiles`
+7. `Radio`
+8. `Steering`
+9. `Endpoints`
+10. `WiFi`
+11. `System`
+12. `Display` (AMOLED only)
+13. `Backgrounds` (AMOLED only)
+
+Two of the headings below do not match the on-screen title: **Main** documents
+the `Drive` page and **Tail Response** documents the page titled `Transition`.
 
 ### Main
 
@@ -277,6 +294,12 @@ Steering output setup:
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
 
+Servo center, travel and reverse are locked while a physical endpoint
+calibration is active, because the saved endpoints already describe the servo.
+The page shows `LOCKED BY CAL` when a change is refused. Reset the calibration
+first: tap a saved row on the **Physical Endpoints** page, or use `Reset
+calibration` in the web configurator or the EdgeTX tool.
+
 ### Physical Servo Endpoints
 
 The calibration page uses three large capture buttons. Each button starts red
@@ -335,7 +358,7 @@ If your device cannot resolve the name, the address `http://192.168.4.1/` always
 
 ### System
 
-Basic firmware/system information. Tap the GPIO 18 mode button to switch between `GAIN INPUT` and `THROTTLE OUT`.
+Basic firmware/system information. On PWM builds, tap the GPIO 18 mode button to switch between `GAIN INPUT` and `THROTTLE OUT`. CRSF builds have no such choice, so that row is a plain label showing the fixed CRSF UART pins.
 
 The `THEME` row has two buttons. The left one cycles the accent colour used for every page header and the adjustment buttons: Mixed (the original colour per page), Cyan, Blue, Magenta, Amber, Green or White. Amber stays reserved for warnings such as a pending restart or a pending WiFi rename. The right one switches between light and dark text; dark text suits a light photo background. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any image. Both settings are saved and shared with the web configurator.
 
@@ -422,7 +445,7 @@ The **System** card at the bottom has a **Restart OpenDrift** button. Use it aft
 
 The **Backgrounds** card takes any JPG or PNG. Your browser scales and crops it to the panel's 456 x 280 pixels and converts it to the panel's pixel format before uploading, so the board never decodes an image and each background costs 250 KB of the otherwise unused 10 MB `ffat` flash partition. Give each image a name of letters, digits, `-` or `_`; the list holds 16, and uploading a name that already exists replaces that image. The firmware formats the partition once, on the first boot after this update, which adds a few seconds before the control task starts. Uploading and deleting write flash, so do it at the bench rather than while driving.
 
-**Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. There is no import yet; the keys match the form field names, so values can be typed back in.
+**Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. The Driving Profiles card imports the profiles out of such a file, as described under **Profiles** above; the remaining keys match the form field names, so those values can be typed back in.
 
 The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings, and every uploaded background) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
 

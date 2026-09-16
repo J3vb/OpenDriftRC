@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Display and web configurator
+
+- Adds a Display page with a 180 degree screen flip for an upside-down board;
+  the rendered image and the touch input rotate together.
+- Adds a display theme: a selectable accent colour, light or dark text, and
+  translucent panels behind the controls so any background stays readable.
+- Adds uploadable AMOLED backgrounds, stored on the board and selectable from
+  the display or the web configurator.
+- Adds a display brightness setting and a configurable idle dim timeout.
+- Adds profile export and import, plus a JSON export of every setting, the
+  endpoint calibration and all profiles.
+- Adds physical servo endpoint capture and reset from the web configurator,
+  and a Restart and Factory reset button.
+
+### Fixes
+
+- Legacy profile migration no longer drops profiles or shifts the active
+  profile index.
+- The ESC neutral failsafe now runs in the control task, so it cannot be
+  delayed by the UI or the web server.
+- The gyro calibrate button no longer races the control task.
+- The Drive page gain and deadband buttons now edit the saved value instead of
+  the live gain, so an edit is no longer overwritten by the gain channel. The
+  Drive page shows the saved value next to the live one when they differ.
+- The web save rejects NaN and empty numbers and clamps the deadband.
+- Servo center, travel and reverse are locked while a physical endpoint
+  calibration is active; the Steering page reports a refused change.
+- Splits the EdgeTX tool's gain into Saved Gain and a read-only Live Gain,
+  adds an editing guard and a BUSY indicator, and handles EXIT correctly.
+- Removes dead files left over from the original round-display port.
+
 ## v1.0.8 - 2026-09-03
 
 ### Lower-latency gyro experiments

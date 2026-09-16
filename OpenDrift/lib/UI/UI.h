@@ -45,6 +45,10 @@ public:
 
     void requestRefresh();
 
+    void setImuHealthy(
+        bool healthy
+    );
+
 
     void update(
         Touch& touch,
@@ -153,6 +157,13 @@ private:
     uint8_t radioSection = 0;
 
     bool steeringCalibrationError = false;
+
+    // Set when Settings refuses a servo center/travel/reverse change
+    // because physical endpoint calibration is active. The Steering page
+    // shows a notice until this timestamp.
+    uint32_t servoLockNoticeUntil = 0;
+
+    bool imuHealthy = true;
 
     int8_t heldRepeatButton = 0;
 

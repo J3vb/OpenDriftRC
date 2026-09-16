@@ -2,6 +2,7 @@
 #include "../../include/Version.h"
 
 #include <esp_heap_caps.h>
+#include <math.h>
 
 static constexpr uint16_t ROUND_CYAN = 0x07FF;
 static constexpr uint16_t ROUND_DIM = 0x3186;
@@ -1011,6 +1012,21 @@ void UI::requestRefresh()
 }
 
 
+void UI::setImuHealthy(
+    bool healthy
+)
+{
+    if(imuHealthy == healthy)
+    {
+        return;
+    }
+
+    imuHealthy = healthy;
+
+    requestRefresh();
+}
+
+
 
 void UI::changePage(
     int8_t direction,
@@ -1862,12 +1878,32 @@ void UI::drawMainPage(
     lcd->setTextColor(ROUND_CYAN);
     lcd->drawCenterString("Drive", 120, 16);
 
+    if(!imuHealthy)
+    {
+        lcd->setTextSize(1);
+        lcd->setTextColor(TFT_RED);
+        lcd->drawCenterString("IMU FAULT", 120, 44);
+    }
+
     lcd->setTextSize(1);
     lcd->setTextColor(0xBDF7);
     lcd->drawCenterString("GYRO GAIN", 120, 57);
     lcd->setTextSize(3);
     lcd->setTextColor(TFT_WHITE);
     lcd->drawFloat(gyro.getGain(), 2, 89, 72);
+
+    if(fabsf(gyro.getGain() - settings.getGain()) > 0.005f)
+    {
+        String savedGain = "SAVED ";
+
+        savedGain += String(settings.getGain(), 2);
+
+        lcd->setTextSize(1);
+        lcd->setTextColor(0xBDF7);
+        lcd->drawCenterString(savedGain.c_str(), 120, 99);
+    }
+
+    lcd->setTextColor(TFT_WHITE);
 
     lcd->drawRect(30, 109, 58, 38, ROUND_CYAN);
     lcd->drawRect(152, 109, 58, 38, ROUND_CYAN);
@@ -1892,6 +1928,21 @@ void UI::drawMainPage(
         "Drive",
         OD_CYAN
     );
+
+    if(!imuHealthy)
+    {
+        lcd->setTextSize(2);
+
+        lcd->setTextColor(
+            OD_AMBER
+        );
+
+        lcd->drawString(
+            "IMU FAULT",
+            300,
+            16
+        );
+    }
 
     lcd->fillRoundRect(18, 52, 240, 106, 6, OD_PANEL);
 
@@ -1919,6 +1970,25 @@ void UI::drawMainPage(
         22,
         82
     );
+
+    if(fabsf(gyro.getGain() - settings.getGain()) > 0.005f)
+    {
+        String savedGain = "SAVED ";
+
+        savedGain += String(settings.getGain(), 2);
+
+        lcd->setTextSize(1);
+
+        lcd->setTextColor(
+            OD_MUTED
+        );
+
+        lcd->drawString(
+            savedGain.c_str(),
+            24,
+            120
+        );
+    }
 
     lcd->setTextSize(2);
 
@@ -2093,7 +2163,7 @@ void UI::drawCorePage(
     drawRoundAdjustRow(
         lcd,
         "DEADBAND",
-        String(gyro.getDeadband(), 1),
+        String(settings.getDeadband(), 1),
         0,
         TFT_MAGENTA
     );
@@ -2177,7 +2247,7 @@ void UI::drawCorePage(
     );
 
     lcd->drawFloat(
-        gyro.getDeadband(),
+        settings.getDeadband(),
         1,
         146,
         48
@@ -2472,13 +2542,15 @@ void UI::drawSystemPage(
         132
     );
 
-    drawAmoledButton(
-        lcd,
-        150,
-        171,
-        240,
-        36,
-        #if defined(OPENDRIFT_INPUT_CRSF)
+    // The CRSF UART pins are fixed, so that row is a label and not a button.
+    #if defined(OPENDRIFT_INPUT_CRSF)
+    lcd->setTextSize(2);
+
+    lcd->setTextColor(
+        OD_TEXT
+    );
+
+    lcd->drawString(
         #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
         "RC TX17 / RX18",
         #elif defined(OPENDRIFT_AMOLED_V2)
@@ -2486,17 +2558,25 @@ void UI::drawSystemPage(
         #else
         "RX17 / TX18",
         #endif
-        OD_CYAN,
-        #else
+        150,
+        181
+    );
+    #else
+    drawAmoledButton(
+        lcd,
+        150,
+        171,
+        240,
+        36,
         settings.getThrottleOutputEnabled()
         ? "THROTTLE OUT"
         : "GAIN INPUT",
         settings.getThrottleOutputEnabled()
         ? OD_AMBER
         : OD_CYAN,
-        #endif
         2
     );
+    #endif
 
     drawPageDots();
 
@@ -2558,6 +2638,8 @@ void UI::drawSystemPage(
         119
     );
 
+    // The CRSF UART pins are fixed, so that row is a label and not a button.
+    #if !defined(OPENDRIFT_INPUT_CRSF)
     lcd->drawRect(
         43,
         137,
@@ -2565,6 +2647,7 @@ void UI::drawSystemPage(
         40,
         ROUND_CYAN
     );
+    #endif
 
     lcd->setTextSize(2);
     lcd->setTextColor(TFT_WHITE);
@@ -3928,6 +4011,13 @@ void UI::drawRoundRadioPage(
         );
 
         lcd->setTextSize(1);
+
+        if(millis() < servoLockNoticeUntil)
+        {
+            lcd->setTextColor(TFT_RED);
+            lcd->drawCenterString("LOCKED BY CAL", 120, 126);
+        }
+
         lcd->setTextColor(0xBDF7);
         lcd->drawCenterString("STEERING TRAVEL", 120, 139);
 
@@ -4300,6 +4390,16 @@ void UI::drawRadioPage(
             361,
             194
         );
+
+        if(millis() < servoLockNoticeUntil)
+        {
+            lcd->setTextColor(OD_AMBER);
+            lcd->drawCenterString(
+                "LOCKED BY CAL",
+                361,
+                212
+            );
+        }
 
         drawPageDots();
 
@@ -6108,13 +6208,10 @@ bool UI::actionButtonAt(
     )
         return true;
 
-    if(
-        page == PAGE_SYSTEM
-        #if defined(OPENDRIFT_INPUT_CRSF)
-        && false
-        #endif
-    )
+    #if !defined(OPENDRIFT_INPUT_CRSF)
+    if(page == PAGE_SYSTEM)
         return buttonPressed(x, y, 150, 171, 240, 36);
+    #endif
     #else
     if(page == PAGE_DRIVE)
         return buttonPressed(x, y, 55, 164, 130, 38);
@@ -6141,13 +6238,10 @@ bool UI::actionButtonAt(
     if(page == PAGE_WIFI)
         return buttonPressed(x, y, 50, 145, 140, 42);
 
-    if(
-        page == PAGE_SYSTEM
-        #if defined(OPENDRIFT_INPUT_CRSF)
-        && false
-        #endif
-    )
+    #if !defined(OPENDRIFT_INPUT_CRSF)
+    if(page == PAGE_SYSTEM)
         return buttonPressed(x, y, 43, 137, 154, 40);
+    #endif
 
     #endif
 
@@ -6167,9 +6261,7 @@ bool UI::applyRepeatButton(
         case 1:
         {
             float gain =
-                gyro.getGain() - 0.01f;
-
-            gyro.setGain(gain);
+                settings.getGain() - 0.01f;
 
             settings.setGain(gain);
 
@@ -6184,9 +6276,7 @@ bool UI::applyRepeatButton(
         case 2:
         {
             float gain =
-                gyro.getGain() + 0.01f;
-
-            gyro.setGain(gain);
+                settings.getGain() + 0.01f;
 
             settings.setGain(gain);
 
@@ -6201,12 +6291,10 @@ bool UI::applyRepeatButton(
         case 3:
         {
             float deadband =
-                gyro.getDeadband() - 1.0f;
+                settings.getDeadband() - 1.0f;
 
             if(deadband < 0)
                 deadband = 0;
-
-            gyro.setDeadband(deadband);
 
             settings.setDeadband(deadband);
 
@@ -6221,9 +6309,7 @@ bool UI::applyRepeatButton(
         case 4:
         {
             float deadband =
-                gyro.getDeadband() + 1.0f;
-
-            gyro.setDeadband(deadband);
+                settings.getDeadband() + 1.0f;
 
             settings.setDeadband(deadband);
 
@@ -6635,6 +6721,21 @@ void UI::update(
     }
     #endif
 
+    // Drop the servo lock notice once it has been on screen long enough,
+    // and redraw the page it sits on so it disappears.
+    if(
+        servoLockNoticeUntil != 0 &&
+        millis() >= servoLockNoticeUntil
+    )
+    {
+        servoLockNoticeUntil = 0;
+
+        if(page == PAGE_STEERING)
+        {
+            refreshRequested = true;
+        }
+    }
+
     if(
         refreshRequested &&
         !touched &&
@@ -6682,8 +6783,9 @@ void UI::update(
 
         nextRepeatAt = 0;
 
-        lastTouchState =
-            false;
+        // The finger is still down. Keeping the press latched stops the
+        // new page from seeing it as a fresh tap on whatever sits under it.
+        lastTouchState = true;
 
         return;
     }
@@ -6712,8 +6814,9 @@ void UI::update(
 
         nextRepeatAt = 0;
 
-        lastTouchState =
-            false;
+        // The finger is still down. Keeping the press latched stops the
+        // new page from seeing it as a fresh tap on whatever sits under it.
+        lastTouchState = true;
 
         return;
     }
@@ -7365,9 +7468,15 @@ void UI::update(
 
             if(buttonPressed(x, y, 294, 66, 134, 64))
             {
-                settings.setServoReverse(
-                    !settings.getServoReverse()
-                );
+                if(
+                    !settings.setServoReverse(
+                        !settings.getServoReverse()
+                    )
+                )
+                {
+                    servoLockNoticeUntil =
+                        millis() + 1500;
+                }
 
                 drawRadioPage(
                     steeringRadio,
@@ -7532,11 +7641,9 @@ void UI::update(
             return;
         }
 
+        #if !defined(OPENDRIFT_INPUT_CRSF)
         if(
             page == PAGE_SYSTEM &&
-            #if defined(OPENDRIFT_INPUT_CRSF)
-            false &&
-            #endif
             buttonPressed(
                 x,
                 y,
@@ -7560,6 +7667,7 @@ void UI::update(
 
             return;
         }
+        #endif
 
         lastTouchState =
             touched;
@@ -7584,10 +7692,8 @@ void UI::update(
             {
 
                 float g =
-                    gyro.getGain()-0.01f;
+                    settings.getGain()-0.01f;
 
-
-                gyro.setGain(g);
 
                 settings.setGain(g);
 
@@ -7604,10 +7710,8 @@ void UI::update(
             {
 
                 float g =
-                    gyro.getGain()+0.01f;
+                    settings.getGain()+0.01f;
 
-
-                gyro.setGain(g);
 
                 settings.setGain(g);
 
@@ -7658,14 +7762,12 @@ void UI::update(
             {
 
                 float deadband =
-                    gyro.getDeadband()-1.0f;
+                    settings.getDeadband()-1.0f;
 
 
                 if(deadband < 0)
                     deadband = 0;
 
-
-                gyro.setDeadband(deadband);
 
                 settings.setDeadband(deadband);
 
@@ -7682,10 +7784,8 @@ void UI::update(
             {
 
                 float deadband =
-                    gyro.getDeadband()+1.0f;
+                    settings.getDeadband()+1.0f;
 
-
-                gyro.setDeadband(deadband);
 
                 settings.setDeadband(deadband);
 
@@ -7723,9 +7823,15 @@ void UI::update(
         {
             if(buttonPressed(x, y, 43, 88, 154, 34))
             {
-                settings.setServoReverse(
-                    !settings.getServoReverse()
-                );
+                if(
+                    !settings.setServoReverse(
+                        !settings.getServoReverse()
+                    )
+                )
+                {
+                    servoLockNoticeUntil =
+                        millis() + 1500;
+                }
             }
 
             if(buttonPressed(x, y, 38, 158, 44, 34))
@@ -7842,9 +7948,15 @@ void UI::update(
             ))
             {
 
-                settings.setServoReverse(
-                    !settings.getServoReverse()
-                );
+                if(
+                    !settings.setServoReverse(
+                        !settings.getServoReverse()
+                    )
+                )
+                {
+                    servoLockNoticeUntil =
+                        millis() + 1500;
+                }
 
             }
 
@@ -7939,11 +8051,9 @@ void UI::update(
 
         }
 
+        #if !defined(OPENDRIFT_INPUT_CRSF)
         if(
             page == PAGE_SYSTEM &&
-            #if defined(OPENDRIFT_INPUT_CRSF)
-            false &&
-            #endif
             buttonPressed(x, y, 43, 137, 154, 40)
         )
         {
@@ -7953,6 +8063,7 @@ void UI::update(
 
             drawSystemPage(settings);
         }
+        #endif
 
 
     }
