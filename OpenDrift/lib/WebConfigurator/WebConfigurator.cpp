@@ -427,7 +427,7 @@ void WebConfigurator::handleRoot()
 
     String html;
 
-    html.reserve(40000);
+    html.reserve(48000);
 
     html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
     html += F("<title>OpenDrift Config</title><style>");
@@ -436,6 +436,7 @@ void WebConfigurator::handleRoot()
     html += F("h1{font-size:28px;margin:8px 0 2px}h2{font-size:18px;margin:22px 0 10px}");
     html += F(".sub{color:#aeb4bb;margin-bottom:20px}.card{border:1px solid #33383f;border-radius:8px;padding:14px;margin:12px 0;background:#171a1f}");
     html += F("label{display:block;font-size:13px;color:#c8cdd2;margin:12px 0 5px}input,select{width:100%;box-sizing:border-box;background:#0b0d10;color:#fff;border:1px solid #3b4148;border-radius:6px;padding:10px;font-size:16px}");
+    html += F("input:disabled,select:disabled{color:#8a9097;-webkit-text-fill-color:#8a9097;opacity:1;background:#15181c;border-color:#2b3036}");
     html += F("input[type=checkbox]{width:auto;transform:scale(1.3);margin-right:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}");
     html += F(".status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pill{background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:10px}");
     html += F("button{width:100%;padding:13px 16px;border:0;border-radius:6px;background:#24a36b;color:#fff;font-size:17px;font-weight:700;margin-top:16px}");
@@ -551,16 +552,16 @@ void WebConfigurator::handleRoot()
     }
 
     html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
-    html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01");
-    html += input("Deadband", "deadband", String(settings->getDeadband(), 2), "number", "1");
-    html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
+    html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01", false, "0", "6");
+    html += input("Deadband", "deadband", String(settings->getDeadband(), 1), "number", "0.1", false, "0", "100");
+    html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1", false, "0", "100");
     html += F("<p class='sub'>This is the gyro's maximum endpoint-to-endpoint authority. 50% can move from center to one calibrated endpoint; 100% can override one endpoint all the way to the other. Physical endpoint calibration remains the final hard limit.</p>");
     html += F("</div>");
     html += checkbox("Reverse gyro correction", "gyroReverse", settings->getGyroReverse());
     html += F("</div>");
 
     html += F("<div class='card'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
-    html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01");
+    html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01", false, "0", "1");
     html += F("<label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
     if(settings->getGyroLpfMode() == 0) html += F(" selected");
     html += F(">24 Hz - original</option><option value='1'");
@@ -568,18 +569,18 @@ void WebConfigurator::handleRoot()
     html += F(">120 Hz - low latency</option><option value='2'");
     if(settings->getGyroLpfMode() == 2) html += F(" selected");
     html += F(">Off - raw bandwidth</option></select>");
-    html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1");
-    html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1");
+    html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1", false, "0", "100");
+    html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1", false, "0", "100");
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
     html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
-    html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1");
+    html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
     html += F("<div class='card'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
-    html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1");
-    html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1");
+    html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1", false, "0", "100");
+    html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1", false, "0", "100");
     html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01");
     html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1");
     html += F("</div></div>");
@@ -588,6 +589,16 @@ void WebConfigurator::handleRoot()
         settings->isSteeringCalibrated();
 
     html += F("<div class='card'><h2>Servo</h2>");
+
+    // Marks a page that rendered the servo geometry fields enabled. A
+    // disabled checkbox is omitted from the POST exactly like an unchecked
+    // one, so without this a page that went stale while the calibration
+    // was cleared elsewhere would clear reverse servo on save.
+    if(!servoGeometryLocked)
+    {
+        html += F("<input type='hidden' name='servoFormUnlocked' value='1'>");
+    }
+
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse(), servoGeometryLocked);
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
@@ -596,8 +607,8 @@ void WebConfigurator::handleRoot()
     html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting: save first, then restart.</p>");
     html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     html += F("<div class='row'>");
-    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked);
-    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked);
+    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked, "1000", "2000");
+    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked, "1", "100");
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
     html += F("</div>");
 
@@ -651,7 +662,7 @@ void WebConfigurator::handleRoot()
     html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Steer the wheels to each safe physical stop with the transmitter, then capture it here, on the display, or in the EdgeTX tool. Entering all three pulse values by hand also works.</p>");
     html += F("<p class='sub'>Servo now: <strong id='servoPulse'>");
     html += steeringServo != nullptr
-        ? String(steeringServo->getPosition())
+        ? String(steeringServo->getCommandPosition())
         : String(F("--"));
     html += F("</strong> us &middot; steering signal <strong id='steeringSignal'>");
     html += steeringSignal ? F("OK") : F("NONE");
@@ -685,10 +696,10 @@ void WebConfigurator::handleRoot()
     }
 
     html += F("<button type='submit' form='resetEndpoints' class='secondary'>Reset calibration</button></div><div class='row'>");
-    html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
-    html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
-    html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
-    html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1");
+    html += input("Max left", "steeringMin", String(settings->getSteeringMin()), "number", "1", false, "900", "2100");
+    html += input("Center", "steeringCenter", String(settings->getSteeringCenter()), "number", "1", false, "900", "2100");
+    html += input("Max right", "steeringMax", String(settings->getSteeringMax()), "number", "1", false, "900", "2100");
+    html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
     html += F("<div class='card'><h2>Gain Channel Calibration</h2><div class='row'>");
@@ -702,8 +713,8 @@ void WebConfigurator::handleRoot()
     #endif
     html += F("</div>");
     #else
-    html += input("Gain low", "gainMin", String(settings->getGainMin()));
-    html += input("Gain high", "gainMax", String(settings->getGainMax()));
+    html += input("Gain low", "gainMin", String(settings->getGainMin()), "number", "1", false, "800", "2200");
+    html += input("Gain high", "gainMax", String(settings->getGainMax()), "number", "1", false, "800", "2200");
     html += F("</div>");
     html += checkbox(
         #if defined(OPENDRIFT_AMOLED_V2)
@@ -716,8 +727,8 @@ void WebConfigurator::handleRoot()
     );
     #endif
     html += F("<div class='row'>");
-    html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.05");
-    html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.05");
+    html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.01", false, "0", "6");
+    html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.01", false, "0", "6");
     html += F("</div><p class='sub'>The minimum must not exceed the maximum; reversed values are swapped on save.</p>");
     html += F("<p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
     html += F("</div>");
@@ -792,7 +803,7 @@ void WebConfigurator::handleRoot()
         html += F("</strong>. Restart to switch to the new name.</p>");
         html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     }
-    html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
+    html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()), "number", "1", false, "0", "3600000");
     html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off.</p>");
     html += F("</div>");
 
@@ -993,18 +1004,18 @@ void WebConfigurator::handleRoot()
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.servo;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+    html += F("</main><script>var liveBusy=false;function updateLive(){if(liveBusy){return;}liveBusy=true;fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.command;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{document.getElementById('servoPulse').textContent='--';document.getElementById('steeringSignal').textContent='offline';}).finally(()=>{liveBusy=false;});}updateLive();setInterval(updateLive,500);");
 
     // The browser parses the JSON and posts plain form fields, so the board
     // needs no JSON parser and every value goes through the same clamps as
     // the settings form.
-    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.readAsText(f);}");
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
     // raw pixels as a multipart file named <name>.rgb. The board never has
     // to decode an image format.
-    html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
+    html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);try{var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}}catch(e){st.textContent='This image could not be converted in the browser. Try a smaller photo.';return;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
     #endif
 
     html += F("</script></body></html>");
@@ -1055,6 +1066,10 @@ void WebConfigurator::handleLiveStatus()
     json += F(",\"servo\":");
     json += steeringServo != nullptr
         ? String(steeringServo->getPosition())
+        : String(0);
+    json += F(",\"command\":");
+    json += steeringServo != nullptr
+        ? String(steeringServo->getCommandPosition())
         : String(0);
     json += F(",\"clients\":");
     json += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
@@ -1178,9 +1193,12 @@ void WebConfigurator::handleSave()
     // renders these three disabled while it is active, so the fallbacks
     // below keep the stored values, and a request that still tries to
     // change them is reported back on the page.
+    // Only a page that rendered those fields enabled may clear reverse
+    // servo: its checkbox is omitted from the POST when disabled just as
+    // it is when unchecked.
     bool servoReverseRejected = false;
 
-    if(!settings->isSteeringCalibrated())
+    if(server.hasArg("servoFormUnlocked"))
     {
         servoReverseRejected =
             !settings->setServoReverse(
@@ -2505,7 +2523,9 @@ String WebConfigurator::input(
     String value,
     const char* type,
     const char* step,
-    bool disabled
+    bool disabled,
+    const char* minValue,
+    const char* maxValue
 )
 {
     String html;
@@ -2518,6 +2538,19 @@ String WebConfigurator::input(
     html += type;
     html += F("' step='");
     html += step;
+
+    if(minValue != nullptr)
+    {
+        html += F("' min='");
+        html += minValue;
+    }
+
+    if(maxValue != nullptr)
+    {
+        html += F("' max='");
+        html += maxValue;
+    }
+
     html += F("' value='");
     html += value;
 

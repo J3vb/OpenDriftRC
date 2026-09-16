@@ -133,7 +133,9 @@ private:
         String value,
         const char* type = "number",
         const char* step = "1",
-        bool disabled = false
+        bool disabled = false,
+        const char* minValue = nullptr,
+        const char* maxValue = nullptr
     );
 
     String checkbox(
