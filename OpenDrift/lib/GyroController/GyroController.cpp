@@ -11,6 +11,7 @@ namespace
     static constexpr uint8_t PHASE_TRANSITION = 3;
 
     static constexpr float TRANSITION_SECONDS = 0.18f;
+    static constexpr float DIRECTION_MEMORY_SECONDS = 0.5f;
     static constexpr float THROTTLE_APPLY_SECONDS = 0.22f;
     static constexpr float THROTTLE_LIFT_SECONDS = 0.48f;
     static constexpr float MEMORY_GAIN_SCALE = 6.0f;
@@ -47,6 +48,8 @@ void GyroController::resetDynamicState()
     driftReferenceYaw = 0.0f;
     driftReferenceReady = false;
     driftDirection = 0;
+    lastDefiniteDirection = 0;
+    quietSeconds = 0.0f;
     transitionTime = 0.0f;
 
     integralAccumulator = 0.0f;
@@ -643,10 +646,13 @@ int GyroController::update(
             0
         );
 
+    // The reversal memory survives the pass through the quiet band, so a
+    // real direction change is caught at any control rate. It is only
+    // forgotten after the car has been quiet for a while.
     bool directionChanged =
         definiteDirection != 0 &&
-        driftDirection != 0 &&
-        definiteDirection != driftDirection;
+        lastDefiniteDirection != 0 &&
+        definiteDirection != lastDefiniteDirection;
 
     if(directionChanged)
     {
@@ -658,6 +664,17 @@ int GyroController::update(
     if(definiteDirection != 0)
     {
         driftDirection = definiteDirection;
+        lastDefiniteDirection = definiteDirection;
+        quietSeconds = 0.0f;
+    }
+    else if(yawAbs < 7.0f)
+    {
+        quietSeconds += dt;
+
+        if(quietSeconds >= DIRECTION_MEMORY_SECONDS)
+        {
+            lastDefiniteDirection = 0;
+        }
     }
 
     transitionTime = max(

@@ -967,9 +967,13 @@ void runControlIteration()
 
     int steeringCommand = 1500;
 
+    // The controller measures driver activity on the normalized command so
+    // Radio Steering Travel cannot make the driver look calmer or busier.
+    int driverCommand = 1500;
+
     if(steeringSignal)
     {
-        steeringCommand =
+        driverCommand =
             mapSteeringPulse(
                 steeringRadio.getPulseWidth(),
                 calibration
@@ -977,7 +981,7 @@ void runControlIteration()
 
         steeringCommand =
             applyRadioSteeringTravel(
-                steeringCommand,
+                driverCommand,
                 settings
             );
     }
@@ -1010,7 +1014,7 @@ void runControlIteration()
     int gyroCorrection =
         gyro.update(
             controllerYaw,
-            steeringCommand,
+            driverCommand,
             steeringSignal,
             throttlePulse,
             throttleSignal

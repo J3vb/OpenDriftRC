@@ -49,15 +49,19 @@
   fractional deadband, and a page opened before a calibration was cleared
   elsewhere cannot flip servo reverse on save.
 
+- The controller's chassis direction-change trigger now keeps its own
+  direction memory through the quiet band, so a real yaw reversal arms the
+  transition phase at any control rate. Previously it only fired when the
+  filtered yaw crossed plus or minus 7 deg/s inside one tick, which left
+  Transition Speed driven almost only by stick movement. Expect transitions
+  to feel more damped; re-check Transition Speed.
+- The controller measures driver activity on the normalized steering
+  command, so Radio Steering Travel no longer makes the driver look calmer
+  or busier. Tunes running travel below 100 percent will see the assists
+  come in slightly later than before.
+
 ### Known limitations
 
-- The controller's chassis direction-change trigger only fires when the
-  filtered yaw crosses the plus or minus 7 deg/s band inside one control
-  tick, so Transition Speed is driven mainly by stick movement. Left as is
-  on purpose; the track-tested behaviour depends on it.
-- Radio Steering Travel scales the command before the controller measures
-  driver activity, so a lower travel makes the gyro treat the driver as
-  quiet sooner. Left as is on purpose.
 - Throttle prediction reacts to the size of a throttle change in either
   direction; brake and throttle stabs count the same. This is deliberate and
   keeps reversed-throttle ESCs working.

@@ -112,10 +112,11 @@ Max Correction ceiling. It follows both the driver's transition intent and the m
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
 
-In practice transition authority follows stick movement: the chassis
-reversal itself rarely re-arms it. A lower Radio Steering Travel also makes
-the driver-activity measure smaller, so re-check Transition Speed and the
-Assistance settings after changing travel.
+Transition authority follows both stick movement and the measured chassis
+reversal; the reversal memory survives the pass through straight and is
+forgotten after half a second of quiet. Driver activity is measured on the
+normalized steering command, so Radio Steering Travel does not change how
+quickly the gyro considers the driver quiet.
 
 ## Safe first test
 
