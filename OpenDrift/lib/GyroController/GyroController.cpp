@@ -90,8 +90,13 @@ void GyroController::resetDynamicState()
     huntNotchY1 = 0.0f;
     huntNotchY2 = 0.0f;
     huntNotchReady = false;
-    huntNotchTrackingHz = huntNotchCenterHz;
-    huntNotchTargetHz = huntNotchCenterHz;
+    huntNotchTrackingHz = HUNT_NOTCH_FREQUENCY_HZ;
+    huntNotchTargetHz = HUNT_NOTCH_FREQUENCY_HZ;
+
+    configureHuntNotch(
+        HUNT_NOTCH_FREQUENCY_HZ,
+        true
+    );
 
     predictedYawTelemetry = 0.0f;
     driftReferenceTelemetry = 0.0f;
@@ -148,6 +153,49 @@ void GyroController::calibrate(float yawRate)
 }
 
 
+void GyroController::startCalibration(uint16_t sampleCount)
+{
+    calibrationSampleTarget = constrain(
+        sampleCount,
+        (uint16_t)25,
+        (uint16_t)1000
+    );
+
+    calibrationSampleCount = 0;
+    calibrationSum = 0.0f;
+    calibrationMin = 0.0f;
+    calibrationMax = 0.0f;
+
+    calibrationState = CALIBRATION_RUNNING;
+}
+
+
+void GyroController::abortCalibration()
+{
+    if(calibrationState != CALIBRATION_RUNNING)
+    {
+        return;
+    }
+
+    calibrationSampleCount = 0;
+    calibrationSum = 0.0f;
+
+    calibrationState = CALIBRATION_REJECTED;
+}
+
+
+bool GyroController::isCalibrating() const
+{
+    return calibrationState == CALIBRATION_RUNNING;
+}
+
+
+GyroController::CalibrationState GyroController::getCalibrationState() const
+{
+    return calibrationState;
+}
+
+
 int GyroController::update(
     float yawRate,
     int steeringCommand,
@@ -175,7 +223,70 @@ int GyroController::update(
 
     lastUpdateMicros = now;
 
-    if(!calibrated)
+    if(calibrationState == CALIBRATION_RUNNING)
+    {
+        if(calibrationSampleCount == 0)
+        {
+            calibrationMin = yawRate;
+            calibrationMax = yawRate;
+        }
+        else
+        {
+            calibrationMin = min(
+                calibrationMin,
+                yawRate
+            );
+
+            calibrationMax = max(
+                calibrationMax,
+                yawRate
+            );
+        }
+
+        calibrationSum += yawRate;
+        calibrationSampleCount++;
+
+        if(calibrationSampleCount >= calibrationSampleTarget)
+        {
+            float spread =
+                calibrationMax - calibrationMin;
+
+            float mean =
+                calibrationSum
+                /
+                (float)calibrationSampleCount;
+
+            // A handled car moves far more than the sensor's own noise.
+            // Rejecting keeps the previous offset instead of storing that
+            // movement as a permanent steering bias.
+            if(
+                spread <= 2.0f &&
+                fabsf(mean) <= 20.0f
+            )
+            {
+                gyroOffset = mean;
+                calibrated = true;
+
+                resetDynamicState();
+
+                calibrationState = CALIBRATION_OK;
+            }
+            else
+            {
+                calibrationState = CALIBRATION_REJECTED;
+            }
+        }
+
+        requestedCorrectionOutput = 0;
+        correctionOutput = 0;
+
+        return 0;
+    }
+
+    if(
+        !calibrated &&
+        calibrationState == CALIBRATION_IDLE
+    )
     {
         calibrate(yawRate);
     }
@@ -191,6 +302,15 @@ int GyroController::update(
         steeringReady = false;
         steeringActivity = 0.0f;
         lastSteeringCommand = 1500;
+
+        // A dropout must not leave settled authority and a stale reference
+        // armed, or recovery lands a large correction immediately.
+        settledBlend = 0.0f;
+        transitionAuthorityBlend = 0.0f;
+        driftReferenceReady = false;
+        driftReferenceYaw = 0.0f;
+        integralAccumulator = 0.0f;
+        integralCorrection = 0;
     }
     else if(!steeringReady)
     {

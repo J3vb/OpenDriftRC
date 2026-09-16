@@ -51,6 +51,28 @@ bool IMU::setGyroLpfMode(uint8_t mode)
         return true;
     }
 
+    // A sensor that refuses the write must not be hammered once per control
+    // tick. Back off for a second, then give up on that mode entirely.
+    if(mode != lpfRetryMode)
+    {
+        lpfRetryMode = mode;
+        lpfRetryCount = 0;
+        lpfLastAttemptMs = 0;
+    }
+
+    if(lpfRetryCount >= 5)
+    {
+        return false;
+    }
+
+    if(
+        lpfRetryCount > 0 &&
+        millis() - lpfLastAttemptMs < 1000
+    )
+    {
+        return false;
+    }
+
     SensorQMI8658::LpfMode sensorMode =
         mode == 1
         ? SensorQMI8658::LPF_MODE_3
@@ -64,10 +86,20 @@ bool IMU::setGyroLpfMode(uint8_t mode)
         sensorMode
     ))
     {
+        lpfLastAttemptMs = millis();
+
+        if(lpfRetryCount < 255)
+        {
+            lpfRetryCount++;
+        }
+
         return false;
     }
 
     gyroLpfMode = mode;
+    lpfRetryCount = 0;
+    lpfLastAttemptMs = 0;
+
     return true;
 }
 
@@ -107,13 +139,15 @@ void IMU::update()
         gyroZ
     ))
     {
-        if(consecutiveReadFailures < 255)
+        if(gyroReadFailures < 255)
         {
-            consecutiveReadFailures++;
+            gyroReadFailures++;
         }
 
         return;
     }
+
+    gyroReadFailures = 0;
 
     if(!qmi.getAccelerometer(
         accelX,
@@ -121,15 +155,15 @@ void IMU::update()
         accelZ
     ))
     {
-        if(consecutiveReadFailures < 255)
+        if(accelReadFailures < 255)
         {
-            consecutiveReadFailures++;
+            accelReadFailures++;
         }
 
         return;
     }
 
-    consecutiveReadFailures = 0;
+    accelReadFailures = 0;
 
     accelMagnitude = sqrtf(
         (accelX * accelX) +
@@ -223,9 +257,23 @@ void IMU::update()
 
 
 
+bool IMU::isYawValid() const
+{
+    return gyroReadFailures < 3;
+}
+
+
+
 bool IMU::isHealthy() const
 {
-    return consecutiveReadFailures < 25;
+    return gyroReadFailures < 25;
+}
+
+
+
+bool IMU::isAccelHealthy() const
+{
+    return accelReadFailures < 25;
 }
 
 

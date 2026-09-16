@@ -685,14 +685,14 @@ void updateCrsfThrottleOutput(
 
 int mapSteeringPulse(
     int pulse,
-    Settings& settings
+    const Settings::SteeringCalibration& calibration
 )
 {
-    if(settings.isSteeringCalibrated())
+    if(calibration.calibrated)
     {
-        int left = settings.getSteeringCapturedInputPulse(0);
-        int center = settings.getSteeringCapturedInputPulse(1);
-        int right = settings.getSteeringCapturedInputPulse(2);
+        int left = calibration.inputMin;
+        int center = calibration.inputCenter;
+        int right = calibration.inputMax;
         int leftDelta = left - center;
         int rightDelta = right - center;
 
@@ -883,34 +883,67 @@ void runControlIteration()
         settings.getGyroHuntStrength()
     );
 
-    if(i2cBusMutex != nullptr)
-    {
+    static uint8_t i2cMisses = 0;
+    static float lastYaw = 0.0f;
+
+    // A stuck bus must cost one tick, not the whole control period.
+    bool i2cReady =
+        i2cBusMutex == nullptr ||
         xSemaphoreTake(
             i2cBusMutex,
-            portMAX_DELAY
-        );
-    }
+            pdMS_TO_TICKS(2)
+        ) == pdTRUE;
 
-    imu.setGyroLpfMode(
-        settings.getGyroLpfMode()
-    );
-
-    imu.update();
-
-    if(gyroCalibrationRequested)
+    if(i2cReady)
     {
-        gyro.calibrate(
-            imu.getYawRate()
+        i2cMisses = 0;
+
+        imu.setGyroLpfMode(
+            settings.getGyroLpfMode()
         );
 
-        gyroCalibrationRequested = false;
+        imu.update();
+
+        if(
+            gyroCalibrationRequested &&
+            !gyro.isCalibrating()
+        )
+        {
+            gyro.startCalibration(
+                controlLoopHz / 2
+            );
+
+            gyroCalibrationRequested = false;
+        }
+
+        if(
+            gyro.isCalibrating() &&
+            !imu.isYawValid()
+        )
+        {
+            gyro.abortCalibration();
+        }
+
+        if(i2cBusMutex != nullptr)
+        {
+            xSemaphoreGive(
+                i2cBusMutex
+            );
+        }
     }
-
-    if(i2cBusMutex != nullptr)
+    else
     {
-        xSemaphoreGive(
-            i2cBusMutex
-        );
+        if(i2cMisses < 255)
+        {
+            i2cMisses++;
+        }
+
+        // The window has no fresh sample this tick, so it cannot complete
+        // honestly.
+        if(gyro.isCalibrating())
+        {
+            gyro.abortCalibration();
+        }
     }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
@@ -926,6 +959,12 @@ void runControlIteration()
         ? throttleRadio.getPulseWidth()
         : 1500;
 
+    Settings::SteeringCalibration calibration;
+
+    settings.getSteeringCalibration(
+        calibration
+    );
+
     int steeringCommand = 1500;
 
     if(steeringSignal)
@@ -933,7 +972,7 @@ void runControlIteration()
         steeringCommand =
             mapSteeringPulse(
                 steeringRadio.getPulseWidth(),
-                settings
+                calibration
             );
 
         steeringCommand =
@@ -945,14 +984,32 @@ void runControlIteration()
     bool imuHealthy =
         imu.isHealthy();
 
-    float yaw =
-        imuHealthy
-        ? imu.getYawRate()
-        : 0.0f;
+    float yaw = 0.0f;
+
+    if(i2cReady)
+    {
+        yaw =
+            imu.isYawValid()
+            ? imu.getYawRate()
+            : 0.0f;
+
+        lastYaw = yaw;
+    }
+    else if(i2cMisses < 3)
+    {
+        yaw = lastYaw;
+    }
+
+    // The controller is odd-symmetric in yaw, so reversing at the input keeps
+    // the logged yaw and its correction in the same frame.
+    float controllerYaw =
+        settings.getGyroReverse()
+        ? -yaw
+        : yaw;
 
     int gyroCorrection =
         gyro.update(
-            yaw,
+            controllerYaw,
             steeringCommand,
             steeringSignal,
             throttlePulse,
@@ -961,14 +1018,6 @@ void runControlIteration()
 
     int requestedGyroCorrection =
         gyro.getRequestedCorrection();
-
-    if(settings.getGyroReverse())
-    {
-        gyroCorrection =
-            -gyroCorrection;
-        requestedGyroCorrection =
-            -requestedGyroCorrection;
-    }
 
     int limitedGyroCorrection = gyroCorrection;
     int appliedGyroCorrection = 0;
@@ -995,12 +1044,6 @@ void runControlIteration()
         correctionSaturated =
             correctionSaturated ||
             appliedGyroCorrection != limitedGyroCorrection;
-
-        Settings::SteeringCalibration calibration;
-
-        settings.getSteeringCalibration(
-            calibration
-        );
 
         steeringServo.configure(
             settings.getServoCenter(),
@@ -1070,7 +1113,7 @@ void runControlIteration()
 
     ControlTelemetry nextTelemetry;
 
-    nextTelemetry.yaw = yaw;
+    nextTelemetry.yaw = controllerYaw;
     nextTelemetry.requestedGyroCorrection =
         requestedGyroCorrection;
     nextTelemetry.limitedGyroCorrection =
@@ -1135,6 +1178,17 @@ void controlTask(void* parameter)
     while(true)
     {
         runControlIteration();
+
+        // After a stall, resume from now instead of replaying the missed
+        // wake times as a burst of back-to-back iterations.
+        if(
+            xTaskGetTickCount() - lastWake >
+            period * 5
+        )
+        {
+            lastWake =
+                xTaskGetTickCount();
+        }
 
         vTaskDelayUntil(
             &lastWake,
@@ -1452,6 +1506,10 @@ void setup()
         delay(1500);
         esp_restart();
     }
+
+    // The 50 ms default lets one stuck slave hold the bus for a dozen control
+    // periods. Wire keeps this across a later begin().
+    Wire.setTimeOut(5);
 
     Serial.println("IMU OK");
 
@@ -1782,18 +1840,65 @@ void setup()
         TFT_CYAN
     );
 
-    delay(2000);
+    delay(1500);
 
-    imu.update();
+    for(uint8_t attempt = 1; attempt <= 2; attempt++)
+    {
+        if(attempt > 1)
+        {
+            delay(500);
+        }
 
-    gyro.calibrate(
-        imu.getYawRate()
+        gyro.startCalibration(
+            controlLoopHz / 2
+        );
+
+        while(gyro.isCalibrating())
+        {
+            imu.update();
+
+            if(!imu.isYawValid())
+            {
+                gyro.abortCalibration();
+                break;
+            }
+
+            gyro.update(
+                imu.getYawRate(),
+                1500,
+                false,
+                1500,
+                false
+            );
+
+            delay(controlLoopPeriodMs);
+        }
+
+        if(
+            gyro.getCalibrationState() ==
+            GyroController::CALIBRATION_OK
+        )
+        {
+            break;
+        }
+    }
+
+    bool gyroBiasOk =
+        gyro.getCalibrationState() ==
+        GyroController::CALIBRATION_OK;
+
+    Serial.println(
+        gyroBiasOk
+        ? "Gyro calibrated"
+        : "Gyro bias rejected; zero offset retained"
     );
 
-    Serial.println("Gyro calibrated");
-
     bootConsole.log(
-        "qmi8658: gyro bias calibration complete"
+        gyroBiasOk
+        ? "qmi8658: gyro bias calibration complete"
+        : "qmi8658: gyro bias rejected (movement), using zero offset",
+        gyroBiasOk ? "[ OK ]" : "[WARN]",
+        gyroBiasOk ? TFT_GREEN : TFT_YELLOW
     );
 
     delay(500);
@@ -1942,6 +2047,21 @@ void setup()
 
     i2cBusMutex =
         xSemaphoreCreateMutex();
+
+    if(i2cBusMutex == nullptr)
+    {
+        Serial.println("I2C mutex allocation failed, restarting");
+
+        bootConsole.log(
+            "freertos: i2c mutex allocation failed; safe reboot",
+            "[FAIL]",
+            TFT_RED
+        );
+
+        Serial.flush();
+        delay(1500);
+        esp_restart();
+    }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
     // Start the live receiver only after every boot-time peripheral and shared

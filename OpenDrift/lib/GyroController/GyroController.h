@@ -7,6 +7,14 @@ class GyroController
 {
 public:
 
+    enum CalibrationState : uint8_t
+    {
+        CALIBRATION_IDLE = 0,
+        CALIBRATION_RUNNING = 1,
+        CALIBRATION_OK = 2,
+        CALIBRATION_REJECTED = 3
+    };
+
     bool begin();
 
     int update(
@@ -18,6 +26,13 @@ public:
     );
 
     void calibrate(float yawRate);
+
+    // Averaged bias window. A car handled during the window is rejected
+    // instead of storing the movement as a permanent steering offset.
+    void startCalibration(uint16_t sampleCount);
+    void abortCalibration();
+    bool isCalibrating() const;
+    CalibrationState getCalibrationState() const;
 
     void setGain(float gain);
     float getGain();
@@ -198,6 +213,14 @@ private:
     bool calibrated = false;
     uint32_t lastUpdateMicros = 0;
 
+    CalibrationState calibrationState = CALIBRATION_IDLE;
+    uint16_t calibrationSampleTarget = 0;
+    uint16_t calibrationSampleCount = 0;
+    float calibrationSum = 0.0f;
+    float calibrationMin = 0.0f;
+    float calibrationMax = 0.0f;
+
     void resetDynamicState();
     void configureHuntNotch(float centerHz, bool resetHistory);
 };
+
