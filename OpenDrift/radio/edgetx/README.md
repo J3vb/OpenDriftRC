@@ -29,14 +29,15 @@ valid captures, the status changes to `YES` and the AMOLED calibration buttons
 turn green. Capturing on the AMOLED page updates the radio status as well.
 Use `Reset Cal` before expanding or replacing existing endpoints.
 
-`Active Gain` follows CRSF channel 3 live. The tool shows a reminder that
-channel 3 overrides gain changes made elsewhere while its signal is valid; the
-stored profile gain remains the fallback used without that gain signal.
+`Saved Gain` is the stored fallback gain and is the value the tool edits.
+`Live Gain` is read-only and follows CRSF channel 3 while its signal is valid;
+channel 3 overrides the saved gain whenever it is connected, so the two rows
+differ during a session and agree once the gain channel is removed.
 `CH3 Gain Min` and `CH3 Gain Max` map the full Channel 3 control movement to
 the desired gyro-gain range. The default remains `0.50` to `3.00`, while both
 the controller and Channel 3 mapping support values up to `6.00`.
 
-The tool exposes the gyro and steering values: Active Gain, Channel 3 gain range, Deadband, Max Correction,
+The tool exposes the gyro and steering values: Saved Gain, Live Gain, Channel 3 gain range, Deadband, Max Correction,
 Smoothing, Gyro LPF, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
 Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, physical endpoints,
 Servo Travel, Servo Center,
