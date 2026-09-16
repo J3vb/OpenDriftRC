@@ -51,6 +51,18 @@ local requestIndex = 1
 local nextGainRequest = 0
 local nextCalibrationRequest = 0
 local pushFailed = 0
+-- EdgeTX sends one telemetry frame per mixer cycle, so a second push in
+-- the same run() call always fails. Polls that lose the slot wait for the
+-- next frame instead of lighting BUSY.
+local pushedThisFrame = false
+
+local function push(command, payload)
+  if not crossfireTelemetryPush or pushedThisFrame then return false end
+  pushedThisFrame = true
+  if crossfireTelemetryPush(command, payload) then return true end
+  pushFailed = getTime()
+  return false
+end
 
 local function readInt32(data, index)
   local value = data[index] * 16777216
@@ -71,23 +83,18 @@ local function int32Bytes(value)
 end
 
 local function requestField(field)
-  if crossfireTelemetryPush then
-    if not crossfireTelemetryPush(0x2C, {DEVICE, RADIO, field[1], 0}) then
-      pushFailed = getTime()
-    end
-  end
+  if field == nil then return false end
+  return push(0x2C, {DEVICE, RADIO, field[1], 0})
 end
 
 local function writeField(field)
-  if not crossfireTelemetryPush or field.value == nil then return end
-  local pushed
+  if field.value == nil then return end
   if field[7] then
-    pushed = crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], field.value})
+    push(0x2D, {DEVICE, RADIO, field[1], field.value})
   else
     local b1, b2, b3, b4 = int32Bytes(field.value)
-    pushed = crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
+    push(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
   end
-  if not pushed then pushFailed = getTime() end
 end
 
 local function findField(id)
@@ -194,31 +201,13 @@ end
 
 local function run(event)
   consumeTelemetry()
+  pushedThisFrame = false
 
   local now = getTime()
   if now - lastRx > 200 then connected = false end
 
-  if now >= nextRequest then
-    requestField(fields[requestIndex])
-    requestIndex = requestIndex + 1
-    if requestIndex > #fields then requestIndex = 1 end
-    nextRequest = now + 15
-  end
-
-  -- Keep the displayed gain following channel 3 instead of waiting for a
-  -- complete parameter-list polling cycle.
-  if now >= nextGainRequest then
-    requestField(findField(35))
-    nextGainRequest = now + 25
-  end
-
-  -- Calibration can also be completed from the AMOLED page. Poll its shared
-  -- persisted status frequently so the radio follows screen-side captures.
-  if now >= nextCalibrationRequest then
-    requestField(findField(27))
-    nextCalibrationRequest = now + 25
-  end
-
+  -- Key handling comes first so a write or a re-read after an edit owns
+  -- this frame's telemetry slot; the periodic polls take the next one.
   local right = event == EVT_ROT_RIGHT or event == EVT_VIRTUAL_NEXT
   local left = event == EVT_ROT_LEFT or event == EVT_VIRTUAL_PREV
   local enter = event == EVT_ENTER_BREAK or event == EVT_VIRTUAL_ENTER
@@ -238,7 +227,8 @@ local function run(event)
       field.value = 1
       writeField(field)
       field.value = 0
-      requestField(findField(27))
+      -- The status re-read goes out on the next frame.
+      nextCalibrationRequest = 0
     elseif not field[10] then
       editing = not editing
       if not editing then requestField(field) end
@@ -247,6 +237,24 @@ local function run(event)
     if editing then adjust(1) else moveSelection(1) end
   elseif left then
     if editing then adjust(-1) else moveSelection(-1) end
+  end
+
+  -- Calibration can also be completed from the AMOLED page. Poll its shared
+  -- persisted status frequently so the radio follows screen-side captures.
+  if now >= nextCalibrationRequest and requestField(findField(27)) then
+    nextCalibrationRequest = now + 25
+  end
+
+  -- Keep the displayed gain following channel 3 instead of waiting for a
+  -- complete parameter-list polling cycle.
+  if now >= nextGainRequest and requestField(findField(35)) then
+    nextGainRequest = now + 25
+  end
+
+  if now >= nextRequest and requestField(fields[requestIndex]) then
+    requestIndex = requestIndex + 1
+    if requestIndex > #fields then requestIndex = 1 end
+    nextRequest = now + 15
   end
 
   lcd.clear()

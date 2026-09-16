@@ -80,11 +80,23 @@ bool IMU::setGyroLpfMode(uint8_t mode)
             ? SensorQMI8658::LPF_OFF
             : SensorQMI8658::LPF_MODE_0);
 
-    if(!qmi.configGyroscope(
-        SensorQMI8658::GYR_RANGE_1024DPS,
-        SensorQMI8658::GYR_ODR_896_8Hz,
-        sensorMode
-    ))
+    bool configured =
+        qmi.configGyroscope(
+            SensorQMI8658::GYR_RANGE_1024DPS,
+            SensorQMI8658::GYR_ODR_896_8Hz,
+            sensorMode
+        );
+
+    // configGyroscope() disables the gyro first and only re-enables it
+    // after the last register write. A failed write, or a retry that
+    // starts with the gyro already off, would otherwise leave it disabled
+    // and every read failing until reboot.
+    if(!qmi.isEnableGyroscope())
+    {
+        qmi.enableGyroscope();
+    }
+
+    if(!configured)
     {
         lpfLastAttemptMs = millis();
 

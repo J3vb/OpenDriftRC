@@ -195,7 +195,7 @@ the `Drive` page and **Tail Response** documents the page titled `Transition`.
 
 Shows the current gyro gain and provides:
 
-- `- / +`: adjust stored gain when radio gain input is not overriding it.
+- `- / +`: adjust the saved gain. A gain channel still overrides the gain that is running; the page shows `SAVED x.xx` under the live value while it does.
 - `CAL`: recalibrate gyro offset. Use this when the car is sitting still and the gyro seems biased.
 
 ### Core
@@ -336,7 +336,7 @@ clears the saved calibration because those changes alter the physical output map
 Servo reverse and gyro reverse are separate on purpose:
 
 - Use `REV` on the Steering page when driver steering moves the wheels backward.
-- Use `GYRO REV` on the Gyro page when driver steering is correct but gyro correction is backward.
+- Use `GYRO REV` on the Core page when driver steering is correct but gyro correction is backward.
 
 Physical endpoint calibration and steering travel are separate on purpose:
 
@@ -370,7 +370,7 @@ Everything about the panel itself.
 
 `SCREEN` flips the whole UI 180 degrees, for a board mounted upside down in the chassis. The rendered image and the touch input rotate together, so the buttons stay where you see them and a swipe still moves the pages in the direction your finger travels. The setting is saved and applied from the first frame after a restart.
 
-The flip is cosmetic only. A physically inverted board also inverts the gyro, and that has its own `GYRO REV` setting on the Steering page - do not change both for the same problem.
+The flip is cosmetic only. A physically inverted board also inverts the gyro, and that has its own `GYRO REV` setting on the Core page - do not change both for the same problem. The web configurator's Display card has the same flip checkbox.
 
 The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
 
@@ -425,15 +425,16 @@ Current web settings:
 - Servo center
 - Servo travel
 - Servo quiet band
-- Steering max left / center / max right
-- Capture left / center / right and reset for the physical servo endpoints, with the live servo pulse
+- Steering max left / center / max right; Save only writes a value you edited on that page
+- Capture left / center / right and reset for the physical servo endpoints, with the live servo pulse; capture refuses while a calibration is active, reset it first
 - Radio steering travel
 - Gain channel low / high
 - GPIO 18 gain-input or throttle-output mode
 - WiFi enabled on boot
-- WiFi network name (SSID), applied after a restart
+- WiFi network name (SSID), applied the next time WiFi starts: toggle `WIFI OFF` / `WIFI ON` on the display, or restart
 - WiFi auto-off timeout
 - Display brightness (AMOLED, 10-100%)
+- Screen flip for an upside-down board (AMOLED)
 - Idle dim timeout (AMOLED, seconds, 0 = never)
 - Text colour and accent colour theme (AMOLED)
 - Backgrounds (AMOLED): upload an image, pick the active one, delete stored ones
@@ -443,7 +444,7 @@ Current web settings:
 
 The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
 
-The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate or the WiFi network name; both only apply after a restart. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
+The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate, which only applies after a restart, or the WiFi network name, which also applies when WiFi is switched off and on again from the display. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
 
 The **Backgrounds** card takes any JPG or PNG. Your browser scales and crops it to the panel's 456 x 280 pixels and converts it to the panel's pixel format before uploading, so the board never decodes an image and each background costs 250 KB of the otherwise unused 10 MB `ffat` flash partition. Give each image a name of letters, digits, `-` or `_`; the list holds 16, and uploading a name that already exists replaces that image. The firmware formats the partition once, on the first boot after this update, which adds a few seconds before the control task starts. Uploading and deleting write flash, so do it at the bench rather than while driving.
 

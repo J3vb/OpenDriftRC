@@ -31,6 +31,11 @@ public:
     // instead of storing the movement as a permanent steering offset.
     void startCalibration(uint16_t sampleCount);
     void abortCalibration();
+
+    // Gyro Reverse negates the yaw fed to update(). The stored bias was
+    // measured in the previous frame, so it flips with it; a window that
+    // is still running mixes both frames and is dropped.
+    void reverseYawFrame();
     bool isCalibrating() const;
     CalibrationState getCalibrationState() const;
 

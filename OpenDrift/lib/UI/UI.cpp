@@ -3717,7 +3717,11 @@ void UI::drawWifiPage(
         wifi.isEnabled() ? OD_GREEN : OD_RED
     );
 
-    lcd->fillRoundRect(18, 48, 264, 200, 6, OD_PANEL);
+    // Status and client rows stop short of the WIFI button; the IP and
+    // host rows below it run the full width so long names stay on the
+    // panel.
+    lcd->fillRoundRect(18, 48, 264, 112, 6, OD_PANEL);
+    lcd->fillRoundRect(18, 160, 420, 88, 6, OD_PANEL);
 
     if(wifi.isEnabled())
     {

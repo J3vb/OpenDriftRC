@@ -187,6 +187,16 @@ void GyroController::abortCalibration()
 }
 
 
+void GyroController::reverseYawFrame()
+{
+    gyroOffset = -gyroOffset;
+
+    abortCalibration();
+
+    resetDynamicState();
+}
+
+
 bool GyroController::isCalibrating() const
 {
     return calibrationState == CALIBRATION_RUNNING;

@@ -124,7 +124,7 @@ private:
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
     // Profiles, Radio, Steering, Physical Endpoints, WiFi, System, and on
-    // the AMOLED a final Backgrounds page.
+    // the AMOLED a Display page and a final Backgrounds page.
 
     uint8_t page = 0;
 

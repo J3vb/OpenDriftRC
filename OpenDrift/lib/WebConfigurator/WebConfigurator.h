@@ -150,6 +150,15 @@ private:
         int fallback
     );
 
+    // True when a steering endpoint field was changed on the page: the
+    // posted value differs from the rendered snapshot, or the snapshot
+    // is missing. An untouched or absent field is not an edit.
+    bool endpointFieldEdited(
+        const char* name,
+        const char* snapshotName,
+        int requested
+    );
+
     float getFloatArg(
         const char* name,
         float fallback

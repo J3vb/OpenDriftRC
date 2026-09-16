@@ -162,9 +162,12 @@ volatile bool pin18ThrottleOutputMode = false;
 volatile bool throttleOutputActive = false;
 
 #if defined(OPENDRIFT_INPUT_CRSF)
-bool crsfThrottleArmed = false;
+// Armed by the loop after the neutral hold, disarmed by the control task
+// the moment the link drops, so a blocked loop cannot leave the ESC armed
+// across a link loss.
+volatile bool crsfThrottleArmed = false;
 bool lastCrsfSignal = false;
-uint32_t crsfThrottleNeutralSinceMs = 0;
+volatile uint32_t crsfThrottleNeutralSinceMs = 0;
 volatile bool crsfThrottleSignalSnapshot = false;
 volatile int crsfThrottlePulseSnapshot = 1500;
 volatile bool crsfThrottleOutputArmed = false;
@@ -1005,9 +1008,23 @@ void runControlIteration()
     }
 
     // The controller is odd-symmetric in yaw, so reversing at the input keeps
-    // the logged yaw and its correction in the same frame.
+    // the logged yaw and its correction in the same frame. The stored bias
+    // lives in that frame too, so a toggle flips it along.
+    static bool lastGyroReverse =
+        settings.getGyroReverse();
+
+    bool gyroReverse =
+        settings.getGyroReverse();
+
+    if(gyroReverse != lastGyroReverse)
+    {
+        gyro.reverseYawFrame();
+
+        lastGyroReverse = gyroReverse;
+    }
+
     float controllerYaw =
-        settings.getGyroReverse()
+        gyroReverse
         ? -yaw
         : yaw;
 
@@ -1086,6 +1103,17 @@ void runControlIteration()
     crsfThrottlePulseSnapshot = throttlePulse;
     crsfThrottleSignalSnapshot = throttleSignal;
 
+    // Disarm here, not only in the loop: a loop blocked in a long web
+    // handler would otherwise miss a short link loss and hand the
+    // receiver's throttle straight to the ESC when the link returns. The
+    // loop re-runs the neutral hold before it arms again.
+    if(!throttleSignal)
+    {
+        crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
+        crsfThrottleNeutralSinceMs = 0;
+    }
+
     // The loop may detach the ESC between these checks. writeMicroseconds
     // returns early when inactive and a stray LEDC write is harmless.
     if(throttleOutputActive)
@@ -1103,14 +1131,17 @@ void runControlIteration()
     #else
     // The loop may detach the ESC between these checks. writeMicroseconds
     // returns early when inactive and a stray LEDC write is harmless.
+    // Without a signal the pin holds neutral until the loop removes the
+    // PWM, so a blocked loop cannot leave the last throttle pulse running.
     if(
         pin18ThrottleOutputMode &&
-        throttleOutputActive &&
-        throttleSignal
+        throttleOutputActive
     )
     {
         throttleOutput.writeMicroseconds(
-            throttleRadio.getPulseWidth()
+            throttleSignal
+            ? throttleRadio.getPulseWidth()
+            : 1500
         );
     }
     #endif
@@ -1867,8 +1898,13 @@ void setup()
                 break;
             }
 
+            // Same frame as the control task: Gyro Reverse negates the
+            // yaw before the controller sees it, so the bias must be
+            // measured on the negated signal too.
             gyro.update(
-                imu.getYawRate(),
+                settings.getGyroReverse()
+                ? -imu.getYawRate()
+                : imu.getYawRate(),
                 1500,
                 false,
                 1500,

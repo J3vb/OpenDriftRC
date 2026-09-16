@@ -548,7 +548,12 @@ void WebConfigurator::handleRoot()
 
     if(server.arg("notice") == "servo-locked")
     {
-        html += F("<div class='card'><p class='sub bad'>Servo center, travel and reverse are locked while endpoint calibration is active. Reset calibration to change them.</p></div>");
+        html += F("<div class='card'><p class='sub bad'>Servo center and travel are locked while endpoint calibration is active. Reset calibration to change them. Reverse servo still works: it swaps the captured left and right stops.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-locked")
+    {
+        html += F("<div class='card'><p class='sub bad'>The endpoints are already calibrated. Reset the calibration before capturing a new stop, or type the pulse values by hand.</p></div>");
     }
 
     html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
@@ -590,10 +595,6 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>Servo</h2>");
 
-    // Marks a page that rendered the servo geometry fields enabled. A
-    // disabled checkbox is omitted from the POST exactly like an unchecked
-    // one, so without this a page that went stale while the calibration
-    // was cleared elsewhere would clear reverse servo on save.
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
@@ -694,6 +695,17 @@ void WebConfigurator::handleRoot()
     html += input("Max left", "steeringMin", String(settings->getSteeringMin()), "number", "1", false, "900", "2100");
     html += input("Center", "steeringCenter", String(settings->getSteeringCenter()), "number", "1", false, "900", "2100");
     html += input("Max right", "steeringMax", String(settings->getSteeringMax()), "number", "1", false, "900", "2100");
+
+    // What the page rendered. Save only applies an endpoint the user
+    // actually edited, so a page that went stale while the stops were
+    // captured, reset or swapped elsewhere cannot write old values back.
+    html += F("<input type='hidden' name='steeringMinWas' value='");
+    html += String(settings->getSteeringMin());
+    html += F("'><input type='hidden' name='steeringCenterWas' value='");
+    html += String(settings->getSteeringCenter());
+    html += F("'><input type='hidden' name='steeringMaxWas' value='");
+    html += String(settings->getSteeringMax());
+    html += F("'>");
     html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
@@ -822,6 +834,7 @@ void WebConfigurator::handleRoot()
     }
 
     html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
+    html += checkbox("Flip the screen 180 degrees (board mounted upside down)", "displayFlip", settings->getDisplayFlip());
     html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
     html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p>");
 
@@ -1004,7 +1017,7 @@ void WebConfigurator::handleRoot()
     // The browser parses the JSON and posts plain form fields, so the board
     // needs no JSON parser and every value goes through the same clamps as
     // the settings form.
-    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(list){list=list.filter(function(q){return q&&typeof q==='object';});}if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
@@ -1185,19 +1198,9 @@ void WebConfigurator::handleSave()
     );
 
     // Physical endpoint calibration owns the servo geometry. The form
-    // renders these three disabled while it is active, so the fallbacks
-    // below keep the stored values, and a request that still tries to
-    // change them is reported back on the page.
-    // Only a page that rendered those fields enabled may clear reverse
-    // servo: its checkbox is omitted from the POST when disabled just as
-    // it is when unchecked.
-    bool servoReverseRejected = false;
-
-    servoReverseRejected =
-        !settings->setServoReverse(
-            server.hasArg("servoReverse")
-        );
-
+    // renders center and travel disabled while it is active, so the
+    // fallbacks below keep the stored values, and a request that still
+    // tries to change them is reported back on the page.
     bool servoCenterRejected =
         !settings->setServoCenter(
             getIntArg(
@@ -1215,7 +1218,6 @@ void WebConfigurator::handleSave()
         );
 
     bool servoGeometryRejected =
-        servoReverseRejected ||
         servoCenterRejected ||
         servoTravelRejected;
 
@@ -1233,6 +1235,10 @@ void WebConfigurator::handleSave()
         )
     );
 
+    // An endpoint counts as edited only when it differs from the value the
+    // page rendered, so a stale page leaves stops captured, reset or
+    // swapped elsewhere alone. A request without the snapshot fields
+    // treats every posted value as an edit.
     int requestedSteeringMin =
         getIntArg(
             "steeringMin",
@@ -1251,19 +1257,56 @@ void WebConfigurator::handleSave()
             settings->getSteeringMax()
         );
 
-    bool steeringCalibrationChanged =
-        requestedSteeringMin != settings->getSteeringMin() ||
-        requestedSteeringCenter != settings->getSteeringCenter() ||
-        requestedSteeringMax != settings->getSteeringMax();
+    bool steeringMinEdited =
+        endpointFieldEdited(
+            "steeringMin",
+            "steeringMinWas",
+            requestedSteeringMin
+        );
 
-    settings->setSteeringMin(requestedSteeringMin);
-    settings->setSteeringCenter(requestedSteeringCenter);
-    settings->setSteeringMax(requestedSteeringMax);
+    bool steeringCenterEdited =
+        endpointFieldEdited(
+            "steeringCenter",
+            "steeringCenterWas",
+            requestedSteeringCenter
+        );
 
-    if(steeringCalibrationChanged)
+    bool steeringMaxEdited =
+        endpointFieldEdited(
+            "steeringMax",
+            "steeringMaxWas",
+            requestedSteeringMax
+        );
+
+    if(
+        steeringMinEdited ||
+        steeringCenterEdited ||
+        steeringMaxEdited
+    )
     {
+        if(steeringMinEdited)
+        {
+            settings->setSteeringMin(requestedSteeringMin);
+        }
+
+        if(steeringCenterEdited)
+        {
+            settings->setSteeringCenter(requestedSteeringCenter);
+        }
+
+        if(steeringMaxEdited)
+        {
+            settings->setSteeringMax(requestedSteeringMax);
+        }
+
         settings->confirmStoredSteeringCalibration();
     }
+
+    // After the endpoints: while calibrated, reverse swaps the stored left
+    // and right stops, and the page posted them in their pre-swap layout.
+    settings->setServoReverse(
+        server.hasArg("servoReverse")
+    );
 
     settings->setRadioSteeringTravel(
         getIntArg(
@@ -1376,6 +1419,10 @@ void WebConfigurator::handleSave()
             "displayDimTimeout",
             settings->getDisplayDimTimeout()
         )
+    );
+
+    settings->setDisplayFlip(
+        server.hasArg("displayFlip")
     );
 
     settings->setThemeText(
@@ -1775,6 +1822,7 @@ void WebConfigurator::handleSettingsExport()
     appendJsonField(json, "blackboxEnabled", jsonBool(settings->getBlackboxEnabled()));
     appendJsonField(json, "displayBrightness", String((int)settings->getDisplayBrightness()));
     appendJsonField(json, "displayDimTimeout", String((int)settings->getDisplayDimTimeout()));
+    appendJsonField(json, "displayFlip", jsonBool(settings->getDisplayFlip()));
     appendJsonField(json, "themeText", String((int)settings->getThemeText()));
     appendJsonField(json, "themeAccent", String((int)settings->getThemeAccent()));
     appendJsonField(json, "backgroundName", jsonString(settings->getBackgroundName()));
@@ -2166,6 +2214,24 @@ void WebConfigurator::handleEndpointCapture()
             400,
             "text/plain",
             "Invalid endpoint"
+        );
+
+        return;
+    }
+
+    // While calibrated the servo is already mapped through the stored
+    // stops, so a capture would only read the stored value back. The
+    // display clears the calibration on that tap; the page has its own
+    // Reset button, so it refuses and says why.
+    if(settings->isSteeringCalibrated())
+    {
+        server.sendHeader(
+            "Location",
+            "/?notice=endpoints-locked#endpoints"
+        );
+
+        server.send(
+            303
         );
 
         return;
@@ -2608,6 +2674,33 @@ int WebConfigurator::getIntArg(
     }
 
     return server.arg(name).toInt();
+}
+
+
+
+bool WebConfigurator::endpointFieldEdited(
+    const char* name,
+    const char* snapshotName,
+    int requested
+)
+{
+    if(
+        !server.hasArg(name) ||
+        server.arg(name).length() == 0
+    )
+    {
+        return false;
+    }
+
+    if(
+        !server.hasArg(snapshotName) ||
+        server.arg(snapshotName).length() == 0
+    )
+    {
+        return true;
+    }
+
+    return requested != server.arg(snapshotName).toInt();
 }
 
 

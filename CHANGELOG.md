@@ -21,11 +21,15 @@
 - Legacy profile migration no longer drops profiles or shifts the active
   profile index.
 - The ESC neutral failsafe now runs in the control task, so it cannot be
-  delayed by the UI or the web server.
+  delayed by the UI or the web server. The CRSF neutral-hold arming is also
+  cleared there on link loss, so a loop blocked in a web download cannot
+  re-apply the receiver's throttle the moment the link returns; the PWM
+  build holds neutral until the loop removes the signal.
 - The gyro calibrate button no longer races the control task.
 - The Drive page gain and deadband buttons now edit the saved value instead of
   the live gain, so an edit is no longer overwritten by the gain channel. The
-  Drive page shows the saved value next to the live one when they differ.
+  Drive page shows the saved value under the live one while a gain channel
+  is overriding it.
 - The web save rejects NaN and empty numbers and clamps the deadband.
 - Servo center and travel are locked while a physical endpoint calibration
   is active; the Steering page reports a refused change. Servo reverse keeps
@@ -49,6 +53,22 @@
 - The web form no longer refuses to save after the EdgeTX tool stored a
   fractional deadband, and a page opened before a calibration was cleared
   elsewhere cannot flip servo reverse on save.
+- The web save only writes a steering endpoint the user edited, so a page
+  opened before the stops were captured, reset or swapped elsewhere no
+  longer writes the old values back and re-marks them calibrated. Servo
+  reverse from the web page now swaps the calibrated stops like the display
+  and the EdgeTX tool do; before, the same save undid the swap.
+- The web endpoint capture buttons refuse while a calibration is active
+  instead of silently re-storing the current stop.
+- Gyro Reverse and the gyro bias now share one frame: the boot calibration
+  measures the bias on the reversed signal, and toggling Gyro Reverse flips
+  the stored bias instead of doubling it.
+- A gyro filter change that fails on the I2C bus no longer leaves the
+  gyroscope disabled until reboot.
+- The EdgeTX tool sends at most one request per frame, so the BUSY flag no
+  longer stays lit and the Endpoints status is polled as intended.
+- The screen flip is included in the settings export and on the web
+  Display card.
 
 - The controller's chassis direction-change trigger now keeps its own
   direction memory through the quiet band, so a real yaw reversal arms the
