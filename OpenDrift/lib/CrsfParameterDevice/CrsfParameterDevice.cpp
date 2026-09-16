@@ -7,7 +7,7 @@ namespace
 {
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
-        {"Active Gain",       0,  600, 150, 2,   5, "x"},
+        {"Saved Gain",        0,  600, 150, 2,   5, "x"},
         {"Deadband",          0,  200,  20, 1,   1, "dps"},
         {"Max Correction",    0,  100,  25, 0,   1, "%"},
         {"Smoothing",         0,  100,  10, 2,   1, ""},
@@ -31,6 +31,9 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition CHANNEL_3_GAIN_MAX_PARAMETER =
         {"CH3 Gain Max", 0, 600, 300, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition LIVE_GAIN_PARAMETER =
+        {"Live Gain", 0, 600, 150, 2, 5, "x"};
 }
 
 
@@ -184,6 +187,7 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 32);
         appendByte(payload, length, 33);
         appendByte(payload, length, 34);
+        appendByte(payload, length, 35);
 
         appendByte(payload, length, 0xFF);
     }
@@ -191,7 +195,8 @@ void CrsfParameterDevice::sendParameter(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 35
     )
     {
         const FloatDefinition* definition =
@@ -340,6 +345,7 @@ void CrsfParameterDevice::writeParameter(
             || parameter == 26
             || parameter == 33
             || parameter == 34
+            || parameter == 35
         ) &&
         length >= 4
     )
@@ -370,7 +376,13 @@ void CrsfParameterDevice::writeParameter(
     }
 
     setScaledValue(parameter, value);
-    settingsChanged = true;
+
+    // Parameter 35 is a read-only mirror of the running gain. Writing it
+    // changes nothing, so it must not schedule a settings save either.
+    if(parameter != 35)
+    {
+        settingsChanged = true;
+    }
 
     uint8_t response[5] = {parameter, 0, 0, 0, 0};
 
@@ -404,14 +416,9 @@ int32_t CrsfParameterDevice::getScaledValue(
 {
     switch(parameter)
     {
-        // Channel 3 is authoritative while it has a valid signal. Report the
-        // controller's live value so EdgeTX never shows the saved fallback
-        // while the car is actually running a different gain.
-        case 1:
-            return lroundf(
-                (gyro != nullptr ? gyro->getGain() : settings->getGain())
-                * 100.0f
-            );
+        // The saved fallback gain, which is what this parameter writes.
+        // Parameter 35 reports the gain the controller is actually running.
+        case 1: return lroundf(settings->getGain() * 100.0f);
         case 2: return lroundf(settings->getDeadband() * 10.0f);
         case 3: return settings->getGyroMaxCorrection();
         case 4: return lroundf(settings->getGyroSmoothing() * 100.0f);
@@ -456,6 +463,11 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 32: return settings->getGyroLpfMode();
         case 33: return lroundf(settings->getChannel3GainMin() * 100.0f);
         case 34: return lroundf(settings->getChannel3GainMax() * 100.0f);
+        case 35:
+            return lroundf(
+                (gyro != nullptr ? gyro->getGain() : settings->getGain())
+                * 100.0f
+            );
         default: return 0;
     }
 }
@@ -577,6 +589,10 @@ void CrsfParameterDevice::setScaledValue(
         case 34:
             settings->setChannel3GainMax(value / 100.0f);
             break;
+        case 35:
+            // Read-only. It mirrors the gain the controller is running,
+            // which channel 3 owns whenever it has a valid signal.
+            break;
     }
 }
 
@@ -599,6 +615,11 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 34)
     {
         return &CHANNEL_3_GAIN_MAX_PARAMETER;
+    }
+
+    if(parameter == 35)
+    {
+        return &LIVE_GAIN_PARAMETER;
     }
 
     return &FLOAT_PARAMETERS[parameter - 1];

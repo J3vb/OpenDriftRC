@@ -317,8 +317,10 @@ bool Backgrounds::beginUpload(
         return false;
     }
 
-    // Keep one spare cluster's worth of room for the directory entry.
-    if(!replacing && FFat.freeBytes() < PIXEL_BYTES + 8192)
+    // Keep one spare cluster's worth of room for the directory entry. A
+    // replacement needs the same room: endUpload() keeps the old image
+    // until the new one is written, so both exist at once.
+    if(FFat.freeBytes() < PIXEL_BYTES + 8192)
     {
         uploadError = "Not enough free space; delete a background first";
         return false;

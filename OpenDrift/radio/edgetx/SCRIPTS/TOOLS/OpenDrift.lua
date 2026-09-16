@@ -4,7 +4,8 @@ local DEVICE = 0xC8
 local RADIO = 0xEA
 
 local fields = {
-  { 1, "Active Gain",      0,  600,   5, 2 },
+  { 1, "Saved Gain",       0,  600,   5, 2 },
+  {35, "Live Gain",        0,  600,   1, 2, false, false, false, true},
   {33, "CH3 Gain Min",     0,  600,   5, 2 },
   {34, "CH3 Gain Max",     0,  600,   5, 2 },
   { 2, "Deadband",         0,  200,   1, 1 },
@@ -46,9 +47,10 @@ local editing = false
 local connected = false
 local lastRx = 0
 local nextRequest = 0
-local requestIndex = 2
+local requestIndex = 1
 local nextGainRequest = 0
 local nextCalibrationRequest = 0
+local pushFailed = 0
 
 local function readInt32(data, index)
   local value = data[index] * 16777216
@@ -70,18 +72,22 @@ end
 
 local function requestField(field)
   if crossfireTelemetryPush then
-    crossfireTelemetryPush(0x2C, {DEVICE, RADIO, field[1], 0})
+    if not crossfireTelemetryPush(0x2C, {DEVICE, RADIO, field[1], 0}) then
+      pushFailed = getTime()
+    end
   end
 end
 
 local function writeField(field)
   if not crossfireTelemetryPush or field.value == nil then return end
+  local pushed
   if field[7] then
-    crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], field.value})
+    pushed = crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], field.value})
   else
     local b1, b2, b3, b4 = int32Bytes(field.value)
-    crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
+    pushed = crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
   end
+  if not pushed then pushFailed = getTime() end
 end
 
 local function findField(id)
@@ -100,17 +106,19 @@ local function consumeTelemetry()
     if command == 0x2B and #data >= 7 and data[1] == RADIO and data[2] == DEVICE then
       local field = findField(data[3])
       if field then
+        -- A reply that arrives mid-edit must not undo what is being dialled in.
+        local keepValue = editing and field == fields[selected]
         local dataType = data[6]
         local index = 7
         while index <= #data and data[index] ~= 0 do index = index + 1 end
         index = index + 1
 
         if dataType == 0x08 and index + 3 <= #data then
-          field.value = readInt32(data, index)
+          if not keepValue then field.value = readInt32(data, index) end
         elseif dataType == 0x09 then
           while index <= #data and data[index] ~= 0 do index = index + 1 end
           index = index + 1
-          if index <= #data then field.value = data[index] end
+          if index <= #data and not keepValue then field.value = data[index] end
           if index + 2 <= #data then
             field[3] = data[index + 1]
             field[4] = data[index + 2]
@@ -122,9 +130,10 @@ local function consumeTelemetry()
     elseif command == 0x2D and #data >= 4 and data[1] == RADIO and data[2] == DEVICE then
       local field = findField(data[3])
       if field then
+        local keepValue = editing and field == fields[selected]
         if field[7] then
-          field.value = data[4]
-        elseif #data >= 7 then
+          if not keepValue then field.value = data[4] end
+        elseif #data >= 7 and not keepValue then
           field.value = readInt32(data, 4)
         end
         connected = true
@@ -136,7 +145,7 @@ end
 
 local function valueText(field)
   if field.value == nil then return "---" end
-  if field[10] then
+  if field[10] and field[7] then
     if field.value == 2 then return "YES" end
     if field.value == 1 then return "PARTIAL" end
     return "NO"
@@ -176,10 +185,11 @@ end
 
 local function init()
   for i = 1, #fields do fields[i].value = nil end
-  requestIndex = 2
+  requestIndex = 1
   nextRequest = 0
   nextGainRequest = 0
   nextCalibrationRequest = 0
+  pushFailed = 0
 end
 
 local function run(event)
@@ -191,14 +201,14 @@ local function run(event)
   if now >= nextRequest then
     requestField(fields[requestIndex])
     requestIndex = requestIndex + 1
-    if requestIndex > #fields then requestIndex = 2 end
+    if requestIndex > #fields then requestIndex = 1 end
     nextRequest = now + 15
   end
 
   -- Keep the displayed gain following channel 3 instead of waiting for a
   -- complete parameter-list polling cycle.
   if now >= nextGainRequest then
-    requestField(fields[1])
+    requestField(findField(35))
     nextGainRequest = now + 25
   end
 
@@ -212,8 +222,16 @@ local function run(event)
   local right = event == EVT_ROT_RIGHT or event == EVT_VIRTUAL_NEXT
   local left = event == EVT_ROT_LEFT or event == EVT_VIRTUAL_PREV
   local enter = event == EVT_ENTER_BREAK or event == EVT_VIRTUAL_ENTER
+  local back = EVT_EXIT_BREAK ~= nil and event == EVT_EXIT_BREAK
 
-  if enter then
+  if back then
+    if editing then
+      editing = false
+      requestField(fields[selected])
+    else
+      return 2
+    end
+  elseif enter then
     local field = fields[selected]
     if field[11] then
       field.value = 1
@@ -232,7 +250,9 @@ local function run(event)
 
   lcd.clear()
   lcd.drawText(1, 0, "OpenDrift CRSF", INVERS)
-  lcd.drawText(127, 0, connected and "LINK" or "WAIT", RIGHT + INVERS)
+  local linkText = connected and "LINK" or "WAIT"
+  if pushFailed ~= 0 and now - pushFailed < 50 then linkText = "BUSY" end
+  lcd.drawText(127, 0, linkText, RIGHT + INVERS)
   if fields[selected][11] then
     lcd.drawText(1, 10, "HOLD POSITION + ENTER", 0)
   else

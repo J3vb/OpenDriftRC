@@ -427,7 +427,7 @@ void WebConfigurator::handleRoot()
 
     String html;
 
-    html.reserve(20000);
+    html.reserve(40000);
 
     html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
     html += F("<title>OpenDrift Config</title><style>");
@@ -545,6 +545,11 @@ void WebConfigurator::handleRoot()
 
     html += F("<form method='post' action='/save'>");
 
+    if(server.arg("notice") == "servo-locked")
+    {
+        html += F("<div class='card'><p class='sub bad'>Servo center, travel and reverse are locked while endpoint calibration is active. Reset calibration to change them.</p></div>");
+    }
+
     html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
     html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01");
     html += input("Deadband", "deadband", String(settings->getDeadband(), 2), "number", "1");
@@ -579,8 +584,11 @@ void WebConfigurator::handleRoot()
     html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1");
     html += F("</div></div>");
 
+    bool servoGeometryLocked =
+        settings->isSteeringCalibrated();
+
     html += F("<div class='card'><h2>Servo</h2>");
-    html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
+    html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse(), servoGeometryLocked);
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
@@ -588,10 +596,17 @@ void WebConfigurator::handleRoot()
     html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting: save first, then restart.</p>");
     html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     html += F("<div class='row'>");
-    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
-    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
+    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked);
+    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked);
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
-    html += F("</div></div>");
+    html += F("</div>");
+
+    if(servoGeometryLocked)
+    {
+        html += F("<p class='sub'>Reverse servo, center pulse and travel percent are locked by the physical endpoint calibration. Reset the calibration below to change them.</p>");
+    }
+
+    html += F("</div>");
 
     // Same states and colours as the display's endpoint page.
     bool endpointsSaved =
@@ -703,7 +718,8 @@ void WebConfigurator::handleRoot()
     html += F("<div class='row'>");
     html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.05");
     html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.05");
-    html += F("</div><p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
+    html += F("</div><p class='sub'>The minimum must not exceed the maximum; reversed values are swapped on save.</p>");
+    html += F("<p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
     html += F("</div>");
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -1158,23 +1174,40 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setServoReverse(
-        server.hasArg("servoReverse")
-    );
+    // Physical endpoint calibration owns the servo geometry. The form
+    // renders these three disabled while it is active, so the fallbacks
+    // below keep the stored values, and a request that still tries to
+    // change them is reported back on the page.
+    bool servoReverseRejected = false;
 
-    settings->setServoCenter(
-        getIntArg(
-            "servoCenter",
-            settings->getServoCenter()
-        )
-    );
+    if(!settings->isSteeringCalibrated())
+    {
+        servoReverseRejected =
+            !settings->setServoReverse(
+                server.hasArg("servoReverse")
+            );
+    }
 
-    settings->setServoTravel(
-        getIntArg(
-            "servoTravel",
-            settings->getServoTravel()
-        )
-    );
+    bool servoCenterRejected =
+        !settings->setServoCenter(
+            getIntArg(
+                "servoCenter",
+                settings->getServoCenter()
+            )
+        );
+
+    bool servoTravelRejected =
+        !settings->setServoTravel(
+            getIntArg(
+                "servoTravel",
+                settings->getServoTravel()
+            )
+        );
+
+    bool servoGeometryRejected =
+        servoReverseRejected ||
+        servoCenterRejected ||
+        servoTravelRejected;
 
     settings->setServoQuiet(
         getIntArg(
@@ -1243,19 +1276,27 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setChannel3GainMin(
+    float channel3GainMin =
         getFloatArg(
             "channel3GainMin",
             settings->getChannel3GainMin()
-        )
-    );
+        );
 
-    settings->setChannel3GainMax(
+    float channel3GainMax =
         getFloatArg(
             "channel3GainMax",
             settings->getChannel3GainMax()
-        )
-    );
+        );
+
+    if(channel3GainMin > channel3GainMax)
+    {
+        float swapped = channel3GainMin;
+        channel3GainMin = channel3GainMax;
+        channel3GainMax = swapped;
+    }
+
+    settings->setChannel3GainMin(channel3GainMin);
+    settings->setChannel3GainMax(channel3GainMax);
 
     #if !defined(OPENDRIFT_INPUT_CRSF)
     settings->setThrottleOutputEnabled(
@@ -1391,7 +1432,7 @@ void WebConfigurator::handleSave()
 
     server.sendHeader(
         "Location",
-        "/"
+        servoGeometryRejected ? "/?notice=servo-locked" : "/"
     );
 
     server.send(
@@ -1543,7 +1584,7 @@ void WebConfigurator::handleLogDownload()
     size_t recordCount =
         blackbox->getRecordCount();
 
-    char line[672];
+    char line[1024];
     String chunk;
     chunk.reserve(8192);
 
@@ -1559,6 +1600,15 @@ void WebConfigurator::handleLogDownload()
         if(length == 0)
         {
             continue;
+        }
+
+        // A truncated record loses its newline, which would merge it with
+        // the next row. Close the line instead.
+        if(length >= sizeof(line) - 1)
+        {
+            line[sizeof(line) - 2] = '\n';
+            line[sizeof(line) - 1] = '\0';
+            length = sizeof(line) - 1;
         }
 
         if(chunk.length() + length > 8192)
@@ -2194,6 +2244,11 @@ void WebConfigurator::handleBackgroundUploadChunk()
     {
         case UPLOAD_FILE_START:
         {
+            // A client that drops after the last chunk never reaches
+            // handleBackgroundUpload, so a stale success flag must not
+            // survive into the next upload.
+            backgroundUploadOk = false;
+
             // The browser sends <name>.rgb; beginUpload() validates the
             // name and refuses when the list or the partition is full.
             String name =
@@ -2421,6 +2476,17 @@ void WebConfigurator::sendRestartPage(
 
 void WebConfigurator::handleNotFound()
 {
+    // Browsers ask for this on every page load; a redirect to the
+    // configurator only wastes a second request.
+    if(server.uri() == "/favicon.ico")
+    {
+        server.send(
+            204
+        );
+
+        return;
+    }
+
     server.sendHeader(
         "Location",
         "/"
@@ -2438,7 +2504,8 @@ String WebConfigurator::input(
     const char* name,
     String value,
     const char* type,
-    const char* step
+    const char* step,
+    bool disabled
 )
 {
     String html;
@@ -2453,7 +2520,17 @@ String WebConfigurator::input(
     html += step;
     html += F("' value='");
     html += value;
-    html += F("'></div>");
+
+    if(disabled)
+    {
+        html += F("' disabled");
+    }
+    else
+    {
+        html += F("'");
+    }
+
+    html += F("></div>");
 
     return html;
 }
@@ -2463,7 +2540,8 @@ String WebConfigurator::input(
 String WebConfigurator::checkbox(
     const char* label,
     const char* name,
-    bool checked
+    bool checked,
+    bool disabled
 )
 {
     String html;
@@ -2475,6 +2553,11 @@ String WebConfigurator::checkbox(
     if(checked)
     {
         html += F(" checked");
+    }
+
+    if(disabled)
+    {
+        html += F(" disabled");
     }
 
     html += F(">");
@@ -2491,7 +2574,10 @@ int WebConfigurator::getIntArg(
     int fallback
 )
 {
-    if(!server.hasArg(name))
+    if(
+        !server.hasArg(name) ||
+        server.arg(name).length() == 0
+    )
     {
         return fallback;
     }
@@ -2511,5 +2597,25 @@ float WebConfigurator::getFloatArg(
         return fallback;
     }
 
-    return server.arg(name).toFloat();
+    String raw =
+        server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+
+    double value =
+        strtod(text, &end);
+
+    // strtod accepts "nan" and "inf"; neither may reach the controller.
+    if(end == text || !isfinite(value))
+    {
+        return fallback;
+    }
+
+    return (float)value;
 }

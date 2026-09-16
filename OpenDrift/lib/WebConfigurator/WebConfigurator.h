@@ -132,13 +132,15 @@ private:
         const char* name,
         String value,
         const char* type = "number",
-        const char* step = "1"
+        const char* step = "1",
+        bool disabled = false
     );
 
     String checkbox(
         const char* label,
         const char* name,
-        bool checked
+        bool checked,
+        bool disabled = false
     );
 
     int getIntArg(
