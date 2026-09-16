@@ -27,8 +27,9 @@
   the live gain, so an edit is no longer overwritten by the gain channel. The
   Drive page shows the saved value next to the live one when they differ.
 - The web save rejects NaN and empty numbers and clamps the deadband.
-- Servo center, travel and reverse are locked while a physical endpoint
-  calibration is active; the Steering page reports a refused change.
+- Servo center and travel are locked while a physical endpoint calibration
+  is active; the Steering page reports a refused change. Servo reverse keeps
+  working after calibration by swapping the captured left and right stops.
 - Splits the EdgeTX tool's gain into Saved Gain and a read-only Live Gain,
   adds an editing guard and a BUSY indicator, and handles EXIT correctly.
 - Removes dead files left over from the original round-display port.

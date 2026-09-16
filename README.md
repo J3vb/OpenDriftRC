@@ -294,8 +294,10 @@ Steering output setup:
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
 
-Servo center, travel and reverse are locked while a physical endpoint
-calibration is active, because the saved endpoints already describe the servo.
+Servo center and travel are locked while a physical endpoint calibration is
+active, because the saved endpoints already describe the servo. Servo reverse
+keeps working: it swaps the captured left and right stops, so the wheels turn
+the other way and the calibration stays.
 The page shows `LOCKED BY CAL` when a change is refused. Reset the calibration
 first: tap a saved row on the **Physical Endpoints** page, or use `Reset
 calibration` in the web configurator or the EdgeTX tool.

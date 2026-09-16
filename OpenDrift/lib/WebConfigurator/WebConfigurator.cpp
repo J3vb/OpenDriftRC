@@ -594,12 +594,7 @@ void WebConfigurator::handleRoot()
     // disabled checkbox is omitted from the POST exactly like an unchecked
     // one, so without this a page that went stale while the calibration
     // was cleared elsewhere would clear reverse servo on save.
-    if(!servoGeometryLocked)
-    {
-        html += F("<input type='hidden' name='servoFormUnlocked' value='1'>");
-    }
-
-    html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse(), servoGeometryLocked);
+    html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
@@ -614,7 +609,7 @@ void WebConfigurator::handleRoot()
 
     if(servoGeometryLocked)
     {
-        html += F("<p class='sub'>Reverse servo, center pulse and travel percent are locked by the physical endpoint calibration. Reset the calibration below to change them.</p>");
+        html += F("<p class='sub'>Center pulse and travel percent are not used while the physical endpoint calibration is active; reset the calibration below to change them. Reverse servo keeps working: it swaps the captured left and right stops.</p>");
     }
 
     html += F("</div>");
@@ -1198,13 +1193,10 @@ void WebConfigurator::handleSave()
     // it is when unchecked.
     bool servoReverseRejected = false;
 
-    if(server.hasArg("servoFormUnlocked"))
-    {
-        servoReverseRejected =
-            !settings->setServoReverse(
-                server.hasArg("servoReverse")
-            );
-    }
+    servoReverseRejected =
+        !settings->setServoReverse(
+            server.hasArg("servoReverse")
+        );
 
     bool servoCenterRejected =
         !settings->setServoCenter(

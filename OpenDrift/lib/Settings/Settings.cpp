@@ -1119,12 +1119,25 @@ bool Settings::setServoReverse(bool value)
         return true;
     }
 
+    // Reverse stays usable after calibration: the captured left and right
+    // stops swap sides, so the wheels turn the other way and the
+    // calibration survives.
+    portENTER_CRITICAL(&settingsMux);
+
     if(isSteeringCalibrated())
     {
-        return false;
+        int swap = steeringMin;
+        steeringMin = steeringMax;
+        steeringMax = swap;
+
+        steeringCapturedPulses[0] = steeringMin;
+        steeringCapturedPulses[2] = steeringMax;
     }
 
     servoReverse = value;
+
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 
     return true;
