@@ -88,15 +88,17 @@ public:
     int getGyroHuntStrength();
     void setGyroHuntStrength(int value);
 
-    // Servo
+    // Servo. The geometry setters refuse a change while the steering
+    // endpoints are calibrated and return false, because the stored
+    // pulses would no longer match the servo.
     int getServoCenter();
-    void setServoCenter(int value);
+    bool setServoCenter(int value);
 
     bool getServoReverse();
-    void setServoReverse(bool value);
+    bool setServoReverse(bool value);
 
     int getServoTravel();
-    void setServoTravel(int value);
+    bool setServoTravel(int value);
 
     int getServoQuiet();
     void setServoQuiet(int value);
@@ -318,6 +320,7 @@ private:
 
     void save();
 
+    void applyFallbackSteeringEndpoints();
     void loadProfiles();
     void captureProfile(DrivingProfile& profile);
     void applyProfile(const DrivingProfile& profile);

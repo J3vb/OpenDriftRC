@@ -170,6 +170,38 @@ namespace
         int32_t gyroHuntSensitivity;
         int32_t gyroHuntStrength;
     };
+
+    constexpr size_t largerSize(size_t left, size_t right)
+    {
+        return left > right ? left : right;
+    }
+
+    constexpr size_t LARGEST_STORED_PROFILE_SIZE =
+        largerSize(
+            largerSize(
+                largerSize(
+                    sizeof(Settings::DrivingProfile),
+                    sizeof(DrivingProfileV8)
+                ),
+                largerSize(
+                    sizeof(DrivingProfileV7),
+                    sizeof(DrivingProfileV6)
+                )
+            ),
+            largerSize(
+                largerSize(
+                    sizeof(DrivingProfileV5),
+                    sizeof(DrivingProfileV4)
+                ),
+                largerSize(
+                    sizeof(DrivingProfileV3),
+                    largerSize(
+                        sizeof(DrivingProfileV2),
+                        sizeof(DrivingProfileV1)
+                    )
+                )
+            )
+        );
 }
 
 bool Settings::begin()
@@ -177,14 +209,19 @@ bool Settings::begin()
     #if defined(OPENDRIFT_ROUND_LOG51_TUNE)
     // Private round-display recovery build. Keep its calibration and tuning
     // isolated from both the normal CRSF and PWM firmware namespaces.
-    prefs.begin("OpenDriftR51", false);
+    bool storageReady = prefs.begin("OpenDriftR51", false);
     #elif defined(OPENDRIFT_INPUT_CRSF)
     // Keep experimental CRSF tuning completely separate from the RC1 PWM
     // build, even when both firmwares are flashed onto the same board.
-    prefs.begin("OpenDriftCRSF", false);
+    bool storageReady = prefs.begin("OpenDriftCRSF", false);
     #else
-    prefs.begin("OpenDrift", false);
+    bool storageReady = prefs.begin("OpenDrift", false);
     #endif
+
+    if(!storageReady)
+    {
+        Serial.println("Settings: NVS open failed");
+    }
 
     gain = constrain(
         prefs.getFloat(
@@ -195,9 +232,13 @@ bool Settings::begin()
         6.0f
     );
 
-    deadband = prefs.getFloat(
-        "deadband",
-        2.0f
+    deadband = constrain(
+        prefs.getFloat(
+            "deadband",
+            2.0f
+        ),
+        0.0f,
+        100.0f
     );
 
     gyroReverse = prefs.getBool(
@@ -435,15 +476,15 @@ bool Settings::begin()
     // v1.0.7b stored receiver input endpoints under the steering keys. They
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
-    steeringCenter = prefs.getInt("servoCalC", servoCenter);
-    int fallbackOffset = (500 * constrain(servoTravel, 1, 100)) / 100;
+    applyFallbackSteeringEndpoints();
+    steeringCenter = prefs.getInt("servoCalC", steeringCenter);
     steeringMin = prefs.getInt(
         "servoCalL",
-        servoCenter + (servoReverse ? fallbackOffset : -fallbackOffset)
+        steeringMin
     );
     steeringMax = prefs.getInt(
         "servoCalR",
-        servoCenter + (servoReverse ? -fallbackOffset : fallbackOffset)
+        steeringMax
     );
     steeringCapturedPulses[0] = steeringMin;
     steeringCapturedPulses[1] = steeringCenter;
@@ -550,7 +591,7 @@ bool Settings::begin()
 
     loadProfiles();
 
-    return true;
+    return storageReady;
 }
 
 void Settings::update()
@@ -832,7 +873,7 @@ float Settings::getDeadband()
 
 void Settings::setDeadband(float value)
 {
-    deadband = value;
+    deadband = constrain(value, 0.0f, 100.0f);
     dirty = true;
 }
 
@@ -1003,16 +1044,22 @@ int Settings::getServoCenter()
     return servoCenter;
 }
 
-void Settings::setServoCenter(int value)
+bool Settings::setServoCenter(int value)
 {
     if(servoCenter == value)
     {
-        return;
+        return true;
+    }
+
+    if(isSteeringCalibrated())
+    {
+        return false;
     }
 
     servoCenter = value;
-    clearSteeringCalibration();
     dirty = true;
+
+    return true;
 }
 
 bool Settings::getServoReverse()
@@ -1020,16 +1067,22 @@ bool Settings::getServoReverse()
     return servoReverse;
 }
 
-void Settings::setServoReverse(bool value)
+bool Settings::setServoReverse(bool value)
 {
     if(servoReverse == value)
     {
-        return;
+        return true;
+    }
+
+    if(isSteeringCalibrated())
+    {
+        return false;
     }
 
     servoReverse = value;
-    clearSteeringCalibration();
     dirty = true;
+
+    return true;
 }
 
 int Settings::getServoTravel()
@@ -1037,16 +1090,22 @@ int Settings::getServoTravel()
     return servoTravel;
 }
 
-void Settings::setServoTravel(int value)
+bool Settings::setServoTravel(int value)
 {
     if(servoTravel == value)
     {
-        return;
+        return true;
+    }
+
+    if(isSteeringCalibrated())
+    {
+        return false;
     }
 
     servoTravel = value;
-    clearSteeringCalibration();
     dirty = true;
+
+    return true;
 }
 
 int Settings::getServoQuiet()
@@ -1526,9 +1585,27 @@ bool Settings::confirmStoredSteeringCalibration()
     return true;
 }
 
+void Settings::applyFallbackSteeringEndpoints()
+{
+    int fallbackOffset = (500 * constrain(servoTravel, 1, 100)) / 100;
+
+    steeringCenter = servoCenter;
+    steeringMin =
+        servoCenter + (servoReverse ? fallbackOffset : -fallbackOffset);
+    steeringMax =
+        servoCenter + (servoReverse ? -fallbackOffset : fallbackOffset);
+    steeringCapturedPulses[0] = steeringMin;
+    steeringCapturedPulses[1] = steeringCenter;
+    steeringCapturedPulses[2] = steeringMax;
+}
+
 void Settings::clearSteeringCalibration()
 {
     steeringCalibrationMask = 0;
+    applyFallbackSteeringEndpoints();
+    steeringCapturedInputPulses[0] = 1000;
+    steeringCapturedInputPulses[1] = 1500;
+    steeringCapturedInputPulses[2] = 2000;
     dirty = true;
 }
 
@@ -1929,7 +2006,7 @@ bool Settings::deleteProfile(
 
 void Settings::loadProfiles()
 {
-    profileCount = constrain(
+    uint8_t storedCount = constrain(
         (int)prefs.getUChar("profCnt", 0),
         0,
         (int)MAX_PROFILES
@@ -1937,7 +2014,14 @@ void Settings::loadProfiles()
 
     uint8_t loadedCount = 0;
 
-    for(uint8_t i = 0; i < profileCount; i++)
+    int8_t newIndexFor[MAX_PROFILES];
+
+    for(uint8_t i = 0; i < MAX_PROFILES; i++)
+    {
+        newIndexFor[i] = -1;
+    }
+
+    for(uint8_t i = 0; i < storedCount; i++)
     {
         char key[12];
 
@@ -1948,31 +2032,54 @@ void Settings::loadProfiles()
             i
         );
 
+        uint8_t buffer[LARGEST_STORED_PROFILE_SIZE] = {};
+
         size_t storedSize = prefs.getBytesLength(key);
 
-        if(storedSize == sizeof(DrivingProfile))
+        if(
+            storedSize < sizeof(uint32_t) ||
+            storedSize > sizeof(buffer) ||
+            prefs.getBytes(key, buffer, storedSize) != storedSize
+        )
         {
-            DrivingProfile stored = {};
+            continue;
+        }
 
-            if(
-                prefs.getBytes(key, &stored, sizeof(stored)) == sizeof(stored) &&
-                stored.name[0] != '\0' &&
-                (stored.version == 8 || stored.version == 9 || stored.version == 10)
-            )
+        uint32_t version = 0;
+        memcpy(&version, buffer, sizeof(version));
+
+        switch(version)
+        {
+            case 10:
+            case 9:
+            case 8:
             {
+                if(storedSize != sizeof(DrivingProfile))
+                {
+                    break;
+                }
+
+                DrivingProfile stored = {};
+                memcpy(&stored, buffer, sizeof(stored));
+
+                if(stored.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = stored;
                 profile.version = 10;
                 profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
 
-                if(stored.version == 9)
+                if(version == 9)
                 {
                     profile.gyroMaxCorrection =
                         centerSpanPercentToFullSpanPercent(
                             stored.gyroMaxCorrection
                         );
                 }
-                else if(stored.version == 8)
+                else if(version == 8)
                 {
                     profile.gyroMaxCorrection =
                         legacyMaxCorrectionToPercent(
@@ -1980,19 +2087,25 @@ void Settings::loadProfiles()
                         );
                 }
 
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV7))
-        {
-            DrivingProfileV7 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 7 &&
-                legacy.name[0] != '\0'
-            )
+            case 7:
             {
+                if(storedSize != sizeof(DrivingProfileV7))
+                {
+                    break;
+                }
+
+                DrivingProfileV7 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2009,19 +2122,25 @@ void Settings::loadProfiles()
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
                 profile.gyroHuntStrength = legacy.gyroHuntStrength;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV6))
-        {
-            DrivingProfileV6 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 6 &&
-                legacy.name[0] != '\0'
-            )
+            case 6:
             {
+                if(storedSize != sizeof(DrivingProfileV6))
+                {
+                    break;
+                }
+
+                DrivingProfileV6 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2038,19 +2157,25 @@ void Settings::loadProfiles()
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
                 profile.gyroHuntStrength = 50;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV5))
-        {
-            DrivingProfileV5 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 5 &&
-                legacy.name[0] != '\0'
-            )
+            case 5:
             {
+                if(storedSize != sizeof(DrivingProfileV5))
+                {
+                    break;
+                }
+
+                DrivingProfileV5 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2066,19 +2191,25 @@ void Settings::loadProfiles()
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV4))
-        {
-            DrivingProfileV4 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 4 &&
-                legacy.name[0] != '\0'
-            )
+            case 4:
             {
+                if(storedSize != sizeof(DrivingProfileV4))
+                {
+                    break;
+                }
+
+                DrivingProfileV4 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2094,19 +2225,25 @@ void Settings::loadProfiles()
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = legacy.gyroTailSlideSpeed;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV3))
-        {
-            DrivingProfileV3 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 3 &&
-                legacy.name[0] != '\0'
-            )
+            case 3:
             {
+                if(storedSize != sizeof(DrivingProfileV3))
+                {
+                    break;
+                }
+
+                DrivingProfileV3 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2126,19 +2263,25 @@ void Settings::loadProfiles()
                     50,
                     100
                 );
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV2))
-        {
-            DrivingProfileV2 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 2 &&
-                legacy.name[0] != '\0'
-            )
+            case 2:
             {
+                if(storedSize != sizeof(DrivingProfileV2))
+                {
+                    break;
+                }
+
+                DrivingProfileV2 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2154,19 +2297,25 @@ void Settings::loadProfiles()
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
                 profile.gyroTransitionSpeed = 50;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
-        }
-        else if(storedSize == sizeof(DrivingProfileV1))
-        {
-            DrivingProfileV1 legacy = {};
-
-            if(
-                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
-                legacy.version == 1 &&
-                legacy.name[0] != '\0'
-            )
+            case 1:
             {
+                if(storedSize != sizeof(DrivingProfileV1))
+                {
+                    break;
+                }
+
+                DrivingProfileV1 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = DrivingProfile();
                 memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
@@ -2182,8 +2331,12 @@ void Settings::loadProfiles()
                 profile.radioSteeringTravel = legacy.radioSteeringTravel;
                 profile.gyroCounterSteerAssist = 0;
                 profile.gyroTransitionSpeed = 50;
+                newIndexFor[i] = (int8_t)loadedCount;
                 loadedCount++;
+                break;
             }
+            default:
+                break;
         }
     }
 
@@ -2194,16 +2347,33 @@ void Settings::loadProfiles()
         persistProfile(i);
     }
 
+    for(uint8_t i = profileCount; i < storedCount; i++)
+    {
+        char key[12];
+
+        snprintf(
+            key,
+            sizeof(key),
+            "prof%u",
+            i
+        );
+
+        prefs.remove(key);
+    }
+
     int storedActive =
         prefs.getChar("profAct", -1);
 
     activeProfileIndex =
         storedActive >= 0 &&
-        storedActive < profileCount
+        storedActive < storedCount
         ?
-        storedActive
+        newIndexFor[storedActive]
         :
         -1;
+
+    prefs.putUChar("profCnt", profileCount);
+    prefs.putChar("profAct", activeProfileIndex);
 }
 
 void Settings::captureProfile(
@@ -2230,7 +2400,7 @@ void Settings::applyProfile(
 )
 {
     gain = constrain(profile.gain, 0.0f, 6.0f);
-    deadband = profile.deadband;
+    deadband = constrain(profile.deadband, 0.0f, 100.0f);
     gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
     gyroIntegralGain = profile.gyroIntegralGain;
     gyroMaxCorrection = profile.gyroMaxCorrection;
