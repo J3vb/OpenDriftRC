@@ -629,7 +629,10 @@ void updateCrsfThrottleOutput(
         abs(throttlePulse - 1500) <=
         CRSF_THROTTLE_NEUTRAL_BAND_US;
 
-    if(!crsfThrottleArmed)
+    // The control task clears both flags on link loss. A clear that lands
+    // between the two stores below leaves them split, so either one being
+    // down sends the output back through the neutral hold.
+    if(!crsfThrottleArmed || !crsfThrottleOutputArmed)
     {
         if(!throttleNeutral)
         {
@@ -2189,7 +2192,7 @@ void loop()
             (unsigned long)crsf.getFrameAgeMs(),
             crsf.getUplinkLinkQuality(),
             crsf.getUplinkSnr(),
-            crsfThrottleArmed ? "ARMED" : "LOCKED"
+            (crsfThrottleArmed && crsfThrottleOutputArmed) ? "ARMED" : "LOCKED"
         );
         #endif
     }
