@@ -32,6 +32,39 @@
 - Splits the EdgeTX tool's gain into Saved Gain and a read-only Live Gain,
   adds an editing guard and a BUSY indicator, and handles EXIT correctly.
 - Removes dead files left over from the original round-display port.
+- Auxiliary CRSF outputs no longer share the MCPWM timer that ESP32Servo
+  uses for the steering servo; assigning a channel to GPIO 1 or 2 on a V1
+  board previously reprogrammed the steering PWM to 50 Hz.
+- Gyro bias calibration averages half a second of samples and rejects the
+  window when the car moved, at boot and from the CAL button, instead of
+  storing one raw sample. The Drive page shows `CAL OK` or `HOLD STILL`.
+- Gyro and accelerometer read failures are counted separately, so an
+  accelerometer fault cannot disable steering, and a failed LPF mode write
+  backs off instead of toggling the sensor every tick.
+- The control task waits at most 2 ms for the I2C bus and no longer replays
+  missed ticks after a stall.
+- Servo center, travel, endpoints, gain range and WiFi timeout are clamped
+  when set and when loaded.
+- The web form no longer refuses to save after the EdgeTX tool stored a
+  fractional deadband, and a page opened before a calibration was cleared
+  elsewhere cannot flip servo reverse on save.
+
+### Known limitations
+
+- The controller's chassis direction-change trigger only fires when the
+  filtered yaw crosses the plus or minus 7 deg/s band inside one control
+  tick, so Transition Speed is driven mainly by stick movement. Left as is
+  on purpose; the track-tested behaviour depends on it.
+- Radio Steering Travel scales the command before the controller measures
+  driver activity, so a lower travel makes the gyro treat the driver as
+  quiet sooner. Left as is on purpose.
+- Throttle prediction reacts to the size of a throttle change in either
+  direction; brake and throttle stabs count the same. This is deliberate and
+  keeps reversed-throttle ESCs working.
+- A settings save can mask the CRSF UART interrupt for a few milliseconds
+  per flash write; the 50 ms link-loss window absorbs it.
+- The blackbox CSV download blocks the loop task for the whole transfer.
+  Steering and the ESC run in the control task and are unaffected.
 
 ## v1.0.8 - 2026-09-03
 

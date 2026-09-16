@@ -87,7 +87,9 @@ the car quickly. They do not disable the fast direct damping path.
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general
 yaw-acceleration look-ahead; throttle temporarily extends that horizon before
-the chassis response develops.
+the chassis response develops. Throttle prediction reacts to the size of a
+throttle change in either direction, so a brake stab counts the same as a
+throttle stab.
 
 ### Gyro filtering
 
@@ -109,6 +111,11 @@ higher values reduce damping for faster rotation. It never changes the hard
 Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
+
+In practice transition authority follows stick movement: the chassis
+reversal itself rarely re-arms it. A lower Radio Steering Travel also makes
+the driver-activity measure smaller, so re-check Transition Speed and the
+Assistance settings after changing travel.
 
 ## Safe first test
 

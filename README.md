@@ -290,7 +290,7 @@ channel 3 gain decoded from the digital link.
 
 Steering output setup:
 
-- `TRV`: scales driver steering input without reducing gyro correction authority.
+- `TRV`: scales driver steering input without reducing gyro correction authority. It also changes how quickly the gyro considers the driver quiet, so re-check the Assistance settings after changing it.
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
 
