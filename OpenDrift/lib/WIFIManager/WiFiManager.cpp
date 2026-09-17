@@ -339,17 +339,26 @@ uint8_t WiFiManager::getClientCount()
         getEventClientCount();
 
     // The event counter only covers the join window, where the station
-    // list lags. Once the link has been quiet for a while the list is the
-    // truth, so a missed disconnect event cannot pin the count above zero
-    // and keep the access point on forever.
+    // list lags. Once the link has been quiet for a while, with no station
+    // event and no HTTP request, the list is the truth, so a missed
+    // disconnect event cannot pin the count above zero and keep the access
+    // point on forever. A client that is still talking to the web server
+    // keeps the count even when the station list under-reports.
     if(counted > reported)
     {
+        unsigned long now = millis();
         unsigned long stationEventMs = lastStationEventMs;
+        unsigned long activityMs = lastClientActivityMs;
 
-        if(
+        bool eventsQuiet =
             stationEventMs != 0 &&
-            millis() - stationEventMs > STATION_RESYNC_MS
-        )
+            now - stationEventMs > STATION_RESYNC_MS;
+
+        bool trafficQuiet =
+            activityMs == 0 ||
+            now - activityMs > STATION_RESYNC_MS;
+
+        if(eventsQuiet && trafficQuiet)
         {
             portENTER_CRITICAL(&stationMux);
             eventStationCount = (int8_t)reported;
@@ -369,6 +378,13 @@ uint8_t WiFiManager::getEventClientCount()
     int8_t count = eventStationCount;
 
     return count > 0 ? (uint8_t)count : 0;
+}
+
+
+
+void WiFiManager::noteClientActivity()
+{
+    lastClientActivityMs = millis();
 }
 
 

@@ -35,6 +35,10 @@ public:
 
     bool hasClient();
 
+    // Called by the web server on each request, so a client that is still
+    // talking counts as present even when the station list under-reports.
+    void noteClientActivity();
+
     // Stations currently associated with the access point: the larger of
     // the driver's station list and the count kept from connect and
     // disconnect events, because the list has been seen to report zero
@@ -109,6 +113,7 @@ private:
     static constexpr unsigned long STATION_RESYNC_MS = 60000;
 
     volatile unsigned long lastStationEventMs = 0;
+    unsigned long lastClientActivityMs = 0;
 
     volatile int8_t eventStationCount = 0;
 

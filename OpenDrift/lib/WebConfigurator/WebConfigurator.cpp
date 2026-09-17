@@ -414,6 +414,11 @@ bool WebConfigurator::isRestartPending()
 
 void WebConfigurator::handleRoot()
 {
+    if(wifi != nullptr)
+    {
+        wifi->noteClientActivity();
+    }
+
     if(settings == nullptr)
     {
         server.send(
@@ -596,6 +601,9 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card'><h2>Servo</h2>");
 
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
+    html += F("<input type='hidden' name='servoReverseWas' value='");
+    html += settings->getServoReverse() ? F("1") : F("0");
+    html += F("'>");
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
@@ -1038,6 +1046,11 @@ void WebConfigurator::handleRoot()
 
 void WebConfigurator::handleLiveStatus()
 {
+    if(wifi != nullptr)
+    {
+        wifi->noteClientActivity();
+    }
+
     if(
         settings == nullptr ||
         gyro == nullptr ||
@@ -1304,9 +1317,23 @@ void WebConfigurator::handleSave()
 
     // After the endpoints: while calibrated, reverse swaps the stored left
     // and right stops, and the page posted them in their pre-swap layout.
-    settings->setServoReverse(
-        server.hasArg("servoReverse")
-    );
+    // Only a checkbox the user actually changed is applied, so a page left
+    // open cannot undo a reverse change made on the display or the radio.
+    if(server.hasArg("servoReverseWas"))
+    {
+        bool postedReverse =
+            server.hasArg("servoReverse");
+
+        bool renderedReverse =
+            server.arg("servoReverseWas") == "1";
+
+        if(postedReverse != renderedReverse)
+        {
+            settings->setServoReverse(
+                postedReverse
+            );
+        }
+    }
 
     settings->setRadioSteeringTravel(
         getIntArg(
