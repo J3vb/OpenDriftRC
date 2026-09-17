@@ -922,9 +922,14 @@ void runControlIteration()
             gyroCalibrationRequested = false;
         }
 
+        // A failed read repeats the previous sample. The window must only
+        // contain fresh samples, so one miss rejects it.
         if(
             gyro.isCalibrating() &&
-            !imu.isYawValid()
+            (
+                !imu.isYawValid() ||
+                !imu.lastGyroReadOk()
+            )
         )
         {
             gyro.abortCalibration();
@@ -1119,10 +1124,17 @@ void runControlIteration()
 
     // The loop may detach the ESC between these checks. writeMicroseconds
     // returns early when inactive and a stray LEDC write is harmless.
+    // Both arming flags are required: the loop stores them one after the
+    // other, so a link loss that lands between the two stores must not
+    // leave the output armed on the next frame.
     if(throttleOutputActive)
     {
         throttleOutput.writeMicroseconds(
-            (!throttleSignal || !crsfThrottleOutputArmed)
+            (
+                !throttleSignal ||
+                !crsfThrottleArmed ||
+                !crsfThrottleOutputArmed
+            )
             ? 1500
             : constrain(
                 throttlePulse,
@@ -1895,7 +1907,10 @@ void setup()
         {
             imu.update();
 
-            if(!imu.isYawValid())
+            if(
+                !imu.isYawValid() ||
+                !imu.lastGyroReadOk()
+            )
             {
                 gyro.abortCalibration();
                 break;

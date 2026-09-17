@@ -298,24 +298,28 @@ bool Settings::begin()
         2
     );
 
-    gyroIntegralGain = prefs.getFloat(
-        "gyroIGain",
-        0.0f
+    gyroIntegralGain = constrain(
+        prefs.getFloat("gyroIGain", 0.0f),
+        0.0f,
+        20.0f
     );
 
-    gyroIntegralLimit = prefs.getInt(
-        "gyroILim",
-        120
+    gyroIntegralLimit = constrain(
+        prefs.getInt("gyroILim", 120),
+        0,
+        500
     );
 
-    gyroHoldBoost = prefs.getInt(
-        "gyroHold",
-        0
+    gyroHoldBoost = constrain(
+        prefs.getInt("gyroHold", 0),
+        0,
+        100
     );
 
-    gyroCounterSteerAssist = prefs.getInt(
-        "counterAssist",
-        0
+    gyroCounterSteerAssist = constrain(
+        prefs.getInt("counterAssist", 0),
+        0,
+        100
     );
 
     if(prefs.isKey("tailSpeedC"))
@@ -351,6 +355,8 @@ bool Settings::begin()
         predictionStrength = prefs.getInt("gyroHunt", 0);
         prefs.putInt("prediction", predictionStrength);
     }
+
+    predictionStrength = constrain(predictionStrength, 0, 100);
 
     gyroHuntStrength = constrain(
         prefs.getInt("huntStrength", 50),
@@ -391,9 +397,10 @@ bool Settings::begin()
         100
     );
 
-    servoQuiet = prefs.getInt(
-        "quiet",
-        0
+    servoQuiet = constrain(
+        prefs.getInt("quiet", 0),
+        0,
+        50
     );
 
     controlLoopHz =
@@ -519,15 +526,16 @@ bool Settings::begin()
     steeringCapturedPulses[0] = steeringMin;
     steeringCapturedPulses[1] = steeringCenter;
     steeringCapturedPulses[2] = steeringMax;
-    steeringCapturedInputPulses[0] = prefs.getInt("servoInL", 1000);
-    steeringCapturedInputPulses[1] = prefs.getInt("servoInC", 1500);
-    steeringCapturedInputPulses[2] = prefs.getInt("servoInR", 2000);
+    steeringCapturedInputPulses[0] = constrain(prefs.getInt("servoInL", 1000), 800, 2200);
+    steeringCapturedInputPulses[1] = constrain(prefs.getInt("servoInC", 1500), 800, 2200);
+    steeringCapturedInputPulses[2] = constrain(prefs.getInt("servoInR", 2000), 800, 2200);
     steeringCalibrationMask = prefs.getBool("servoEndV1", false)
         ? (prefs.getUChar("servoCalM", 0) & 0x07)
         : 0;
 
-    radioSteeringTravel = prefs.getInt(
-        "strTravel",
+    radioSteeringTravel = constrain(
+        prefs.getInt("strTravel", 100),
+        0,
         100
     );
 
@@ -2153,7 +2161,7 @@ bool Settings::deleteProfile(
         persistProfile(i);
     }
 
-    char key[12];
+    char key[16];
 
     snprintf(
         key,
@@ -2196,7 +2204,7 @@ void Settings::loadProfiles()
 
     for(uint8_t i = 0; i < storedCount; i++)
     {
-        char key[12];
+        char key[16];
 
         snprintf(
             key,
@@ -2517,12 +2525,13 @@ void Settings::loadProfiles()
 
     for(uint8_t i = 0; i < profileCount; i++)
     {
+        clampProfile(profiles[i]);
         persistProfile(i);
     }
 
     for(uint8_t i = profileCount; i < storedCount; i++)
     {
-        char key[12];
+        char key[16];
 
         snprintf(
             key,
@@ -2547,6 +2556,24 @@ void Settings::loadProfiles()
 
     prefs.putUChar("profCnt", profileCount);
     prefs.putChar("profAct", activeProfileIndex);
+}
+
+void Settings::clampProfile(
+    DrivingProfile& profile
+)
+{
+    profile.gain = constrain(profile.gain, 0.0f, 6.0f);
+    profile.deadband = constrain(profile.deadband, 0.0f, 100.0f);
+    profile.gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
+    profile.gyroIntegralGain = constrain(profile.gyroIntegralGain, 0.0f, 20.0f);
+    profile.gyroMaxCorrection = constrain(profile.gyroMaxCorrection, 0, 100);
+    profile.gyroIntegralLimit = constrain(profile.gyroIntegralLimit, 0, 500);
+    profile.gyroHoldBoost = constrain(profile.gyroHoldBoost, 0, 100);
+    profile.predictionStrength = constrain(profile.predictionStrength, 0, 100);
+    profile.radioSteeringTravel = constrain(profile.radioSteeringTravel, 0, 100);
+    profile.gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
+    profile.gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
+    profile.gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
 }
 
 void Settings::captureProfile(
@@ -2577,15 +2604,15 @@ void Settings::applyProfile(
     gain = constrain(profile.gain, 0.0f, 6.0f);
     deadband = constrain(profile.deadband, 0.0f, 100.0f);
     gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
-    gyroIntegralGain = profile.gyroIntegralGain;
-    gyroMaxCorrection = profile.gyroMaxCorrection;
-    gyroIntegralLimit = profile.gyroIntegralLimit;
-    gyroHoldBoost = profile.gyroHoldBoost;
-    predictionStrength = profile.predictionStrength;
-    radioSteeringTravel = profile.radioSteeringTravel;
-    gyroCounterSteerAssist = profile.gyroCounterSteerAssist;
-    gyroTransitionSpeed = profile.gyroTransitionSpeed;
-    gyroHuntStrength = profile.gyroHuntStrength;
+    gyroIntegralGain = constrain(profile.gyroIntegralGain, 0.0f, 20.0f);
+    gyroMaxCorrection = constrain(profile.gyroMaxCorrection, 0, 100);
+    gyroIntegralLimit = constrain(profile.gyroIntegralLimit, 0, 500);
+    gyroHoldBoost = constrain(profile.gyroHoldBoost, 0, 100);
+    predictionStrength = constrain(profile.predictionStrength, 0, 100);
+    radioSteeringTravel = constrain(profile.radioSteeringTravel, 0, 100);
+    gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
+    gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
+    gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
 
     portEXIT_CRITICAL(&settingsMux);
 }
@@ -2599,7 +2626,7 @@ bool Settings::persistProfile(
         return false;
     }
 
-    char key[12];
+    char key[16];
 
     snprintf(
         key,

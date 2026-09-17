@@ -169,7 +169,6 @@ private:
     // Set when Settings refuses a servo center/travel/reverse change
     // because physical endpoint calibration is active. The Steering page
     // shows a notice until this timestamp.
-    uint32_t servoLockNoticeUntil = 0;
 
     // Gyro calibration feedback on the Drive page. The result is held on
     // screen for a moment after the averaging window ends.

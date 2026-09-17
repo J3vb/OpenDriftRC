@@ -139,6 +139,10 @@ The frozen round-board environment remains available for local experimentation:
 pio run -e waveshare_128
 ```
 
+The round images are within a few kilobytes of the stock 1.3 MB app slot.
+Every environment uses the project's `partitions.csv` (6 MB app), so flash with
+PlatformIO or the same partition table; a default table cannot hold them.
+
 CRSF builds are intentionally separate:
 
 ```sh
@@ -298,9 +302,10 @@ Servo center and travel are locked while a physical endpoint calibration is
 active, because the saved endpoints already describe the servo. Servo reverse
 keeps working: it swaps the captured left and right stops, so the wheels turn
 the other way and the calibration stays.
-The page shows `LOCKED BY CAL` when a change is refused. Reset the calibration
-first: tap a saved row on the **Physical Endpoints** page, or use `Reset
-calibration` in the web configurator or the EdgeTX tool.
+Center and travel are edited in the web configurator, which reports a refused
+change on the page. Reset the calibration first: tap a saved row on the
+**Physical Endpoints** page, or use `Reset calibration` in the web configurator
+or the EdgeTX tool.
 
 ### Physical Servo Endpoints
 
@@ -330,8 +335,10 @@ Suggested calibration flow:
 4. Confirm all three buttons are green and the page says `SAVED - TAP TO RESET`.
 5. Return to Steering and verify the wheels remain inside both saved physical stops.
 
-Changing `REV`, Servo Center, or Servo Travel after calibration deliberately
-clears the saved calibration because those changes alter the physical output map.
+Servo Center and Servo Travel are refused while a calibration is active, and
+`REV` swaps the captured stops, so none of them clears the saved calibration.
+Reset it from the **Physical Endpoints** page, the web configurator, or the
+EdgeTX tool when the servo geometry changes.
 
 Servo reverse and gyro reverse are separate on purpose:
 

@@ -156,10 +156,13 @@ void IMU::update()
             gyroReadFailures++;
         }
 
+        gyroReadOk = false;
+
         return;
     }
 
     gyroReadFailures = 0;
+    gyroReadOk = true;
 
     if(!qmi.getAccelerometer(
         accelX,
@@ -272,6 +275,13 @@ void IMU::update()
 bool IMU::isYawValid() const
 {
     return gyroReadFailures < 3;
+}
+
+
+
+bool IMU::lastGyroReadOk() const
+{
+    return gyroReadOk;
 }
 
 

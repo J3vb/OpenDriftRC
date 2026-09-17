@@ -338,6 +338,7 @@ private:
 
     void applyFallbackSteeringEndpoints();
     void loadProfiles();
+    void clampProfile(DrivingProfile& profile);
     void captureProfile(DrivingProfile& profile);
     void applyProfile(const DrivingProfile& profile);
     bool persistProfile(uint8_t index);

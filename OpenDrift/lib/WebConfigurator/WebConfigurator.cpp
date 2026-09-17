@@ -2,6 +2,7 @@
 #include "../../include/Version.h"
 
 #include <esp_system.h>
+#include <limits.h>
 
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
@@ -2702,15 +2703,32 @@ int WebConfigurator::getIntArg(
     int fallback
 )
 {
-    if(
-        !server.hasArg(name) ||
-        server.arg(name).length() == 0
-    )
+    if(!server.hasArg(name))
     {
         return fallback;
     }
 
-    return server.arg(name).toInt();
+    String raw =
+        server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+
+    long value =
+        strtol(text, &end, 10);
+
+    // Text that is not a number must not silently become zero.
+    if(end == text)
+    {
+        return fallback;
+    }
+
+    return (int)constrain(value, (long)INT_MIN, (long)INT_MAX);
 }
 
 

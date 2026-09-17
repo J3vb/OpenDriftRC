@@ -430,32 +430,6 @@ static void drawRoundAdjustRow(
 }
 
 
-static void drawRoundCompactAdjustRow(
-    LGFX_Sprite* lcd,
-    const char* label,
-    const String& value,
-    int row,
-    uint16_t accent
-)
-{
-    int labelY = 39 + (row * 41);
-    int buttonY = 50 + (row * 41);
-
-    lcd->setTextSize(1);
-    lcd->setTextColor(0xBDF7);
-    lcd->drawCenterString(label, 120, labelY);
-
-    lcd->drawRect(26, buttonY, 44, 28, accent);
-    lcd->drawRect(170, buttonY, 44, 28, accent);
-
-    lcd->setTextSize(2);
-    lcd->setTextColor(TFT_WHITE);
-    lcd->drawCenterString("-", 48, buttonY + 6);
-    lcd->drawCenterString("+", 192, buttonY + 6);
-    lcd->drawCenterString(value.c_str(), 120, buttonY + 6);
-}
-
-
 static bool prepareRoundFrame()
 {
     if(
@@ -4085,12 +4059,6 @@ void UI::drawRoundRadioPage(
 
         lcd->setTextSize(1);
 
-        if(millis() < servoLockNoticeUntil)
-        {
-            lcd->setTextColor(TFT_RED);
-            lcd->drawCenterString("LOCKED BY CAL", 120, 126);
-        }
-
         lcd->setTextColor(0xBDF7);
         lcd->drawCenterString("STEERING TRAVEL", 120, 139);
 
@@ -4463,16 +4431,6 @@ void UI::drawRadioPage(
             361,
             194
         );
-
-        if(millis() < servoLockNoticeUntil)
-        {
-            lcd->setTextColor(OD_AMBER);
-            lcd->drawCenterString(
-                "LOCKED BY CAL",
-                361,
-                212
-            );
-        }
 
         drawPageDots();
 
@@ -6748,8 +6706,10 @@ void UI::update(
     bool touched =
         touch.isTouched();
 
+    #if !defined(OPENDRIFT_BOARD_AMOLED_164)
     uint8_t gesture =
         touch.getGesture();
+    #endif
 
     wifi.holdAutoOff(
         page == PAGE_WIFI
@@ -6827,21 +6787,6 @@ void UI::update(
         refreshRequested = true;
     }
     #endif
-
-    // Drop the servo lock notice once it has been on screen long enough,
-    // and redraw the page it sits on so it disappears.
-    if(
-        servoLockNoticeUntil != 0 &&
-        millis() >= servoLockNoticeUntil
-    )
-    {
-        servoLockNoticeUntil = 0;
-
-        if(page == PAGE_STEERING)
-        {
-            refreshRequested = true;
-        }
-    }
 
     if(
         refreshRequested &&
@@ -7580,15 +7525,9 @@ void UI::update(
 
             if(buttonPressed(x, y, 294, 66, 134, 64))
             {
-                if(
-                    !settings.setServoReverse(
-                        !settings.getServoReverse()
-                    )
-                )
-                {
-                    servoLockNoticeUntil =
-                        millis() + 1500;
-                }
+                settings.setServoReverse(
+                    !settings.getServoReverse()
+                );
 
                 drawRadioPage(
                     steeringRadio,
@@ -7934,15 +7873,9 @@ void UI::update(
         {
             if(buttonPressed(x, y, 43, 88, 154, 34))
             {
-                if(
-                    !settings.setServoReverse(
-                        !settings.getServoReverse()
-                    )
-                )
-                {
-                    servoLockNoticeUntil =
-                        millis() + 1500;
-                }
+                settings.setServoReverse(
+                    !settings.getServoReverse()
+                );
             }
 
             if(buttonPressed(x, y, 38, 158, 44, 34))
@@ -8059,15 +7992,9 @@ void UI::update(
             ))
             {
 
-                if(
-                    !settings.setServoReverse(
-                        !settings.getServoReverse()
-                    )
-                )
-                {
-                    servoLockNoticeUntil =
-                        millis() + 1500;
-                }
+                settings.setServoReverse(
+                    !settings.getServoReverse()
+                );
 
             }
 

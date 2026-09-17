@@ -5,7 +5,7 @@ local RADIO = 0xEA
 
 local fields = {
   { 1, "Saved Gain",       0,  600,   5, 2 },
-  {35, "Live Gain",        0,  600,   1, 2, false, false, false, true},
+  {35, "Live Gain",        0,  600,   5, 2, false, false, false, true},
   {33, "CH3 Gain Min",     0,  600,   5, 2 },
   {34, "CH3 Gain Max",     0,  600,   5, 2 },
   { 2, "Deadband",         0,  200,   1, 1 },

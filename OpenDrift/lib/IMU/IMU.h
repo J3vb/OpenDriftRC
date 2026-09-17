@@ -17,6 +17,9 @@ public:
     void update();
 
     bool isYawValid() const;
+
+    // True when the most recent update() read the gyroscope successfully.
+    bool lastGyroReadOk() const;
     bool isHealthy() const;
     bool isAccelHealthy() const;
 
@@ -58,6 +61,8 @@ private:
     bool accelFilterReady = false;
 
     uint8_t gyroReadFailures = 0;
+
+    bool gyroReadOk = false;
     uint8_t accelReadFailures = 0;
 
     uint8_t gyroLpfMode = 0;

@@ -35,7 +35,7 @@
   is overriding it.
 - The web save rejects NaN and empty numbers and clamps the deadband.
 - Servo center and travel are locked while a physical endpoint calibration
-  is active; the Steering page reports a refused change. Servo reverse keeps
+  is active; the web configurator reports a refused change. Servo reverse keeps
   working after calibration by swapping the captured left and right stops.
 - Splits the EdgeTX tool's gain into Saved Gain and a read-only Live Gain,
   adds an editing guard and a BUSY indicator, and handles EXIT correctly.
@@ -51,8 +51,15 @@
   backs off instead of toggling the sensor every tick.
 - The control task waits at most 2 ms for the I2C bus and no longer replays
   missed ticks after a stall.
-- Servo center, travel, endpoints, gain range and WiFi timeout are clamped
-  when set and when loaded.
+- Every tuning, servo and endpoint value is clamped when set, when loaded
+  and when a profile is applied or migrated, so a stored value outside its
+  range (for example a steering travel above 100) cannot reach the controller.
+- The CRSF throttle output requires both arming flags, so a link loss that
+  lands between the two arming stores in the loop cannot pass live throttle
+  on the next frame without a fresh neutral hold.
+- Gyro bias calibration rejects the window on a single failed gyro read
+  instead of averaging a repeated sample.
+- The web save ignores a non-numeric value instead of storing it as zero.
 - The web form no longer refuses to save after the EdgeTX tool stored a
   fractional deadband, and a page opened before a calibration was cleared
   elsewhere cannot flip servo reverse on save.

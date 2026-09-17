@@ -8,8 +8,8 @@ then launch **OpenDrift** from the [EdgeTX Tools menu](https://github.com/double
 
 CRSF wiring for the full-duplex firmware:
 
-- Receiver TX to OpenDrift GPIO 17
-- Receiver RX to OpenDrift GPIO 18
+- AMOLED V1: receiver TX to OpenDrift GPIO 17, receiver RX to GPIO 18
+- AMOLED V2: receiver TX to OpenDrift GPIO 1, receiver RX to GPIO 2
 - Receiver and OpenDrift grounds connected
 
 Use the roller to select a setting, press it to enter edit mode, rotate to
