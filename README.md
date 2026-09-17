@@ -242,6 +242,9 @@ The Drift Memory limit remains available in the web configurator as an advanced 
 
 Keep it at `50` unless deliberately collecting same-car experimental A/B data.
 
+`ANTI WOBBLE` on the same page sets the depth of the wheel-wobble notch, `0`
+to `100`; `0` bypasses it and `50` is the track-tested default.
+
 `SMOOTH` is intentionally inverted from raw filter math: higher numbers mean more smoothing and slower gyro response.
 
 Deadband is applied as a soft deadband. Small yaw noise is still ignored, but correction fades in from zero instead of jumping as soon as yaw crosses the deadband value.

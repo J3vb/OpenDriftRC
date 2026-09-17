@@ -15,6 +15,8 @@
   endpoint calibration and all profiles.
 - Adds physical servo endpoint capture and reset from the web configurator,
   and a Restart and Factory reset button.
+- Anti Wobble is adjustable on the AMOLED Transition page; it was only
+  reachable from the web and the EdgeTX tool.
 - The web configurator has five tabs (Tune, Servo, Radio, Profiles, Board)
   and a sticky header with Save and an unsaved-changes indicator, so a phone
   no longer scrolls the whole page to save one value.

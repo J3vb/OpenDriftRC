@@ -3327,23 +3327,27 @@ void UI::drawExperimentalPage(
     );
 
     drawAmoledRowPanel(lcd, 48, 48);
-    drawAmoledRowPanel(lcd, 124, 66);
+    drawAmoledRowPanel(lcd, 110, 48);
 
     setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("TRANS SPEED", 22, 58);
+    lcd->drawString("ANTI WOBBLE", 22, 120);
 
     lcd->setTextSize(3);
     lcd->setTextColor(OD_TEXT);
     lcd->drawNumber(settings.getGyroTransitionSpeed(), 146, 48);
+    lcd->drawNumber(settings.getGyroHuntStrength(), 146, 110);
 
     drawAmoledButton(lcd, 276, 48, 70, 48, "-", OD_MAGENTA);
     drawAmoledButton(lcd, 364, 48, 70, 48, "+", OD_MAGENTA);
+    drawAmoledButton(lcd, 276, 110, 70, 48, "-", OD_MAGENTA);
+    drawAmoledButton(lcd, 364, 110, 70, 48, "+", OD_MAGENTA);
 
     lcd->setTextSize(2);
     lcd->setTextColor(OD_MUTED);
-    lcd->drawString("50 = NEUTRAL RESPONSE", 22, 132);
-    lcd->drawString("LOWER SLOW / HIGHER FAST", 22, 166);
+    lcd->drawString("TRANS 50 = NEUTRAL RESPONSE", 22, 176);
+    lcd->drawString("WOBBLE 0 = OFF, 50 = DEFAULT", 22, 200);
     #else
     lcd->setTextSize(3);
     lcd->setTextColor(TFT_MAGENTA);
@@ -6077,6 +6081,12 @@ int8_t UI::repeatButtonAt(
 
         if(buttonPressed(x, y, 364, 48, 70, 48))
             return 30;
+
+        if(buttonPressed(x, y, 276, 110, 70, 48))
+            return 31;
+
+        if(buttonPressed(x, y, 364, 110, 70, 48))
+            return 32;
     }
 
     if(page == PAGE_DISPLAY)
