@@ -106,6 +106,7 @@ private:
     // auto-off timer for this long, so a slow handshake or a laptop that
     // briefly reconnects cannot be cut off halfway.
     static constexpr unsigned long STATION_GRACE_MS = 30000;
+    static constexpr unsigned long STATION_RESYNC_MS = 60000;
 
     volatile unsigned long lastStationEventMs = 0;
 

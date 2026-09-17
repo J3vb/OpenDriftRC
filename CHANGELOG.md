@@ -53,6 +53,9 @@
 - The web form no longer refuses to save after the EdgeTX tool stored a
   fractional deadband, and a page opened before a calibration was cleared
   elsewhere cannot flip servo reverse on save.
+- The WiFi client count falls back to the station list after a minute
+  without station events, so a missed disconnect event can no longer keep
+  the access point on forever.
 - The web save only writes a steering endpoint the user edited, so a page
   opened before the stops were captured, reset or swapped elsewhere no
   longer writes the old values back and re-marks them calibrated. Servo
