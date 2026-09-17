@@ -449,12 +449,16 @@ void WebConfigurator::handleRoot()
     html += F(".endpoints{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.endpoints button{margin:0;padding:10px 6px;font-size:13px}.endpoints small{font-weight:400}");
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
     html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile,.endpoints{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
-    html += F("</style></head><body><main>");
-    html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator &middot; ");
+    html += F("header.top{position:sticky;top:0;z-index:5;background:#101214;border-bottom:1px solid #33383f}.bar{max-width:760px;margin:0 auto;padding:10px 18px 0;display:flex;align-items:center;gap:12px}.bar h1{font-size:20px;margin:0;line-height:1.1}.bar .ver{font-size:12px;color:#aeb4bb;display:block;margin-top:2px}.bar .grow{flex:1}");
+    html += F(".dirty{display:none;align-items:center;gap:6px;font-size:13px;color:#e5a733;white-space:nowrap}.dirty::before{content:'';width:9px;height:9px;border-radius:50%;background:#e5a733}body.is-dirty .dirty{display:flex}#saveTop{width:auto;margin:0;padding:10px 18px;font-size:15px}body.is-dirty #saveTop{box-shadow:0 0 0 2px #e5a733}");
+    html += F("nav.tabs{max-width:760px;margin:0 auto;padding:8px 18px 0;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}nav.tabs::-webkit-scrollbar{display:none}nav.tabs button{width:auto;margin:0;flex:0 0 auto;padding:9px 14px;font-size:14px;font-weight:600;border-radius:8px 8px 0 0;background:transparent;color:#aeb4bb;border:1px solid transparent;border-bottom:0}nav.tabs button.active{background:#171a1f;color:#f5f5f5;border-color:#33383f}");
+    html += F(".card[data-tab]{display:none}.card[data-tab].on{display:block}main{padding-top:6px}");
+    html += F("</style></head><body><header class='top'><div class='bar'><div><h1>OpenDrift</h1><span class='ver'>Web configurator &middot; ");
     html += F(OPENDRIFT_VERSION_STRING);
-    html += F("</div>");
+    html += F("</span></div><div class='grow'></div><span class='dirty'>Unsaved changes</span><button type='submit' form='saveForm' id='saveTop'>Save</button></div>");
+    html += F("<nav class='tabs'><button type='button' data-tab='tune'>Tune</button><button type='button' data-tab='servo'>Servo</button><button type='button' data-tab='radio'>Radio</button><button type='button' data-tab='profiles'>Profiles</button><button type='button' data-tab='board'>Board</button></nav></header><main>");
 
-    html += F("<div class='card'><h2>Live Radio</h2><div class='status'>");
+    html += F("<div class='card' data-tab='radio'><h2>Live Radio</h2><div class='status'>");
     html += F("<div class='pill'>Steering: ");
     html += String(steeringRadio->getPulseWidth());
     html += steeringRadio->hasSignal() ? F(" OK") : F(" NO SIGNAL");
@@ -487,7 +491,7 @@ void WebConfigurator::handleRoot()
     #endif
     html += F("</div></div></div>");
 
-    html += F("<div class='card' id='profiles'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
+    html += F("<div class='card' data-tab='profiles' id='profiles'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
     html += settings->getActiveProfileName();
     html += F("</strong>. Active profiles automatically keep trackside tune changes.</p>");
 
@@ -549,7 +553,7 @@ void WebConfigurator::handleRoot()
 
     html += F("</div>");
 
-    html += F("<form method='post' action='/save'>");
+    html += F("<form method='post' action='/save' id='saveForm'>");
 
     if(server.arg("notice") == "servo-locked")
     {
@@ -561,7 +565,7 @@ void WebConfigurator::handleRoot()
         html += F("<div class='card'><p class='sub bad'>The endpoints are already calibrated. Reset the calibration before capturing a new stop, or type the pulse values by hand.</p></div>");
     }
 
-    html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
+    html += F("<div class='card' data-tab='tune'><h2>Drive &amp; Limits</h2><div class='row'>");
     html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01", false, "0", "6");
     html += input("Deadband", "deadband", String(settings->getDeadband(), 1), "number", "0.1", false, "0", "100");
     html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1", false, "0", "100");
@@ -570,7 +574,7 @@ void WebConfigurator::handleRoot()
     html += checkbox("Reverse gyro correction", "gyroReverse", settings->getGyroReverse());
     html += F("</div>");
 
-    html += F("<div class='card'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
+    html += F("<div class='card' data-tab='tune'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
     html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01", false, "0", "1");
     html += F("<label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
     if(settings->getGyroLpfMode() == 0) html += F(" selected");
@@ -584,11 +588,11 @@ void WebConfigurator::handleRoot()
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
+    html += F("<div class='card' data-tab='tune'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
     html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
+    html += F("<div class='card' data-tab='tune'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
     html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1", false, "0", "100");
     html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1", false, "0", "100");
     html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01");
@@ -598,7 +602,7 @@ void WebConfigurator::handleRoot()
     bool servoGeometryLocked =
         settings->isSteeringCalibrated();
 
-    html += F("<div class='card'><h2>Servo</h2>");
+    html += F("<div class='card' data-tab='servo'><h2>Servo</h2>");
 
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
     html += F("<input type='hidden' name='servoReverseWas' value='");
@@ -639,7 +643,7 @@ void WebConfigurator::handleRoot()
     uint8_t endpointMask =
         settings->getSteeringCalibrationMask();
 
-    html += F("<div class='card' id='endpoints'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong class='");
+    html += F("<div class='card' data-tab='servo' id='endpoints'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong class='");
     html += endpointsSaved
         ? F("ok")
         : (
@@ -717,7 +721,7 @@ void WebConfigurator::handleRoot()
     html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Gain Channel Calibration</h2><div class='row'>");
+    html += F("<div class='card' data-tab='radio'><h2>Gain Channel Calibration</h2><div class='row'>");
     #if defined(OPENDRIFT_INPUT_CRSF)
     #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
     html += F("Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.");
@@ -749,7 +753,7 @@ void WebConfigurator::handleRoot()
     html += F("</div>");
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
-    html += F("<div class='card'><h2>Auxiliary Channel Outputs</h2><p class='sub'>Route any CRSF channel to a standard 50 Hz receiver-style PWM signal. Outputs return to 1500 us on signal loss. GPIO is 3.3 V signal only: power accessories externally and connect a common ground.</p><div class='row'>");
+    html += F("<div class='card' data-tab='radio'><h2>Auxiliary Channel Outputs</h2><p class='sub'>Route any CRSF channel to a standard 50 Hz receiver-style PWM signal. Outputs return to 1500 us on signal loss. GPIO is 3.3 V signal only: power accessories externally and connect a common ground.</p><div class='row'>");
 
     for(uint8_t gpio = 1; gpio <= 8; gpio++)
     {
@@ -798,7 +802,7 @@ void WebConfigurator::handleRoot()
     html += F("</div><p class='sub'>Mappings take effect immediately after Save Settings. Multiple GPIOs may mirror the same channel.</p></div>");
     #endif
 
-    html += F("<div class='card'><h2>WiFi</h2>");
+    html += F("<div class='card' data-tab='board'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
     html += F("<p class='sub'>Connected devices now: <strong id='wifiClients'>");
     html += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
@@ -823,7 +827,7 @@ void WebConfigurator::handleRoot()
     html += F("</div>");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
-    html += F("<div class='card'><h2>Display</h2><label>Brightness</label><select name='displayBrightness'>");
+    html += F("<div class='card' data-tab='board'><h2>Display</h2><label>Brightness</label><select name='displayBrightness'>");
 
     for(uint8_t percent = 10; percent <= 100; percent += 10)
     {
@@ -874,7 +878,7 @@ void WebConfigurator::handleRoot()
 
     #endif
 
-    html += F("<div class='card'><h2>Blackbox</h2>");
+    html += F("<div class='card' data-tab='board'><h2>Blackbox</h2>");
     html += checkbox("Enable onboard logging", "blackboxEnabled", settings->getBlackboxEnabled());
     html += F("</div>");
 
@@ -895,7 +899,7 @@ void WebConfigurator::handleRoot()
 
     html += F("<form id='resetEndpoints' method='post' action='/reset-endpoints' onsubmit=\"return confirm('Clear the physical endpoint calibration? The servo returns to the plain center and travel map until all three points are captured again.')\"></form>");
 
-    html += F("<div class='card'><h2>Blackbox Log</h2>");
+    html += F("<div class='card' data-tab='board'><h2>Blackbox Log</h2>");
 
     if(!settings->getBlackboxEnabled())
     {
@@ -940,7 +944,7 @@ void WebConfigurator::handleRoot()
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Outside the settings form on purpose: the Use and Delete buttons
     // are forms of their own, and forms cannot nest.
-    html += F("<div class='card' id='backgrounds'><h2>Backgrounds</h2>");
+    html += F("<div class='card' data-tab='board' id='backgrounds'><h2>Backgrounds</h2>");
 
     if(backgrounds == nullptr || !backgrounds->isReady())
     {
@@ -1006,7 +1010,7 @@ void WebConfigurator::handleRoot()
     // The settings form above cannot contain another form, so the restart
     // form lives here and the restart buttons elsewhere on the page point
     // at it through their form attribute.
-    html += F("<div class='card'><h2>System</h2><p class='sub'>Last reset: <strong>");
+    html += F("<div class='card' data-tab='board'><h2>System</h2><p class='sub'>Last reset: <strong>");
     html += resetReasonText(esp_reset_reason());
     html += F("</strong> &middot; up ");
     html += uptimeText();
@@ -1034,6 +1038,12 @@ void WebConfigurator::handleRoot()
     html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);try{var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}}catch(e){st.textContent='This image could not be converted in the browser. Try a smaller photo.';return;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
     #endif
 
+    // Tabs hide cards in place, so form membership and the form= buttons
+    // are untouched. The active tab survives the save redirect through
+    // localStorage; the unsaved dot follows any input inside the save form.
+    html += F("(function(){var tabs=document.querySelectorAll('nav.tabs button'),cards=document.querySelectorAll('.card[data-tab]');function show(n){tabs.forEach(function(b){b.classList.toggle('active',b.dataset.tab===n)});cards.forEach(function(c){c.classList.toggle('on',c.dataset.tab===n)});try{localStorage.setItem('odTab',n)}catch(e){}if(location.hash!=='#'+n){history.replaceState(null,'','#'+n)}window.scrollTo(0,0)}");
+    html += F("tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.tab)})});var st=(location.hash||'').slice(1);if(!st){try{st=localStorage.getItem('odTab')||''}catch(e){}}if(!document.querySelector('nav.tabs button[data-tab=\"'+st+'\"]')){st='tune'}show(st);");
+    html += F("var f=document.getElementById('saveForm'),dirty=false;function setDirty(v){dirty=v;document.body.classList.toggle('is-dirty',v)}if(f){f.addEventListener('input',function(){setDirty(true)});f.addEventListener('change',function(){setDirty(true)});f.addEventListener('submit',function(){setDirty(false)})}window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue=''}})})();");
     html += F("</script></body></html>");
 
     server.send(
