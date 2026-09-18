@@ -2635,14 +2635,10 @@ void UI::drawSystemPage(
         18
     );
 
-    lcd->setTextSize(2);
+    lcd->setTextSize(1);
     lcd->setTextColor(TFT_WHITE);
     lcd->drawCenterString(
-        #if defined(OPENDRIFT_INPUT_CRSF)
-        "OpenDrift CRSF BETA",
-        #else
-        "OpenDrift OPEN BETA",
-        #endif
+        OPENDRIFT_VERSION_STRING,
         120,
         57
     );
@@ -2832,7 +2828,7 @@ void UI::drawDriftAssistPage(
         drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_BLUE);
     }
     #else
-    lcd->setTextSize(3);
+    lcd->setTextSize(2);
     lcd->setTextColor(ROUND_CYAN);
     lcd->drawCenterString("Assistance", 120, 14);
 
@@ -2906,8 +2902,21 @@ static uint16_t nextDimTimeout(
     int8_t direction
 )
 {
+    uint8_t current =
+        dimTimeoutStepIndex(seconds);
+
+    // Stepping down from a value between rungs lands on the rung below it,
+    // not a rung further down.
+    if(
+        direction < 0 &&
+        DIM_TIMEOUT_STEPS[current] != seconds
+    )
+    {
+        return DIM_TIMEOUT_STEPS[current];
+    }
+
     int8_t index =
-        (int8_t)dimTimeoutStepIndex(seconds) + direction;
+        (int8_t)current + direction;
 
     if(index < 0)
     {
@@ -3349,7 +3358,7 @@ void UI::drawExperimentalPage(
     lcd->drawString("TRANS 50 = NEUTRAL RESPONSE", 22, 176);
     lcd->drawString("WOBBLE 0 = OFF, 50 = DEFAULT", 22, 200);
     #else
-    lcd->setTextSize(3);
+    lcd->setTextSize(2);
     lcd->setTextColor(TFT_MAGENTA);
     lcd->drawCenterString("Transition", 120, 14);
 
@@ -3422,6 +3431,7 @@ void UI::drawProfilesPage(
             104
         );
 
+        lcd->setTextSize(1);
         lcd->setTextColor(OD_MUTED);
         lcd->drawCenterString(
             "Create profiles in the web configurator",
@@ -3472,23 +3482,48 @@ void UI::drawProfilesPage(
                 accent
             );
 
+            String summary =
+                "G " + String(profile->gain, 2) +
+                "   PRED " + String(profile->predictionStrength) +
+                "   HOLD " + String(profile->gyroHoldBoost);
+
+            // The summary is right-aligned at x=426 in size 1 (6.9 px per
+            // character). Clip the size 2 name (13.8 px per character) so it
+            // ends at least 8 px before the summary starts.
+            int nameWidth =
+                (int)(426.0f - (summary.length() * 6.9f)) - 8 - 30;
+
+            int nameChars =
+                nameWidth > 0
+                ?
+                (int)(nameWidth / 13.8f)
+                :
+                0;
+
+            String name = profile->name;
+
+            if((int)name.length() > nameChars)
+            {
+                name =
+                    nameChars > 1
+                    ?
+                    name.substring(0, nameChars - 1) + "~"
+                    :
+                    "";
+            }
+
             lcd->setTextSize(2);
             lcd->setTextColor(
                 active ? OD_GREEN : OD_TEXT
             );
             lcd->drawString(
-                profile->name,
+                name,
                 30,
                 y + 10
             );
 
             lcd->setTextSize(1);
             lcd->setTextColor(OD_MUTED);
-
-            String summary =
-                "G " + String(profile->gain, 2) +
-                "   PRED " + String(profile->predictionStrength) +
-                "   HOLD " + String(profile->gyroHoldBoost);
 
             lcd->drawRightString(
                 summary.c_str(),
@@ -4029,7 +4064,7 @@ void UI::drawRoundRadioPage(
         lcd->drawFloat(gyro.getGain(), 2, 136, 157);
         lcd->setTextSize(1);
         lcd->setTextColor(0xBDF7);
-        lcd->drawCenterString("CH1 steer / CH2 throttle / CH3 gain", 120, 188);
+        lcd->drawCenterString("CH1 STR  CH2 THR  CH3 GAIN", 120, 188);
     }
     else if(radioSection == 1)
     {
@@ -4155,6 +4190,8 @@ void UI::drawSteeringCalibrationPage(
     GyroController& gyro
 )
 {
+    lastDrawnSteeringSignal = steeringRadio.hasSignal();
+
     #if !defined(OPENDRIFT_BOARD_AMOLED_164)
     radioSection = 2;
 
@@ -5889,7 +5926,12 @@ void UI::drawFixedPageDots()
         return;
     }
 
-    const int spacing = 16;
+    // Eleven dots at 16 px spacing on y=215 pushed the outer two off the
+    // round glass. At y=200 the half chord is sqrt(120^2 - 80.5^2) = 89, so
+    // 14 px spacing keeps the whole row (x 50..190, radius 4) on the panel.
+    const int spacing = 14;
+
+    const int dotsY = 200;
 
     int startX =
         (UI_CANVAS_WIDTH / 2) -
@@ -5910,7 +5952,7 @@ void UI::drawFixedPageDots()
         {
             roundFrame.fillCircle(
                 x,
-                UI_DOTS_Y,
+                dotsY,
                 4,
                 ROUND_CYAN
             );
@@ -5919,7 +5961,7 @@ void UI::drawFixedPageDots()
         {
             roundFrame.drawCircle(
                 x,
-                UI_DOTS_Y,
+                dotsY,
                 4,
                 ROUND_DIM
             );
@@ -6892,6 +6934,7 @@ void UI::update(
             page == PAGE_DRIVE ||
             page == PAGE_RADIO ||
             page == PAGE_STEERING ||
+            page == PAGE_STEERING_CAL ||
             page == PAGE_WIFI
         ) &&
         !touched &&
@@ -6933,6 +6976,20 @@ void UI::update(
                 drawWifiPage(
                     wifi,
                     settings
+                );
+            }
+        }
+        else if(page == PAGE_STEERING_CAL)
+        {
+            // The endpoints page shows the link state, so it has to follow
+            // the steering signal coming and going.
+            if(steeringRadio.hasSignal() != lastDrawnSteeringSignal)
+            {
+                drawSteeringCalibrationPage(
+                    steeringRadio,
+                    gainRadio,
+                    settings,
+                    gyro
                 );
             }
         }

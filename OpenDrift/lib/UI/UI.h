@@ -160,6 +160,9 @@ private:
 
     bool lastDrawnWifiEnabled = false;
 
+    // Endpoints page live refresh: redraw when the steering link changes.
+    bool lastDrawnSteeringSignal = false;
+
     unsigned long lastPageSwipe = 0;
 
     uint8_t radioSection = 0;
