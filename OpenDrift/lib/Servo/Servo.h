@@ -21,6 +21,10 @@ public:
 
     int getPosition();
 
+    void noteCommandPulse(int us);
+
+    int getCommandPosition();
+
     void configure(
         int centerPulse,
         bool reversed,
@@ -35,9 +39,13 @@ public:
 
 private:
 
+    int computePulse(int us);
+
     Servo servo;
 
     int currentPulse = 1500;
+
+    int commandPulse = 1500;
 
     int centerPulse = 1500;
 

@@ -1,5 +1,140 @@
 # Changelog
 
+## Unreleased
+
+### Display and web configurator
+
+- Adds a Display page with a 180 degree screen flip for an upside-down board;
+  the rendered image and the touch input rotate together.
+- Adds a display theme: a selectable accent colour, light or dark text, and
+  translucent panels behind the controls so any background stays readable.
+- Adds uploadable AMOLED backgrounds, stored on the board and selectable from
+  the display or the web configurator.
+- Adds a display brightness setting and a configurable idle dim timeout.
+- Adds profile export and import, plus a JSON export of every setting, the
+  endpoint calibration and all profiles.
+- Adds physical servo endpoint capture and reset from the web configurator,
+  and a Restart and Factory reset button.
+- Anti Wobble is adjustable on the AMOLED Transition page; it was only
+  reachable from the web and the EdgeTX tool.
+- The web configurator has five tabs (Tune, Servo, Radio, Profiles, Board)
+  and a sticky header with Save and an unsaved-changes indicator, so a phone
+  no longer scrolls the whole page to save one value.
+
+### Fixes
+
+- A rejected endpoint capture no longer overwrites the stored stop, and a
+  partial capture no longer becomes a live endpoint after a reboot.
+- Servo center, travel and reverse keep the fallback endpoints in sync.
+- Hand-typed endpoints are applied as one set, with a notice on the page.
+- Web checkboxes only apply when they were changed on that page, so a stale
+  page can no longer revert gyro reverse, WiFi, blackbox, display flip or
+  throttle output.
+- Activating or deleting a profile verifies the row it was asked for.
+- An endpoint capture from the EdgeTX tool is refused while the endpoints are
+  already calibrated.
+- IMU startup reports configuration failures, and a disabled gyro is always
+  re-enabled.
+- The saved gyro LPF mode is applied before the boot bias window.
+- The auxiliary outputs fail safe from the control task.
+- The round display's Radio page THR row shows the throttle channel.
+- Display pages redraw after a change made in the web configurator.
+- The Endpoints page follows the steering signal.
+- The dim-timeout minus button steps down from a value set on the web.
+- Long profile names and hints fit on the AMOLED Profiles page.
+- Dots, titles and version text fit inside the round display.
+- Web page: the gyro LPF label is paired with its control, the CRSF pin text
+  is correct, field ranges match the firmware, the notice is visible, and the
+  settings hash is validated.
+- The CRSF deadband and servo travel ranges match the web configurator.
+- Corrects the documentation: the AMOLED V2 CRSF target, the CRSF throttle
+  failsafe, the Response page controls, what a profile stores, the GPIO 18
+  mode pin on V2, blackbox retention, and the web settings list.
+- Legacy profile migration no longer drops profiles or shifts the active
+  profile index.
+- The ESC neutral failsafe now runs in the control task, so it cannot be
+  delayed by the UI or the web server. The CRSF neutral-hold arming is also
+  cleared there on link loss, so a loop blocked in a web download cannot
+  re-apply the receiver's throttle the moment the link returns; the PWM
+  build holds neutral until the loop removes the signal.
+- The gyro calibrate button no longer races the control task.
+- The Drive page gain and deadband buttons now edit the saved value instead of
+  the live gain, so an edit is no longer overwritten by the gain channel. The
+  Drive page shows the saved value under the live one while a gain channel
+  is overriding it.
+- The web save rejects NaN and empty numbers and clamps the deadband.
+- Servo center and travel are locked while a physical endpoint calibration
+  is active; the web configurator reports a refused change. Servo reverse keeps
+  working after calibration by swapping the captured left and right stops.
+- Splits the EdgeTX tool's gain into Saved Gain and a read-only Live Gain,
+  adds an editing guard and a BUSY indicator, and handles EXIT correctly.
+- Removes dead files left over from the original round-display port.
+- Auxiliary CRSF outputs no longer share the MCPWM timer that ESP32Servo
+  uses for the steering servo; assigning a channel to GPIO 1 or 2 on a V1
+  board previously reprogrammed the steering PWM to 50 Hz.
+- Gyro bias calibration averages half a second of samples and rejects the
+  window when the car moved, at boot and from the CAL button, instead of
+  storing one raw sample. The Drive page shows `CAL OK` or `HOLD STILL`.
+- Gyro and accelerometer read failures are counted separately, so an
+  accelerometer fault cannot disable steering, and a failed LPF mode write
+  backs off instead of toggling the sensor every tick.
+- The control task waits at most 2 ms for the I2C bus and no longer replays
+  missed ticks after a stall.
+- Every tuning, servo and endpoint value is clamped when set, when loaded
+  and when a profile is applied or migrated, so a stored value outside its
+  range (for example a steering travel above 100) cannot reach the controller.
+- The CRSF throttle output requires both arming flags, so a link loss that
+  lands between the two arming stores in the loop cannot pass live throttle
+  on the next frame without a fresh neutral hold.
+- Gyro bias calibration rejects the window on a single failed gyro read
+  instead of averaging a repeated sample.
+- The web save ignores a non-numeric value instead of storing it as zero.
+- The web form no longer refuses to save after the EdgeTX tool stored a
+  fractional deadband, and a page opened before a calibration was cleared
+  elsewhere cannot flip servo reverse on save.
+- The WiFi client count falls back to the station list after a minute
+  without station events, so a missed disconnect event can no longer keep
+  the access point on forever.
+- The web save only writes a steering endpoint the user edited, so a page
+  opened before the stops were captured, reset or swapped elsewhere no
+  longer writes the old values back and re-marks them calibrated. Servo
+  reverse from the web page now swaps the calibrated stops like the display
+  and the EdgeTX tool do; before, the same save undid the swap.
+- The web endpoint capture buttons refuse while a calibration is active
+  instead of silently re-storing the current stop.
+- Gyro Reverse and the gyro bias now share one frame: the boot calibration
+  measures the bias on the reversed signal, and toggling Gyro Reverse flips
+  the stored bias instead of doubling it.
+- A gyro filter change that fails on the I2C bus no longer leaves the
+  gyroscope disabled until reboot.
+- The EdgeTX tool sends at most one request per frame, so the BUSY flag no
+  longer stays lit and the Endpoints status is polled as intended.
+- The screen flip is included in the settings export and on the web
+  Display card.
+
+- The controller's chassis direction-change trigger now keeps its own
+  direction memory through the quiet band, so a real yaw reversal arms the
+  transition phase at any control rate. Previously it only fired when the
+  filtered yaw crossed plus or minus 7 deg/s inside one tick, which left
+  Transition Speed driven almost only by stick movement. Expect transitions
+  to feel more damped; re-check Transition Speed.
+- The controller measures driver activity on the normalized steering
+  command, so Radio Steering Travel no longer makes the driver look calmer
+  or busier. Tunes running travel below 100 percent will see the assists
+  come in slightly later than before.
+
+### Known limitations
+
+- Endpoint capture assumes Radio Steering Travel at 100; a reduced travel is
+  applied on top of the captured stops afterwards.
+- Throttle prediction reacts to the size of a throttle change in either
+  direction; brake and throttle stabs count the same. This is deliberate and
+  keeps reversed-throttle ESCs working.
+- A settings save can mask the CRSF UART interrupt for a few milliseconds
+  per flash write; the 50 ms link-loss window absorbs it.
+- The blackbox CSV download blocks the loop task for the whole transfer.
+  Steering and the ESC run in the control task and are unaffected.
+
 ## v1.0.8 - 2026-09-03
 
 ### Lower-latency gyro experiments

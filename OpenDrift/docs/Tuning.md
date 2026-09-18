@@ -87,7 +87,9 @@ the car quickly. They do not disable the fast direct damping path.
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general
 yaw-acceleration look-ahead; throttle temporarily extends that horizon before
-the chassis response develops.
+the chassis response develops. Throttle prediction reacts to the size of a
+throttle change in either direction, so a brake stab counts the same as a
+throttle stab.
 
 ### Gyro filtering
 
@@ -109,6 +111,12 @@ higher values reduce damping for faster rotation. It never changes the hard
 Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
 reversal, then fades out before the next settled drift. Test `25`, `50`, and
 `75` at the same tune first, then refine the preferred direction.
+
+Transition authority follows both stick movement and the measured chassis
+reversal; the reversal memory survives the pass through straight and is
+forgotten after half a second of quiet. Driver activity is measured on the
+normalized steering command, so Radio Steering Travel does not change how
+quickly the gyro considers the driver quiet.
 
 ## Safe first test
 
@@ -206,8 +214,11 @@ the retired alpha-era tuning fields:
 The stage-one onboard logger stores fixed-size binary records entirely in a
 4 MB circular PSRAM buffer. It performs no internal-flash or filesystem writes
 while driving. At the current 20 Hz sample rate, the complete telemetry set
-retains approximately the newest 18 minutes of a run. Once full, the oldest
-records are overwritten so the most recent behavior remains available.
+retains about the newest 14 minutes of a run: the 244-byte record leaves room
+for 17189 samples in 4 MB. The buffer is allocated 1 MB smaller at a time when
+less PSRAM is free, which shortens the retained window in proportion. Once
+full, the oldest records are overwritten so the most recent behavior remains
+available.
 
 Use **Download CSV** in the web configurator before removing power. CSV text is
 generated from the binary records only during the download. The buffer is

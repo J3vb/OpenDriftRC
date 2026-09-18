@@ -19,8 +19,8 @@ bool ServoOutput::begin(
     int channel =
         servo.attach(
         pin,
-        1000,
-        2000
+        900,
+        2100
     );
 
     if(channel == 0)
@@ -56,7 +56,7 @@ void ServoOutput::end()
 
 
 
-void ServoOutput::writeMicroseconds(int us)
+int ServoOutput::computePulse(int us)
 {
     us = constrain(us, 1000, 2000);
 
@@ -81,7 +81,15 @@ void ServoOutput::writeMicroseconds(int us)
         targetPulse = centerPulse + correction;
     }
 
-    targetPulse = constrain(targetPulse, 900, 2100);
+    return constrain(targetPulse, 900, 2100);
+}
+
+
+
+void ServoOutput::writeMicroseconds(int us)
+{
+    int targetPulse =
+        computePulse(us);
 
     if(
         quietBand > 0 &&
@@ -106,8 +114,8 @@ void ServoOutput::center()
     currentPulse =
         constrain(
             centerPulse,
-            1000,
-            2000
+            900,
+            2100
         );
 
     servo.writeMicroseconds(
@@ -120,6 +128,21 @@ void ServoOutput::center()
 int ServoOutput::getPosition()
 {
     return currentPulse;
+}
+
+
+
+void ServoOutput::noteCommandPulse(int us)
+{
+    commandPulse =
+        computePulse(us);
+}
+
+
+
+int ServoOutput::getCommandPosition()
+{
+    return commandPulse;
 }
 
 

@@ -8,8 +8,8 @@ then launch **OpenDrift** from the [EdgeTX Tools menu](https://github.com/double
 
 CRSF wiring for the full-duplex firmware:
 
-- Receiver TX to OpenDrift GPIO 17
-- Receiver RX to OpenDrift GPIO 18
+- AMOLED V1: receiver TX to OpenDrift GPIO 17, receiver RX to GPIO 18
+- AMOLED V2: receiver TX to OpenDrift GPIO 1, receiver RX to GPIO 2
 - Receiver and OpenDrift grounds connected
 
 Use the roller to select a setting, press it to enter edit mode, rotate to
@@ -29,18 +29,23 @@ valid captures, the status changes to `YES` and the AMOLED calibration buttons
 turn green. Capturing on the AMOLED page updates the radio status as well.
 Use `Reset Cal` before expanding or replacing existing endpoints.
 
-`Active Gain` follows CRSF channel 3 live. The tool shows a reminder that
-channel 3 overrides gain changes made elsewhere while its signal is valid; the
-stored profile gain remains the fallback used without that gain signal.
+`Saved Gain` is the stored fallback gain and is the value the tool edits.
+`Live Gain` is read-only and follows CRSF channel 3 while its signal is valid;
+channel 3 overrides the saved gain whenever it is connected, so the two rows
+differ during a session and agree once the gain channel is removed.
 `CH3 Gain Min` and `CH3 Gain Max` map the full Channel 3 control movement to
 the desired gyro-gain range. The default remains `0.50` to `3.00`, while both
 the controller and Channel 3 mapping support values up to `6.00`.
 
-The tool exposes the gyro and steering values: Active Gain, Channel 3 gain range, Deadband, Max Correction,
+The tool exposes the gyro and steering values: Saved Gain, Live Gain, Channel 3 gain range, Deadband, Max Correction,
 Smoothing, Gyro LPF, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
 Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, physical endpoints,
-Servo Travel, Servo Center,
-Servo Reverse, and Gyro Reverse. It also assigns CRSF channel 1–16 or OFF to
+Servo Travel, Servo Center, Servo Rate,
+Servo Reverse, and Gyro Reverse. `Servo Travel` and `Servo Center` are refused
+while the physical endpoint calibration is active; use `Reset Cal` first. The
+same applies to the capture actions, which are refused once the endpoints are
+calibrated. Restart OpenDrift after changing `Servo Rate`; check your servo is
+rated for 333 Hz. It also assigns CRSF channel 1–16 or OFF to
 GPIO 1–8 on AMOLED V1 and GPIO 3–8 on AMOLED V2. GPIO 1/2 display `RES` on V2
 because those pins carry the CRSF UART.
 

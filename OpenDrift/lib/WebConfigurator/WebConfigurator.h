@@ -7,6 +7,9 @@
 #include "GyroController.h"
 #include "RadioInput.h"
 #include "BlackboxLogger.h"
+#include "WiFiManager.h"
+#include "Servo.h"
+#include "Backgrounds.h"
 
 
 class WebConfigurator
@@ -21,15 +24,35 @@ public:
         RadioInput& steeringRadio,
         RadioInput& gainRadio,
         RadioInput& throttleRadio,
-        BlackboxLogger& blackbox
+        BlackboxLogger& blackbox,
+        WiFiManager& wifi,
+        ServoOutput& steeringServo,
+        Backgrounds& backgrounds
     );
 
     void update();
 
     bool isRunning();
 
+    // True between a web restart request and the reset itself. The main
+    // loop keeps calling update() while this holds, even if the access
+    // point drops in the meantime.
+    bool isRestartPending();
+
+    // Called after a handler changed settings, so the display can redraw
+    // the page it is showing.
+    void setChangeCallback(void (*callback)());
+
 
 private:
+
+    void (*changeCallback)() = nullptr;
+    void notifyChanged();
+    bool profileRowMatches(int index);
+
+    // True when a checkbox was changed on the page: the posted state
+    // differs from the rendered snapshot, or the snapshot is missing.
+    bool checkboxChanged(const char* name, bool& posted);
 
     WebServer server;
 
@@ -45,7 +68,31 @@ private:
 
     BlackboxLogger* blackbox = nullptr;
 
+    WiFiManager* wifi = nullptr;
+
+    ServoOutput* steeringServo = nullptr;
+
+    Backgrounds* backgrounds = nullptr;
+
     bool running = false;
+
+    // Result of the multipart background upload in flight, read by the
+    // completion handler.
+    bool backgroundUploadOk = false;
+
+    // Web twin of the display's capture error flag: set when a capture is
+    // refused or rejected, cleared by a reset or a completed calibration.
+    bool endpointCaptureError = false;
+
+    // A restart request is answered first and executed from update()
+    // once the response has had time to leave the socket.
+    static constexpr unsigned long RESTART_DELAY_MS = 500;
+
+    unsigned long restartAtMs = 0;
+
+    // Set by /factory-reset: the deferred restart erases the settings
+    // namespace right before the reset instead of flushing it.
+    bool factoryResetPending = false;
 
     void handleRoot();
 
@@ -63,6 +110,33 @@ private:
 
     void handleLogClear();
 
+    void handleSettingsExport();
+
+    void handleProfilesExport();
+
+    void handleProfilesImport();
+
+    void handleRestart();
+
+    void handleFactoryReset();
+
+    void handleEndpointCapture();
+
+    void handleEndpointReset();
+
+    void handleBackgroundUpload();
+
+    void handleBackgroundUploadChunk();
+
+    void handleBackgroundUse();
+
+    void handleBackgroundDelete();
+
+    void sendRestartPage(
+        const char* heading,
+        const char* ssid
+    );
+
     void handleNotFound();
 
     String input(
@@ -70,13 +144,17 @@ private:
         const char* name,
         String value,
         const char* type = "number",
-        const char* step = "1"
+        const char* step = "1",
+        bool disabled = false,
+        const char* minValue = nullptr,
+        const char* maxValue = nullptr
     );
 
     String checkbox(
         const char* label,
         const char* name,
-        bool checked
+        bool checked,
+        bool disabled = false
     );
 
     int getIntArg(
@@ -84,8 +162,30 @@ private:
         int fallback
     );
 
+    // True when a steering endpoint field was changed on the page: the
+    // posted value differs from the rendered snapshot, or the snapshot
+    // is missing. An untouched or absent field is not an edit.
+    bool endpointFieldEdited(
+        const char* name,
+        const char* snapshotName,
+        int requested
+    );
+
     float getFloatArg(
         const char* name,
         float fallback
+    );
+
+    // Indexed form fields of the profile import, e.g. "gain3".
+    float profileFloatArg(
+        const char* prefix,
+        int index,
+        float fallback
+    );
+
+    int32_t profileIntArg(
+        const char* prefix,
+        int index,
+        int32_t fallback
     );
 };

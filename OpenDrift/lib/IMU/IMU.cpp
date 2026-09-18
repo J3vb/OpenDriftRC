@@ -18,27 +18,34 @@ bool IMU::begin()
     }
 
 
-    qmi.configAccelerometer(
-        SensorQMI8658::ACC_RANGE_4G,
-        SensorQMI8658::ACC_ODR_1000Hz,
-        SensorQMI8658::LPF_MODE_0
-    );
+    // A sensor that answers WHO_AM_I but refuses a configuration write is
+    // not usable: SensorLib leaves the gyro disabled and every later read
+    // fails without bus traffic. Report it so setup() can retry or reboot.
+    bool configured =
+        qmi.configAccelerometer(
+            SensorQMI8658::ACC_RANGE_4G,
+            SensorQMI8658::ACC_ODR_1000Hz,
+            SensorQMI8658::LPF_MODE_0
+        );
 
-
-    qmi.configGyroscope(
-        SensorQMI8658::GYR_RANGE_1024DPS,
-        SensorQMI8658::GYR_ODR_896_8Hz,
-        SensorQMI8658::LPF_MODE_0
-    );
+    configured =
+        qmi.configGyroscope(
+            SensorQMI8658::GYR_RANGE_1024DPS,
+            SensorQMI8658::GYR_ODR_896_8Hz,
+            SensorQMI8658::LPF_MODE_0
+        ) && configured;
 
     gyroLpfMode = 0;
+    lpfRetryMode = 0;
+    lpfRetryCount = 0;
+    lpfLastAttemptMs = 0;
+    enableRetryMs = 0;
+    settleUntilMs = 0;
 
+    configured = qmi.enableAccelerometer() && configured;
+    configured = qmi.enableGyroscope() && configured;
 
-    qmi.enableAccelerometer();
-    qmi.enableGyroscope();
-
-
-    return true;
+    return configured;
 }
 
 
@@ -46,9 +53,47 @@ bool IMU::setGyroLpfMode(uint8_t mode)
 {
     mode = constrain(mode, 0, 2);
 
+    // A gyro left disabled by an earlier failed write is re-enabled here,
+    // before any early return, so no path can leave it off until reboot.
+    // The 1 s spacing keeps a dead bus from being hammered every tick.
+    if(
+        !qmi.isEnableGyroscope() &&
+        millis() - enableRetryMs >= 1000
+    )
+    {
+        enableRetryMs = millis();
+
+        if(qmi.enableGyroscope())
+        {
+            settleUntilMs = millis() + GYRO_SETTLE_MS;
+        }
+    }
+
     if(mode == gyroLpfMode)
     {
         return true;
+    }
+
+    // A sensor that refuses the write must not be hammered once per control
+    // tick. Back off for a second, then give up on that mode entirely.
+    if(mode != lpfRetryMode)
+    {
+        lpfRetryMode = mode;
+        lpfRetryCount = 0;
+        lpfLastAttemptMs = 0;
+    }
+
+    if(lpfRetryCount >= 5)
+    {
+        return false;
+    }
+
+    if(
+        lpfRetryCount > 0 &&
+        millis() - lpfLastAttemptMs < 1000
+    )
+    {
+        return false;
     }
 
     SensorQMI8658::LpfMode sensorMode =
@@ -58,16 +103,42 @@ bool IMU::setGyroLpfMode(uint8_t mode)
             ? SensorQMI8658::LPF_OFF
             : SensorQMI8658::LPF_MODE_0);
 
-    if(!qmi.configGyroscope(
-        SensorQMI8658::GYR_RANGE_1024DPS,
-        SensorQMI8658::GYR_ODR_896_8Hz,
-        sensorMode
-    ))
+    bool configured =
+        qmi.configGyroscope(
+            SensorQMI8658::GYR_RANGE_1024DPS,
+            SensorQMI8658::GYR_ODR_896_8Hz,
+            sensorMode
+        );
+
+    // configGyroscope() disables the gyro first and only re-enables it
+    // after the last register write. A failed write, or a retry that
+    // starts with the gyro already off, would otherwise leave it disabled
+    // and every read failing until reboot.
+    if(!qmi.isEnableGyroscope())
     {
+        configured = qmi.enableGyroscope() && configured;
+    }
+
+    if(!configured)
+    {
+        lpfLastAttemptMs = millis();
+
+        if(lpfRetryCount < 255)
+        {
+            lpfRetryCount++;
+        }
+
         return false;
     }
 
     gyroLpfMode = mode;
+    lpfRetryCount = 0;
+    lpfLastAttemptMs = 0;
+
+    // The gyro was stopped and restarted. Its first samples are not valid
+    // yet, so yaw reads as invalid until the turn-on time has passed.
+    settleUntilMs = millis() + GYRO_SETTLE_MS;
+
     return true;
 }
 
@@ -101,11 +172,24 @@ void IMU::update()
 
     lastUpdateMicros = now;
 
-    qmi.getGyroscope(
+    if(!qmi.getGyroscope(
         gyroX,
         gyroY,
         gyroZ
-    );
+    ))
+    {
+        if(gyroReadFailures < 255)
+        {
+            gyroReadFailures++;
+        }
+
+        gyroReadOk = false;
+
+        return;
+    }
+
+    gyroReadFailures = 0;
+    gyroReadOk = true;
 
     if(!qmi.getAccelerometer(
         accelX,
@@ -113,8 +197,15 @@ void IMU::update()
         accelZ
     ))
     {
+        if(accelReadFailures < 255)
+        {
+            accelReadFailures++;
+        }
+
         return;
     }
+
+    accelReadFailures = 0;
 
     accelMagnitude = sqrtf(
         (accelX * accelX) +
@@ -204,6 +295,43 @@ void IMU::update()
         0.0f,
         1.0f
     );
+}
+
+
+
+bool IMU::isSettling() const
+{
+    return
+        settleUntilMs != 0 &&
+        (int32_t)(millis() - settleUntilMs) < 0;
+}
+
+
+
+bool IMU::isYawValid() const
+{
+    return gyroReadFailures < 3 && !isSettling();
+}
+
+
+
+bool IMU::lastGyroReadOk() const
+{
+    return gyroReadOk && !isSettling();
+}
+
+
+
+bool IMU::isHealthy() const
+{
+    return gyroReadFailures < 25;
+}
+
+
+
+bool IMU::isAccelHealthy() const
+{
+    return accelReadFailures < 25;
 }
 
 

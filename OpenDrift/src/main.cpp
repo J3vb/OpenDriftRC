@@ -24,6 +24,7 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#include "Backgrounds.h"
 #include "../include/Version.h"
 
 LGFX lcd;
@@ -62,6 +63,8 @@ AuxChannelOutputs auxChannelOutputs;
 
 BlackboxLogger blackbox;
 
+Backgrounds backgrounds;
+
 unsigned long lastBlackboxLog = 0;
 
 bool blackboxStarted = false;
@@ -96,6 +99,7 @@ struct ControlTelemetry
     int servoCommand = 1500;
     bool steeringSignal = false;
     bool throttleSignal = false;
+    bool imuHealthy = true;
 };
 
 ControlTelemetry controlTelemetry;
@@ -153,17 +157,34 @@ static constexpr int CRSF_THROTTLE_NEUTRAL_BAND_US = 50;
 
 bool pin18ModeConfigured = false;
 
-bool pin18ThrottleOutputMode = false;
+volatile bool pin18ThrottleOutputMode = false;
 
-bool throttleOutputActive = false;
+volatile bool throttleOutputActive = false;
 
 #if defined(OPENDRIFT_INPUT_CRSF)
-bool crsfThrottleArmed = false;
+// Armed by the loop after the neutral hold, disarmed by the control task
+// the moment the link drops, so a blocked loop cannot leave the ESC armed
+// across a link loss.
+volatile bool crsfThrottleArmed = false;
 bool lastCrsfSignal = false;
-uint32_t crsfThrottleNeutralSinceMs = 0;
+volatile uint32_t crsfThrottleNeutralSinceMs = 0;
 volatile bool crsfThrottleSignalSnapshot = false;
 volatile int crsfThrottlePulseSnapshot = 1500;
+volatile bool crsfThrottleOutputArmed = false;
 #endif
+
+volatile bool gyroCalibrationRequested = false;
+
+
+void requestGyroCalibration()
+{
+    gyroCalibrationRequested = true;
+}
+
+void requestUiRefresh()
+{
+    ui.requestRefresh();
+}
 
 const char* password = "opendrift";
 const char* hostname = "opendrift";
@@ -600,14 +621,10 @@ void updateCrsfThrottleOutput(
 {
     if(!signalValid)
     {
-        if(throttleOutputActive)
-        {
-            // Active neutral is deterministic and does not depend on the
-            // receiver or ESC having matching failsafe configuration.
-            throttleOutput.writeMicroseconds(1500);
-        }
-
+        // The control task writes active neutral. It is deterministic and does
+        // not depend on the receiver or ESC having matching failsafe setup.
         crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
         crsfThrottleNeutralSinceMs = 0;
 
         return;
@@ -617,28 +634,31 @@ void updateCrsfThrottleOutput(
         abs(throttlePulse - 1500) <=
         CRSF_THROTTLE_NEUTRAL_BAND_US;
 
-    if(!crsfThrottleArmed)
+    // The control task clears both flags on link loss. A clear that lands
+    // between the two stores below leaves them split, so either one being
+    // down sends the output back through the neutral hold.
+    if(!crsfThrottleArmed || !crsfThrottleOutputArmed)
     {
         if(!throttleNeutral)
         {
             crsfThrottleNeutralSinceMs = 0;
-
-            if(throttleOutputActive)
-            {
-                throttleOutput.writeMicroseconds(1500);
-            }
+            crsfThrottleOutputArmed = false;
 
             return;
         }
 
-        if(crsfThrottleNeutralSinceMs == 0)
+        // One read: the control task can zero this between two reads on a
+        // link loss, and a zero must restart the hold, not satisfy it.
+        uint32_t neutralSince = crsfThrottleNeutralSinceMs;
+
+        if(neutralSince == 0)
         {
             crsfThrottleNeutralSinceMs = millis();
             return;
         }
 
         if(
-            millis() - crsfThrottleNeutralSinceMs <
+            millis() - neutralSince <
             CRSF_THROTTLE_NEUTRAL_MS
         )
         {
@@ -669,31 +689,25 @@ void updateCrsfThrottleOutput(
             return;
         }
 
+        crsfThrottleOutputArmed = true;
+
         Serial.println(
             "CRSF throttle output armed after neutral hold"
         );
     }
-
-    throttleOutput.writeMicroseconds(
-        constrain(
-            throttlePulse,
-            1000,
-            2000
-        )
-    );
 }
 #endif
 
 int mapSteeringPulse(
     int pulse,
-    Settings& settings
+    const Settings::SteeringCalibration& calibration
 )
 {
-    if(settings.isSteeringCalibrated())
+    if(calibration.calibrated)
     {
-        int left = settings.getSteeringCapturedInputPulse(0);
-        int center = settings.getSteeringCapturedInputPulse(1);
-        int right = settings.getSteeringCapturedInputPulse(2);
+        int left = calibration.inputMin;
+        int center = calibration.inputCenter;
+        int right = calibration.inputMax;
         int leftDelta = left - center;
         int rightDelta = right - center;
 
@@ -884,25 +898,72 @@ void runControlIteration()
         settings.getGyroHuntStrength()
     );
 
-    if(i2cBusMutex != nullptr)
-    {
+    static uint8_t i2cMisses = 0;
+    static float lastYaw = 0.0f;
+
+    // A stuck bus must cost one tick, not the whole control period.
+    bool i2cReady =
+        i2cBusMutex == nullptr ||
         xSemaphoreTake(
             i2cBusMutex,
-            portMAX_DELAY
-        );
-    }
+            pdMS_TO_TICKS(2)
+        ) == pdTRUE;
 
-    imu.setGyroLpfMode(
-        settings.getGyroLpfMode()
-    );
-
-    imu.update();
-
-    if(i2cBusMutex != nullptr)
+    if(i2cReady)
     {
-        xSemaphoreGive(
-            i2cBusMutex
+        i2cMisses = 0;
+
+        imu.setGyroLpfMode(
+            settings.getGyroLpfMode()
         );
+
+        imu.update();
+
+        if(
+            gyroCalibrationRequested &&
+            !gyro.isCalibrating()
+        )
+        {
+            gyro.startCalibration(
+                controlLoopHz / 2
+            );
+
+            gyroCalibrationRequested = false;
+        }
+
+        // A failed read repeats the previous sample. The window must only
+        // contain fresh samples, so one miss rejects it.
+        if(
+            gyro.isCalibrating() &&
+            (
+                !imu.isYawValid() ||
+                !imu.lastGyroReadOk()
+            )
+        )
+        {
+            gyro.abortCalibration();
+        }
+
+        if(i2cBusMutex != nullptr)
+        {
+            xSemaphoreGive(
+                i2cBusMutex
+            );
+        }
+    }
+    else
+    {
+        if(i2cMisses < 255)
+        {
+            i2cMisses++;
+        }
+
+        // The window has no fresh sample this tick, so it cannot complete
+        // honestly.
+        if(gyro.isCalibrating())
+        {
+            gyro.abortCalibration();
+        }
     }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
@@ -918,29 +979,76 @@ void runControlIteration()
         ? throttleRadio.getPulseWidth()
         : 1500;
 
+    Settings::SteeringCalibration calibration;
+
+    settings.getSteeringCalibration(
+        calibration
+    );
+
     int steeringCommand = 1500;
+
+    // The controller measures driver activity on the normalized command so
+    // Radio Steering Travel cannot make the driver look calmer or busier.
+    int driverCommand = 1500;
 
     if(steeringSignal)
     {
-        steeringCommand =
+        driverCommand =
             mapSteeringPulse(
                 steeringRadio.getPulseWidth(),
-                settings
+                calibration
             );
 
         steeringCommand =
             applyRadioSteeringTravel(
-                steeringCommand,
+                driverCommand,
                 settings
             );
     }
-    float yaw =
-        imu.getYawRate();
+    bool imuHealthy =
+        imu.isHealthy();
+
+    float yaw = 0.0f;
+
+    if(i2cReady)
+    {
+        yaw =
+            imu.isYawValid()
+            ? imu.getYawRate()
+            : 0.0f;
+
+        lastYaw = yaw;
+    }
+    else if(i2cMisses < 3)
+    {
+        yaw = lastYaw;
+    }
+
+    // The controller is odd-symmetric in yaw, so reversing at the input keeps
+    // the logged yaw and its correction in the same frame. The stored bias
+    // lives in that frame too, so a toggle flips it along.
+    static bool lastGyroReverse =
+        settings.getGyroReverse();
+
+    bool gyroReverse =
+        settings.getGyroReverse();
+
+    if(gyroReverse != lastGyroReverse)
+    {
+        gyro.reverseYawFrame();
+
+        lastGyroReverse = gyroReverse;
+    }
+
+    float controllerYaw =
+        gyroReverse
+        ? -yaw
+        : yaw;
 
     int gyroCorrection =
         gyro.update(
-            yaw,
-            steeringCommand,
+            controllerYaw,
+            driverCommand,
             steeringSignal,
             throttlePulse,
             throttleSignal
@@ -948,14 +1056,6 @@ void runControlIteration()
 
     int requestedGyroCorrection =
         gyro.getRequestedCorrection();
-
-    if(settings.getGyroReverse())
-    {
-        gyroCorrection =
-            -gyroCorrection;
-        requestedGyroCorrection =
-            -requestedGyroCorrection;
-    }
 
     int limitedGyroCorrection = gyroCorrection;
     int appliedGyroCorrection = 0;
@@ -988,14 +1088,18 @@ void runControlIteration()
             settings.getServoReverse(),
             settings.getServoTravel(),
             settings.getServoQuiet(),
-            settings.isSteeringCalibrated(),
-            settings.getSteeringMin(),
-            settings.getSteeringCenter(),
-            settings.getSteeringMax()
+            calibration.calibrated,
+            calibration.min,
+            calibration.center,
+            calibration.max
         );
 
         steeringServo.writeMicroseconds(
             servoCommand
+        );
+
+        steeringServo.noteCommandPulse(
+            steeringCommand
         );
 
         servoCommand = steeringServo.getPosition();
@@ -1007,6 +1111,12 @@ void runControlIteration()
         // Do not hold the last steering command after a receiver loss.
         steeringServo.center();
         servoCommand = steeringServo.getPosition();
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        // The loop normally does this, but it may be blocked in a long web
+        // transfer; the accessory outputs must still drop to neutral.
+        auxChannelOutputs.writeFailsafe();
+        #endif
     }
 
     lastCrsfSignal = steeringSignal;
@@ -1015,11 +1125,60 @@ void runControlIteration()
     // dynamic LEDC allocation must not run inside this high-priority task.
     crsfThrottlePulseSnapshot = throttlePulse;
     crsfThrottleSignalSnapshot = throttleSignal;
+
+    // Disarm here, not only in the loop: a loop blocked in a long web
+    // handler would otherwise miss a short link loss and hand the
+    // receiver's throttle straight to the ESC when the link returns. The
+    // loop re-runs the neutral hold before it arms again.
+    if(!throttleSignal)
+    {
+        crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
+        crsfThrottleNeutralSinceMs = 0;
+    }
+
+    // The loop may detach the ESC between these checks. writeMicroseconds
+    // returns early when inactive and a stray LEDC write is harmless.
+    // Both arming flags are required: the loop stores them one after the
+    // other, so a link loss that lands between the two stores must not
+    // leave the output armed on the next frame.
+    if(throttleOutputActive)
+    {
+        throttleOutput.writeMicroseconds(
+            (
+                !throttleSignal ||
+                !crsfThrottleArmed ||
+                !crsfThrottleOutputArmed
+            )
+            ? 1500
+            : constrain(
+                throttlePulse,
+                1000,
+                2000
+            )
+        );
+    }
+    #else
+    // The loop may detach the ESC between these checks. writeMicroseconds
+    // returns early when inactive and a stray LEDC write is harmless.
+    // Without a signal the pin holds neutral until the loop removes the
+    // PWM, so a blocked loop cannot leave the last throttle pulse running.
+    if(
+        pin18ThrottleOutputMode &&
+        throttleOutputActive
+    )
+    {
+        throttleOutput.writeMicroseconds(
+            throttleSignal
+            ? throttleRadio.getPulseWidth()
+            : 1500
+        );
+    }
     #endif
 
     ControlTelemetry nextTelemetry;
 
-    nextTelemetry.yaw = yaw;
+    nextTelemetry.yaw = controllerYaw;
     nextTelemetry.requestedGyroCorrection =
         requestedGyroCorrection;
     nextTelemetry.limitedGyroCorrection =
@@ -1036,6 +1195,8 @@ void runControlIteration()
         steeringSignal;
     nextTelemetry.throttleSignal =
         throttleSignal;
+    nextTelemetry.imuHealthy =
+        imuHealthy;
 
     portENTER_CRITICAL(
         &controlTelemetryMux
@@ -1082,6 +1243,17 @@ void controlTask(void* parameter)
     while(true)
     {
         runControlIteration();
+
+        // After a stall, resume from now instead of replaying the missed
+        // wake times as a burst of back-to-back iterations.
+        if(
+            xTaskGetTickCount() - lastWake >
+            period * 5
+        )
+        {
+            lastWake =
+                xTaskGetTickCount();
+        }
 
         vTaskDelayUntil(
             &lastWake,
@@ -1267,14 +1439,86 @@ void setup()
     bool settingsOk =
         settings.begin();
 
+    if(!settingsOk)
+    {
+        bootConsole.log(
+            "nvs: settings store unavailable",
+            "[WARN]",
+            TFT_YELLOW
+        );
+    }
+
     controlLoopHz = settings.getControlLoopHz();
     controlLoopPeriodMs = 1000 / controlLoopHz;
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(displayOk)
+    {
+        lcd.setBrightness(
+            opendriftBrightnessLevel(
+                settings.getDisplayBrightness()
+            )
+        );
+    }
+    #endif
 
     bootConsole.log(
         "nvs: mounted OpenDrift settings store",
         settingsOk ? "[ OK ]" : "[WARN]",
         settingsOk ? TFT_GREEN : TFT_YELLOW
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    //-------------------
+    // BACKGROUND STORAGE
+    //-------------------
+
+    // Mounted before the control task exists: the one-time format of the
+    // ffat partition on the first boot takes a few seconds and must never
+    // overlap with steering.
+    bootConsole.log(
+        "ffat: mounting background storage"
+    );
+
+    bool backgroundsOk =
+        backgrounds.begin();
+
+    char backgroundMessage[64];
+
+    if(!backgroundsOk)
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: background storage unavailable"
+        );
+    }
+    else if(backgrounds.wasFormatted())
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: formatted, %u KB free for backgrounds",
+            (unsigned int)(backgrounds.getFreeBytes() / 1024)
+        );
+    }
+    else
+    {
+        snprintf(
+            backgroundMessage,
+            sizeof(backgroundMessage),
+            "ffat: %u backgrounds, %u KB free",
+            (unsigned int)backgrounds.getCount(),
+            (unsigned int)(backgrounds.getFreeBytes() / 1024)
+        );
+    }
+
+    bootConsole.log(
+        backgroundMessage,
+        backgroundsOk ? "[ OK ]" : "[WARN]",
+        backgroundsOk ? TFT_GREEN : TFT_YELLOW
+    );
+    #endif
 
     //-------------------
     // IMU
@@ -1328,11 +1572,23 @@ void setup()
         esp_restart();
     }
 
+    // The 50 ms default lets one stuck slave hold the bus for a dozen control
+    // periods. Wire keeps this across a later begin().
+    Wire.setTimeOut(5);
+
     Serial.println("IMU OK");
 
     bootConsole.log(
         "qmi8658: 6-axis inertial sensor ready"
     );
+
+    // Run the boot bias window at the filter the controller will use, so
+    // the stillness check and a later CAL see the same noise level.
+    imu.setGyroLpfMode(
+        settings.getGyroLpfMode()
+    );
+
+    delay(80);
 
     //-------------------
     // TOUCH
@@ -1657,18 +1913,73 @@ void setup()
         TFT_CYAN
     );
 
-    delay(2000);
+    delay(1500);
 
-    imu.update();
+    for(uint8_t attempt = 1; attempt <= 2; attempt++)
+    {
+        if(attempt > 1)
+        {
+            delay(500);
+        }
 
-    gyro.calibrate(
-        imu.getYawRate()
+        gyro.startCalibration(
+            controlLoopHz / 2
+        );
+
+        while(gyro.isCalibrating())
+        {
+            imu.update();
+
+            if(
+                !imu.isYawValid() ||
+                !imu.lastGyroReadOk()
+            )
+            {
+                gyro.abortCalibration();
+                break;
+            }
+
+            // Same frame as the control task: Gyro Reverse negates the
+            // yaw before the controller sees it, so the bias must be
+            // measured on the negated signal too.
+            gyro.update(
+                settings.getGyroReverse()
+                ? -imu.getYawRate()
+                : imu.getYawRate(),
+                1500,
+                false,
+                1500,
+                false
+            );
+
+            delay(controlLoopPeriodMs);
+        }
+
+        if(
+            gyro.getCalibrationState() ==
+            GyroController::CALIBRATION_OK
+        )
+        {
+            break;
+        }
+    }
+
+    bool gyroBiasOk =
+        gyro.getCalibrationState() ==
+        GyroController::CALIBRATION_OK;
+
+    Serial.println(
+        gyroBiasOk
+        ? "Gyro calibrated"
+        : "Gyro bias rejected; zero offset retained"
     );
 
-    Serial.println("Gyro calibrated");
-
     bootConsole.log(
-        "qmi8658: gyro bias calibration complete"
+        gyroBiasOk
+        ? "qmi8658: gyro bias calibration complete"
+        : "qmi8658: gyro bias rejected (movement), using zero offset",
+        gyroBiasOk ? "[ OK ]" : "[WARN]",
+        gyroBiasOk ? TFT_GREEN : TFT_YELLOW
     );
 
     delay(500);
@@ -1743,7 +2054,10 @@ void setup()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi,
+            steeringServo,
+            backgrounds
         );
 
         bootConsole.log(
@@ -1784,6 +2098,12 @@ void setup()
 
     bootConsole.end();
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    ui.setBackgroundStore(
+        backgrounds
+    );
+    #endif
+
     ui.begin(
         &lcd,
         gyro,
@@ -1794,16 +2114,39 @@ void setup()
         steeringServo
     );
 
-    #if defined(OPENDRIFT_INPUT_CRSF)
+    ui.setCalibrationCallback(
+        requestGyroCalibration
+    );
+
+    // Every build has a throttle input; without this the round Radio page
+    // would show the gain channel under THR.
     ui.setThrottleRadio(
         throttleRadio
     );
-    #endif
+
+    webConfig.setChangeCallback(
+        requestUiRefresh
+    );
 
     touch.update();
 
     i2cBusMutex =
         xSemaphoreCreateMutex();
+
+    if(i2cBusMutex == nullptr)
+    {
+        Serial.println("I2C mutex allocation failed, restarting");
+
+        bootConsole.log(
+            "freertos: i2c mutex allocation failed; safe reboot",
+            "[FAIL]",
+            TFT_RED
+        );
+
+        Serial.flush();
+        delay(1500);
+        esp_restart();
+    }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
     // Start the live receiver only after every boot-time peripheral and shared
@@ -1857,7 +2200,19 @@ void setup()
     }
     else
     {
+        // Without the control task nothing drives the servo. Say so on
+        // the boot screen and reboot rather than sit there looking healthy.
         Serial.println("Controller: task start failed");
+
+        bootConsole.log(
+            "opendrift-control: task start failed; safe reboot",
+            "[FAIL]",
+            TFT_RED
+        );
+
+        Serial.flush();
+        delay(1500);
+        esp_restart();
     }
 }
 
@@ -1891,7 +2246,7 @@ void loop()
             (unsigned long)crsf.getFrameAgeMs(),
             crsf.getUplinkLinkQuality(),
             crsf.getUplinkSnr(),
-            crsfThrottleArmed ? "ARMED" : "LOCKED"
+            (crsfThrottleArmed && crsfThrottleOutputArmed) ? "ARMED" : "LOCKED"
         );
         #endif
     }
@@ -1942,11 +2297,19 @@ void loop()
             steeringRadio,
             gainRadio,
             throttleRadio,
-            blackbox
+            blackbox,
+            wifi,
+            steeringServo,
+            backgrounds
         );
     }
 
-    if(wifi.isEnabled())
+    // A requested restart must still fire if the access point drops
+    // inside the short delay between the response and the reset.
+    if(
+        wifi.isEnabled() ||
+        webConfig.isRestartPending()
+    )
     {
         webConfig.update();
     }
@@ -1992,13 +2355,6 @@ void loop()
                     SHARED_GAIN_THROTTLE_PIN
                 );
         }
-
-        if(throttleOutputActive)
-        {
-            throttleOutput.writeMicroseconds(
-                throttleRadio.getPulseWidth()
-            );
-        }
     }
     else if(
         pin18ThrottleOutputMode &&
@@ -2042,6 +2398,10 @@ void loop()
 
     portEXIT_CRITICAL(
         &controlTelemetryMux
+    );
+
+    ui.setImuHealthy(
+        telemetry.imuHealthy
     );
 
     //-------------------
