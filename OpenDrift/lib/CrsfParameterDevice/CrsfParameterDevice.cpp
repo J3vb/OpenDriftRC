@@ -8,7 +8,7 @@ namespace
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
         {"Saved Gain",        0,  600, 150, 2,   5, "x"},
-        {"Deadband",          0,  200,  20, 1,   1, "dps"},
+        {"Deadband",          0, 1000,  20, 1,   1, "dps"},
         {"Max Correction",    0,  100,  25, 0,   1, "%"},
         {"Smoothing",         0,  100,  10, 2,   1, ""},
         {"Drift Memory",      0, 2000,   0, 2,   1, ""},
@@ -19,7 +19,7 @@ namespace
         {"Prediction",        0,  100,   0, 0,   1, "%"},
         {"Servo Quiet",       0,   50,   0, 0,   1, "us"},
         {"Steering Travel",   0,  100, 100, 0,   1, "%"},
-        {"Servo Travel",     10,  100, 100, 0,   1, "%"},
+        {"Servo Travel",      1,  100, 100, 0,   1, "%"},
         {"Servo Center",   1000, 2000,1500, 0,   1, "us"}
     };
 

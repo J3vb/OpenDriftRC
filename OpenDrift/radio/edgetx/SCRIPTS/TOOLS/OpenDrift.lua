@@ -8,7 +8,7 @@ local fields = {
   {35, "Live Gain",        0,  600,   5, 2, false, false, false, true},
   {33, "CH3 Gain Min",     0,  600,   5, 2 },
   {34, "CH3 Gain Max",     0,  600,   5, 2 },
-  { 2, "Deadband",         0,  200,   1, 1 },
+  { 2, "Deadband",         0, 1000,   1, 1 },
   { 3, "Max Corr %",       0,  100,   1, 0 },
   { 4, "Smoothing",        0,  100,   1, 2 },
   {32, "Gyro LPF",         0,    2,   1, 0, true, false, false, false, false, true},
@@ -26,7 +26,7 @@ local fields = {
   {29, "Capture Center",   0,    1,   1, 0, true, false, false, false, true},
   {30, "Capture Right",    0,    1,   1, 0, true, false, false, false, true},
   {31, "Reset Cal",        0,    1,   1, 0, true, false, false, false, true},
-  {13, "Servo Travel",    10,  100,   1, 0 },
+  {13, "Servo Travel",     1,  100,   1, 0 },
   {14, "Servo Center",  1000, 2000,   1, 0 },
   {15, "Servo Reverse",    0,    1,   1, 0, true},
   {16, "Gyro Reverse",     0,    1,   1, 0, true},
@@ -264,6 +264,8 @@ local function run(event)
   lcd.drawText(127, 0, linkText, RIGHT + INVERS)
   if fields[selected][11] then
     lcd.drawText(1, 10, "HOLD POSITION + ENTER", 0)
+  elseif fields[selected][1] == 25 then
+    lcd.drawText(1, 10, "REBOOT TO APPLY", 0)
   else
     local calibration = findField(27)
     local calibrationText = "END: ---"

@@ -596,13 +596,13 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card' data-tab='tune'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
     html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01", false, "0", "1");
-    html += F("<label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
+    html += F("<div><label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
     if(settings->getGyroLpfMode() == 0) html += F(" selected");
     html += F(">24 Hz - original</option><option value='1'");
     if(settings->getGyroLpfMode() == 1) html += F(" selected");
     html += F(">120 Hz - low latency</option><option value='2'");
     if(settings->getGyroLpfMode() == 2) html += F(" selected");
-    html += F(">Off - raw bandwidth</option></select>");
+    html += F(">Off - raw bandwidth</option></select></div>");
     html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1", false, "0", "100");
     html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1", false, "0", "100");
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
@@ -615,8 +615,8 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card' data-tab='tune'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
     html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1", false, "0", "100");
     html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1", false, "0", "100");
-    html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01");
-    html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1");
+    html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01", false, "0", "20");
+    html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1", false, "0", "500");
     html += F("</div></div>");
 
     bool servoGeometryLocked =
@@ -634,7 +634,7 @@ void WebConfigurator::handleRoot()
     html += F("<div class='row'>");
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked, "1000", "2000");
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked, "1", "100");
-    html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
+    html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1", false, "0", "50");
     html += F("</div>");
 
     if(servoGeometryLocked)
@@ -738,17 +738,17 @@ void WebConfigurator::handleRoot()
     html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
-    html += F("<div class='card' data-tab='radio'><h2>Gain Channel Calibration</h2><div class='row'>");
+    html += F("<div class='card' data-tab='radio'><h2>Gain Channel Calibration</h2>");
     #if defined(OPENDRIFT_INPUT_CRSF)
     #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
-    html += F("Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.");
+    html += F("<p class='sub'>Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.</p>");
     #elif defined(OPENDRIFT_AMOLED_V2)
-    html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.");
+    html += F("<p class='sub'>CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.</p>");
     #else
-    html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold.");
+    html += F("<p class='sub'>CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold.</p>");
     #endif
-    html += F("</div>");
     #else
+    html += F("<div class='row'>");
     html += input("Gain low", "gainMin", String(settings->getGainMin()), "number", "1", false, "800", "2200");
     html += input("Gain high", "gainMax", String(settings->getGainMax()), "number", "1", false, "800", "2200");
     html += F("</div>");
@@ -840,7 +840,7 @@ void WebConfigurator::handleRoot()
         html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     }
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()), "number", "1", false, "0", "3600000");
-    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off.</p>");
+    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off, and anything from 1 to 4999 ms is treated as 5000 ms.</p>");
     html += F("</div>");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -864,7 +864,7 @@ void WebConfigurator::handleRoot()
 
     html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
     html += checkbox("Flip the screen 180 degrees (board mounted upside down)", "displayFlip", settings->getDisplayFlip());
-    html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
+    html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1", false, "0", "600");
     html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p>");
 
     html += F("<label>Text colour</label><select name='themeText'><option value='0'");
@@ -1041,7 +1041,17 @@ void WebConfigurator::handleRoot()
     html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
     html += F("</div>");
 
-    html += F("</main><script>var liveBusy=false;function updateLive(){if(liveBusy){return;}liveBusy=true;fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.command;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{document.getElementById('servoPulse').textContent='--';document.getElementById('steeringSignal').textContent='offline';}).finally(()=>{liveBusy=false;});}updateLive();setInterval(updateLive,500);");
+    // Tabs hide cards in place, so form membership and the form= buttons
+    // are untouched. The active tab survives the save redirect through
+    // localStorage; the unsaved dot follows any input inside the save form.
+    // It runs in its own script ahead of the live poller, so a failure
+    // down there can never leave the page with every card hidden.
+    html += F("</main><script>(function(){var tabs=document.querySelectorAll('nav.tabs button'),cards=document.querySelectorAll('.card[data-tab]');function show(n,keep){tabs.forEach(function(b){b.classList.toggle('active',b.dataset.tab===n)});cards.forEach(function(c){c.classList.toggle('on',c.dataset.tab===n)});try{localStorage.setItem('odTab',n)}catch(e){}if(keep){return}if(location.hash!=='#'+n){history.replaceState(null,'','#'+n)}window.scrollTo(0,0)}");
+    html += F("tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.tab)})});var names=['tune','servo','radio','profiles','board'];function known(n){return names.indexOf(n)>=0}var st=(location.hash||'').slice(1),el=st?document.getElementById(st):null,card=el?el.closest('.card[data-tab]'):null;if(card){show(card.dataset.tab,true);el.scrollIntoView()}else{if(!known(st)){st='';try{st=localStorage.getItem('odTab')||''}catch(e){}}if(!known(st)){st='tune'}show(st)}");
+    html += F("var f=document.getElementById('saveForm'),dirty=false;function setDirty(v){dirty=v;document.body.classList.toggle('is-dirty',v)}if(f){f.addEventListener('input',function(){setDirty(true)});f.addEventListener('change',function(){setDirty(true)});f.addEventListener('submit',function(){setDirty(false)})}window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue=''}})})();");
+    html += F("</script>");
+
+    html += F("<script>var liveBusy=false;function updateLive(){if(liveBusy){return;}liveBusy=true;fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.command;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{document.getElementById('servoPulse').textContent='--';document.getElementById('steeringSignal').textContent='offline';}).finally(()=>{liveBusy=false;});}updateLive();setInterval(updateLive,500);");
 
     // The browser parses the JSON and posts plain form fields, so the board
     // needs no JSON parser and every value goes through the same clamps as
@@ -1055,12 +1065,6 @@ void WebConfigurator::handleRoot()
     html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);try{var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}}catch(e){st.textContent='This image could not be converted in the browser. Try a smaller photo.';return;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
     #endif
 
-    // Tabs hide cards in place, so form membership and the form= buttons
-    // are untouched. The active tab survives the save redirect through
-    // localStorage; the unsaved dot follows any input inside the save form.
-    html += F("(function(){var tabs=document.querySelectorAll('nav.tabs button'),cards=document.querySelectorAll('.card[data-tab]');function show(n,keep){tabs.forEach(function(b){b.classList.toggle('active',b.dataset.tab===n)});cards.forEach(function(c){c.classList.toggle('on',c.dataset.tab===n)});try{localStorage.setItem('odTab',n)}catch(e){}if(keep){return}if(location.hash!=='#'+n){history.replaceState(null,'','#'+n)}window.scrollTo(0,0)}");
-    html += F("tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.tab)})});var st=(location.hash||'').slice(1),el=st?document.getElementById(st):null,card=el?el.closest('.card[data-tab]'):null;if(card){show(card.dataset.tab,true);el.scrollIntoView()}else{if(!st){try{st=localStorage.getItem('odTab')||''}catch(e){}}if(!document.querySelector('nav.tabs button[data-tab=\"'+st+'\"]')){st='tune'}show(st)}");
-    html += F("var f=document.getElementById('saveForm'),dirty=false;function setDirty(v){dirty=v;document.body.classList.toggle('is-dirty',v)}if(f){f.addEventListener('input',function(){setDirty(true)});f.addEventListener('change',function(){setDirty(true)});f.addEventListener('submit',function(){setDirty(false)})}window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue=''}})})();");
     html += F("</script></body></html>");
 
     // A cached copy of this page carries stale profile rows and stale
@@ -2415,7 +2419,7 @@ void WebConfigurator::handleEndpointCapture()
     {
         server.sendHeader(
             "Location",
-            "/?notice=endpoints-locked#endpoints"
+            "/?notice=endpoints-locked"
         );
 
         server.send(
