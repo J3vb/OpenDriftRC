@@ -214,8 +214,11 @@ the retired alpha-era tuning fields:
 The stage-one onboard logger stores fixed-size binary records entirely in a
 4 MB circular PSRAM buffer. It performs no internal-flash or filesystem writes
 while driving. At the current 20 Hz sample rate, the complete telemetry set
-retains approximately the newest 18 minutes of a run. Once full, the oldest
-records are overwritten so the most recent behavior remains available.
+retains about the newest 14 minutes of a run: the 244-byte record leaves room
+for 17189 samples in 4 MB. The buffer is allocated 1 MB smaller at a time when
+less PSRAM is free, which shortens the retained window in proportion. Once
+full, the oldest records are overwritten so the most recent behavior remains
+available.
 
 Use **Download CSV** in the web configurator before removing power. CSV text is
 generated from the binary records only during the download. The buffer is

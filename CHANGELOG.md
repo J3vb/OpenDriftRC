@@ -23,6 +23,33 @@
 
 ### Fixes
 
+- A rejected endpoint capture no longer overwrites the stored stop, and a
+  partial capture no longer becomes a live endpoint after a reboot.
+- Servo center, travel and reverse keep the fallback endpoints in sync.
+- Hand-typed endpoints are applied as one set, with a notice on the page.
+- Web checkboxes only apply when they were changed on that page, so a stale
+  page can no longer revert gyro reverse, WiFi, blackbox, display flip or
+  throttle output.
+- Activating or deleting a profile verifies the row it was asked for.
+- An endpoint capture from the EdgeTX tool is refused while the endpoints are
+  already calibrated.
+- IMU startup reports configuration failures, and a disabled gyro is always
+  re-enabled.
+- The saved gyro LPF mode is applied before the boot bias window.
+- The auxiliary outputs fail safe from the control task.
+- The round display's Radio page THR row shows the throttle channel.
+- Display pages redraw after a change made in the web configurator.
+- The Endpoints page follows the steering signal.
+- The dim-timeout minus button steps down from a value set on the web.
+- Long profile names and hints fit on the AMOLED Profiles page.
+- Dots, titles and version text fit inside the round display.
+- Web page: the gyro LPF label is paired with its control, the CRSF pin text
+  is correct, field ranges match the firmware, the notice is visible, and the
+  settings hash is validated.
+- The CRSF deadband and servo travel ranges match the web configurator.
+- Corrects the documentation: the AMOLED V2 CRSF target, the CRSF throttle
+  failsafe, the Response page controls, what a profile stores, the GPIO 18
+  mode pin on V2, blackbox retention, and the web settings list.
 - Legacy profile migration no longer drops profiles or shifts the active
   profile index.
 - The ESC neutral failsafe now runs in the control task, so it cannot be
@@ -98,6 +125,8 @@
 
 ### Known limitations
 
+- Endpoint capture assumes Radio Steering Travel at 100; a reduced travel is
+  applied on top of the captured stops afterwards.
 - Throttle prediction reacts to the size of a throttle change in either
   direction; brake and throttle stabs count the same. This is deliberate and
   keeps reversed-throttle ESCs working.

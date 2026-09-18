@@ -75,8 +75,9 @@ outputs; use external power and a common ground for lights and controllers.
 - Signal loss is also declared once link statistics have been received and
   report an uplink link quality of 0, even while channel frames keep arriving.
 - Steering centers when the link is lost.
-- GPIO 16 emits no throttle PWM until a valid link has held throttle within
-  50 microseconds of center for 500 ms.
+- GPIO 16 holds a continuous 1500 microsecond neutral pulse from power-up.
+  Live throttle passes only after a valid link has held throttle within
+  50 microseconds of center for 500 ms; until then the pin stays at neutral.
 - If the link is lost, the full build commands neutral throttle immediately.
   Reconnection requires another neutral hold before live throttle passes.
 
@@ -101,7 +102,13 @@ and writes the controller settings over full-duplex CRSF:
 
 Writes are acknowledged over CRSF, applied live, saved through the normal
 delayed settings writer, and request an immediate redraw of the current gyro
-screen.
+screen. Some writes are refused instead:
+
+- Servo Center and Servo Travel are refused while the physical endpoint
+  calibration is active. Use Reset Cal first.
+- The three capture actions are refused while the endpoints are already
+  calibrated. Reset Cal first.
+- Servo Rate is stored immediately but only takes effect after a restart.
 
 The same tool also exposes the auxiliary output map. AMOLED V1 can assign
 GPIO 1–8 to CRSF channel 1–16 or Off. AMOLED V2 can assign GPIO 3–8; GPIO 1/2
