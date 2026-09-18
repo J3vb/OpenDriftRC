@@ -88,7 +88,8 @@ private:
         uint8_t parameter
     );
 
-    void setScaledValue(
+    // Returns false when the write changed nothing (read-only or refused).
+    bool setScaledValue(
         uint8_t parameter,
         int32_t value
     );

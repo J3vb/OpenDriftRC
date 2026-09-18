@@ -39,8 +39,20 @@ public:
     // point drops in the meantime.
     bool isRestartPending();
 
+    // Called after a handler changed settings, so the display can redraw
+    // the page it is showing.
+    void setChangeCallback(void (*callback)());
+
 
 private:
+
+    void (*changeCallback)() = nullptr;
+    void notifyChanged();
+    bool profileRowMatches(int index);
+
+    // True when a checkbox was changed on the page: the posted state
+    // differs from the rendered snapshot, or the snapshot is missing.
+    bool checkboxChanged(const char* name, bool& posted);
 
     WebServer server;
 

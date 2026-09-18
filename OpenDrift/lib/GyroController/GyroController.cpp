@@ -184,6 +184,10 @@ void GyroController::abortCalibration()
     calibrationSum = 0.0f;
 
     calibrationState = CALIBRATION_REJECTED;
+
+    // The per-tick references froze for the length of the window; reseed
+    // them so the next tick does not difference a stale sample.
+    resetDynamicState();
 }
 
 
@@ -287,6 +291,8 @@ int GyroController::update(
             else
             {
                 calibrationState = CALIBRATION_REJECTED;
+
+                resetDynamicState();
             }
         }
 

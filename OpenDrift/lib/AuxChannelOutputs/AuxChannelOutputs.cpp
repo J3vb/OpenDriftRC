@@ -138,6 +138,20 @@ void AuxChannelOutputs::update(
 }
 
 
+void AuxChannelOutputs::writeFailsafe()
+{
+    // Called from the control task on link loss. The loop may be blocked
+    // in a long web transfer, so the failsafe cannot wait for it.
+    for(uint8_t slot = 0; slot < OUTPUT_COUNT; slot++)
+    {
+        if(attached[slot])
+        {
+            writeOutput(slot, AUX_FAILSAFE_PULSE_US);
+        }
+    }
+}
+
+
 bool AuxChannelOutputs::isPinAvailable(
     uint8_t gpio
 )

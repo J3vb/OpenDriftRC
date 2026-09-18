@@ -375,11 +375,10 @@ void CrsfParameterDevice::writeParameter(
         return;
     }
 
-    setScaledValue(parameter, value);
-
-    // Parameter 35 is a read-only mirror of the running gain. Writing it
-    // changes nothing, so it must not schedule a settings save either.
-    if(parameter != 35)
+    // Parameter 35 is a read-only mirror of the running gain, and servo
+    // center/travel are refused while endpoints are calibrated. Neither
+    // changed anything, so neither marks the settings as changed.
+    if(setScaledValue(parameter, value) && parameter != 35)
     {
         settingsChanged = true;
     }
@@ -473,7 +472,7 @@ int32_t CrsfParameterDevice::getScaledValue(
 }
 
 
-void CrsfParameterDevice::setScaledValue(
+bool CrsfParameterDevice::setScaledValue(
     uint8_t parameter,
     int32_t value
 )
@@ -509,8 +508,8 @@ void CrsfParameterDevice::setScaledValue(
         case 10: settings->setPredictionStrength(value); break;
         case 11: settings->setServoQuiet(value); break;
         case 12: settings->setRadioSteeringTravel(value); break;
-        case 13: settings->setServoTravel(value); break;
-        case 14: settings->setServoCenter(value); break;
+        case 13: return settings->setServoTravel(value);
+        case 14: return settings->setServoCenter(value);
         case 15: settings->setServoReverse(value != 0); break;
         case 16: settings->setGyroReverse(value != 0); break;
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -558,8 +557,11 @@ void CrsfParameterDevice::setScaledValue(
         case 28:
         case 29:
         case 30:
+            // Same gate as the web page: a capture while calibrated would
+            // only read the mapped stop back and drop the calibration.
             if(
                 value == 1 &&
+                !settings->isSteeringCalibrated() &&
                 steeringRadio != nullptr &&
                 steeringRadio->hasSignal() &&
                 steeringServo != nullptr
@@ -592,8 +594,10 @@ void CrsfParameterDevice::setScaledValue(
         case 35:
             // Read-only. It mirrors the gain the controller is running,
             // which channel 3 owns whenever it has a valid signal.
-            break;
+            return false;
     }
+
+    return true;
 }
 
 

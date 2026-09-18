@@ -181,6 +181,11 @@ void requestGyroCalibration()
     gyroCalibrationRequested = true;
 }
 
+void requestUiRefresh()
+{
+    ui.requestRefresh();
+}
+
 const char* password = "opendrift";
 const char* hostname = "opendrift";
 
@@ -642,14 +647,18 @@ void updateCrsfThrottleOutput(
             return;
         }
 
-        if(crsfThrottleNeutralSinceMs == 0)
+        // One read: the control task can zero this between two reads on a
+        // link loss, and a zero must restart the hold, not satisfy it.
+        uint32_t neutralSince = crsfThrottleNeutralSinceMs;
+
+        if(neutralSince == 0)
         {
             crsfThrottleNeutralSinceMs = millis();
             return;
         }
 
         if(
-            millis() - crsfThrottleNeutralSinceMs <
+            millis() - neutralSince <
             CRSF_THROTTLE_NEUTRAL_MS
         )
         {
@@ -1102,6 +1111,12 @@ void runControlIteration()
         // Do not hold the last steering command after a receiver loss.
         steeringServo.center();
         servoCommand = steeringServo.getPosition();
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        // The loop normally does this, but it may be blocked in a long web
+        // transfer; the accessory outputs must still drop to neutral.
+        auxChannelOutputs.writeFailsafe();
+        #endif
     }
 
     lastCrsfSignal = steeringSignal;
@@ -1566,6 +1581,14 @@ void setup()
     bootConsole.log(
         "qmi8658: 6-axis inertial sensor ready"
     );
+
+    // Run the boot bias window at the filter the controller will use, so
+    // the stillness check and a later CAL see the same noise level.
+    imu.setGyroLpfMode(
+        settings.getGyroLpfMode()
+    );
+
+    delay(80);
 
     //-------------------
     // TOUCH
@@ -2095,11 +2118,15 @@ void setup()
         requestGyroCalibration
     );
 
-    #if defined(OPENDRIFT_INPUT_CRSF)
+    // Every build has a throttle input; without this the round Radio page
+    // would show the gain channel under THR.
     ui.setThrottleRadio(
         throttleRadio
     );
-    #endif
+
+    webConfig.setChangeCallback(
+        requestUiRefresh
+    );
 
     touch.update();
 
@@ -2173,7 +2200,19 @@ void setup()
     }
     else
     {
+        // Without the control task nothing drives the servo. Say so on
+        // the boot screen and reboot rather than sit there looking healthy.
         Serial.println("Controller: task start failed");
+
+        bootConsole.log(
+            "opendrift-control: task start failed; safe reboot",
+            "[FAIL]",
+            TFT_RED
+        );
+
+        Serial.flush();
+        delay(1500);
+        esp_restart();
     }
 }
 

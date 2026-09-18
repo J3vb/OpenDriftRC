@@ -187,6 +187,10 @@ public:
         int inputPulse = 0
     );
     bool confirmStoredSteeringCalibration();
+    // Applies a complete hand-entered stop set as a calibration in one
+    // step. Returns false, changing nothing, when the set is not valid.
+    bool setStoredSteeringEndpoints(int min, int center, int max);
+    static bool steeringStopsValid(int min, int center, int max);
     void clearSteeringCalibration();
 
     int getRadioSteeringTravel();

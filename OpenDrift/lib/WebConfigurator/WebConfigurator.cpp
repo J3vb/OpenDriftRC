@@ -531,10 +531,14 @@ void WebConfigurator::handleRoot()
 
         html += F("<form method='post' action='/activate-profile'><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button type='submit'>Activate</button></form>");
 
         html += F("<form method='post' action='/delete-profile' onsubmit=\"return confirm('Delete this profile?')\"><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
     }
 
@@ -564,6 +568,21 @@ void WebConfigurator::handleRoot()
     if(server.arg("notice") == "endpoints-locked")
     {
         html += F("<div class='card'><p class='sub bad'>The endpoints are already calibrated. Reset the calibration before capturing a new stop, or type the pulse values by hand.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-invalid")
+    {
+        html += F("<div class='card'><p class='sub bad'>The endpoint values were not applied. Left and right must sit on opposite sides of center, at least 10 us away from it. The stored endpoints are unchanged.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-confirmed")
+    {
+        html += F("<div class='card'><p class='sub ok'>The typed endpoints are now the steering calibration. Servo center and travel are locked while it is active; use Reset on the Endpoints card to go back to the center/travel setup.</p></div>");
+    }
+
+    if(server.arg("notice") == "profiles-changed")
+    {
+        html += F("<div class='card'><p class='sub bad'>The profile list changed since that page was loaded, so nothing was activated or deleted. Check the list below and try again.</p></div>");
     }
 
     html += F("<div class='card' data-tab='tune'><h2>Drive &amp; Limits</h2><div class='row'>");
@@ -606,9 +625,6 @@ void WebConfigurator::handleRoot()
     html += F("<div class='card' data-tab='servo'><h2>Servo</h2>");
 
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
-    html += F("<input type='hidden' name='servoReverseWas' value='");
-    html += settings->getServoReverse() ? F("1") : F("0");
-    html += F("'>");
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
@@ -1047,6 +1063,13 @@ void WebConfigurator::handleRoot()
     html += F("var f=document.getElementById('saveForm'),dirty=false;function setDirty(v){dirty=v;document.body.classList.toggle('is-dirty',v)}if(f){f.addEventListener('input',function(){setDirty(true)});f.addEventListener('change',function(){setDirty(true)});f.addEventListener('submit',function(){setDirty(false)})}window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue=''}})})();");
     html += F("</script></body></html>");
 
+    // A cached copy of this page carries stale profile rows and stale
+    // checkbox snapshots, so Back must fetch it again.
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
     server.send(
         200,
         "text/html",
@@ -1147,9 +1170,14 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setGyroReverse(
-        server.hasArg("gyroReverse")
-    );
+    bool gyroReversePosted = false;
+
+    if(checkboxChanged("gyroReverse", gyroReversePosted))
+    {
+        settings->setGyroReverse(
+            gyroReversePosted
+        );
+    }
 
     settings->setGyroMaxCorrection(
         getIntArg(
@@ -1302,48 +1330,55 @@ void WebConfigurator::handleSave()
             requestedSteeringMax
         );
 
+    // The three stops are applied as one set. An invalid set changes
+    // nothing and is reported; a valid set on an uncalibrated board is
+    // reported too, because it locks servo center and travel.
+    const char* endpointNotice = nullptr;
+
     if(
         steeringMinEdited ||
         steeringCenterEdited ||
         steeringMaxEdited
     )
     {
-        if(steeringMinEdited)
-        {
-            settings->setSteeringMin(requestedSteeringMin);
-        }
+        bool wasCalibrated = settings->isSteeringCalibrated();
 
-        if(steeringCenterEdited)
-        {
-            settings->setSteeringCenter(requestedSteeringCenter);
-        }
+        int min =
+            steeringMinEdited
+            ? requestedSteeringMin
+            : settings->getSteeringMin();
 
-        if(steeringMaxEdited)
-        {
-            settings->setSteeringMax(requestedSteeringMax);
-        }
+        int center =
+            steeringCenterEdited
+            ? requestedSteeringCenter
+            : settings->getSteeringCenter();
 
-        settings->confirmStoredSteeringCalibration();
+        int max =
+            steeringMaxEdited
+            ? requestedSteeringMax
+            : settings->getSteeringMax();
+
+        if(!settings->setStoredSteeringEndpoints(min, center, max))
+        {
+            endpointNotice = "endpoints-invalid";
+        }
+        else if(!wasCalibrated)
+        {
+            endpointNotice = "endpoints-confirmed";
+        }
     }
 
     // After the endpoints: while calibrated, reverse swaps the stored left
     // and right stops, and the page posted them in their pre-swap layout.
     // Only a checkbox the user actually changed is applied, so a page left
     // open cannot undo a reverse change made on the display or the radio.
-    if(server.hasArg("servoReverseWas"))
+    bool servoReversePosted = false;
+
+    if(checkboxChanged("servoReverse", servoReversePosted))
     {
-        bool postedReverse =
-            server.hasArg("servoReverse");
-
-        bool renderedReverse =
-            server.arg("servoReverseWas") == "1";
-
-        if(postedReverse != renderedReverse)
-        {
-            settings->setServoReverse(
-                postedReverse
-            );
-        }
+        settings->setServoReverse(
+            servoReversePosted
+        );
     }
 
     settings->setRadioSteeringTravel(
@@ -1390,9 +1425,14 @@ void WebConfigurator::handleSave()
     settings->setChannel3GainMax(channel3GainMax);
 
     #if !defined(OPENDRIFT_INPUT_CRSF)
-    settings->setThrottleOutputEnabled(
-        server.hasArg("throttleOutputEnabled")
-    );
+    bool throttleOutputPosted = false;
+
+    if(checkboxChanged("throttleOutputEnabled", throttleOutputPosted))
+    {
+        settings->setThrottleOutputEnabled(
+            throttleOutputPosted
+        );
+    }
     #endif
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -1422,9 +1462,14 @@ void WebConfigurator::handleSave()
     }
     #endif
 
-    settings->setWifiEnabled(
-        server.hasArg("wifiEnabled")
-    );
+    bool wifiEnabledPosted = false;
+
+    if(checkboxChanged("wifiEnabled", wifiEnabledPosted))
+    {
+        settings->setWifiEnabled(
+            wifiEnabledPosted
+        );
+    }
 
     if(server.hasArg("wifiSsid"))
     {
@@ -1440,9 +1485,14 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setBlackboxEnabled(
-        server.hasArg("blackboxEnabled")
-    );
+    bool blackboxPosted = false;
+
+    if(checkboxChanged("blackboxEnabled", blackboxPosted))
+    {
+        settings->setBlackboxEnabled(
+            blackboxPosted
+        );
+    }
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     settings->setDisplayBrightness(
@@ -1459,9 +1509,14 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setDisplayFlip(
-        server.hasArg("displayFlip")
-    );
+    bool displayFlipPosted = false;
+
+    if(checkboxChanged("displayFlip", displayFlipPosted))
+    {
+        settings->setDisplayFlip(
+            displayFlipPosted
+        );
+    }
 
     settings->setThemeText(
         getIntArg(
@@ -1525,14 +1580,27 @@ void WebConfigurator::handleSave()
         );
     }
 
+    String location = "/";
+
+    if(servoGeometryRejected)
+    {
+        location = "/?notice=servo-locked";
+    }
+    else if(endpointNotice != nullptr)
+    {
+        location = String("/?notice=") + endpointNotice;
+    }
+
     server.sendHeader(
         "Location",
-        servoGeometryRejected ? "/?notice=servo-locked" : "/"
+        location
     );
 
     server.send(
         303
     );
+
+    notifyChanged();
 }
 
 
@@ -1564,8 +1632,10 @@ void WebConfigurator::handleProfileCreate()
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
 }
 
 
@@ -1582,18 +1652,23 @@ void WebConfigurator::handleProfileActivate()
 
     int index = server.arg("profile").toInt();
 
-    if(
-        index < 0 ||
-        index >= settings->getProfileCount() ||
-        !settings->activateProfile(index)
-    )
+    if(!profileRowMatches(index))
+    {
+        server.sendHeader("Location", "/?notice=profiles-changed#profiles");
+        server.send(303);
+        return;
+    }
+
+    if(!settings->activateProfile(index))
     {
         server.send(404, "text/plain", "Profile not found");
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
 }
 
 
@@ -1610,18 +1685,93 @@ void WebConfigurator::handleProfileDelete()
 
     int index = server.arg("profile").toInt();
 
-    if(
-        index < 0 ||
-        index >= settings->getProfileCount() ||
-        !settings->deleteProfile(index)
-    )
+    if(!profileRowMatches(index))
+    {
+        server.sendHeader("Location", "/?notice=profiles-changed#profiles");
+        server.send(303);
+        return;
+    }
+
+    if(!settings->deleteProfile(index))
     {
         server.send(404, "text/plain", "Profile not found");
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
+}
+
+
+
+// A profile row posts its list position and its name. The position alone
+// is not enough: a page rendered before a delete points at the wrong row.
+bool WebConfigurator::profileRowMatches(
+    int index
+)
+{
+    if(
+        settings == nullptr ||
+        index < 0 ||
+        index >= settings->getProfileCount()
+    )
+    {
+        return false;
+    }
+
+    if(!server.hasArg("name"))
+    {
+        return true;
+    }
+
+    const Settings::DrivingProfile* profile =
+        settings->getProfile(index);
+
+    return
+        profile != nullptr &&
+        server.arg("name").equalsIgnoreCase(profile->name);
+}
+
+
+
+bool WebConfigurator::checkboxChanged(
+    const char* name,
+    bool& posted
+)
+{
+    posted = server.hasArg(name);
+
+    String snapshotName = String(name) + "Was";
+
+    if(!server.hasArg(snapshotName))
+    {
+        return true;
+    }
+
+    bool rendered = server.arg(snapshotName) == "1";
+
+    return posted != rendered;
+}
+
+
+
+void WebConfigurator::setChangeCallback(
+    void (*callback)()
+)
+{
+    changeCallback = callback;
+}
+
+
+
+void WebConfigurator::notifyChanged()
+{
+    if(changeCallback != nullptr)
+    {
+        changeCallback();
+    }
 }
 
 
@@ -2310,6 +2460,8 @@ void WebConfigurator::handleEndpointCapture()
     server.send(
         303
     );
+
+    notifyChanged();
 }
 
 
@@ -2339,6 +2491,8 @@ void WebConfigurator::handleEndpointReset()
     server.send(
         303
     );
+
+    notifyChanged();
 }
 
 
@@ -2675,7 +2829,13 @@ String WebConfigurator::checkbox(
 {
     String html;
 
-    html += F("<label><input name='");
+    // The rendered state travels with the form, so a save only applies a
+    // checkbox the user actually changed on this page.
+    html += F("<input type='hidden' name='");
+    html += name;
+    html += F("Was' value='");
+    html += checked ? '1' : '0';
+    html += F("'><label><input name='");
     html += name;
     html += F("' type='checkbox'");
 

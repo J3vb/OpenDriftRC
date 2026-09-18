@@ -502,36 +502,36 @@ bool Settings::begin()
     // cannot safely be reused as physical servo stops, so only the new servo
     // endpoint schema is accepted as calibrated.
     applyFallbackSteeringEndpoints();
-    steeringCenter = constrain(
-        prefs.getInt("servoCalC", steeringCenter),
-        900,
-        2100
-    );
-    steeringMin = constrain(
-        prefs.getInt(
-            "servoCalL",
-            steeringMin
-        ),
-        900,
-        2100
-    );
-    steeringMax = constrain(
-        prefs.getInt(
-            "servoCalR",
-            steeringMax
-        ),
-        900,
-        2100
-    );
-    steeringCapturedPulses[0] = steeringMin;
-    steeringCapturedPulses[1] = steeringCenter;
-    steeringCapturedPulses[2] = steeringMax;
+    steeringCapturedPulses[0] = constrain(prefs.getInt("servoCalL", steeringMin), 900, 2100);
+    steeringCapturedPulses[1] = constrain(prefs.getInt("servoCalC", steeringCenter), 900, 2100);
+    steeringCapturedPulses[2] = constrain(prefs.getInt("servoCalR", steeringMax), 900, 2100);
     steeringCapturedInputPulses[0] = constrain(prefs.getInt("servoInL", 1000), 800, 2200);
     steeringCapturedInputPulses[1] = constrain(prefs.getInt("servoInC", 1500), 800, 2200);
     steeringCapturedInputPulses[2] = constrain(prefs.getInt("servoInR", 2000), 800, 2200);
     steeringCalibrationMask = prefs.getBool("servoEndV1", false)
         ? (prefs.getUChar("servoCalM", 0) & 0x07)
         : 0;
+
+    // Only a complete, valid capture set becomes the live endpoints. A
+    // partial or rejected capture stays visible on the endpoint pages but
+    // the servo keeps using the fallback geometry until it is completed.
+    if(
+        steeringCalibrationMask == 0x07 &&
+        steeringStopsValid(
+            steeringCapturedPulses[0],
+            steeringCapturedPulses[1],
+            steeringCapturedPulses[2]
+        )
+    )
+    {
+        steeringMin = steeringCapturedPulses[0];
+        steeringCenter = steeringCapturedPulses[1];
+        steeringMax = steeringCapturedPulses[2];
+    }
+    else if(steeringCalibrationMask == 0x07)
+    {
+        steeringCalibrationMask = 0;
+    }
 
     radioSteeringTravel = constrain(
         prefs.getInt("strTravel", 100),
@@ -1109,7 +1109,13 @@ bool Settings::setServoCenter(int value)
         return false;
     }
 
+    // The fallback endpoints describe the geometry the servo uses while
+    // uncalibrated, so they follow every servo setting change.
+    portENTER_CRITICAL(&settingsMux);
     servoCenter = clamped;
+    applyFallbackSteeringEndpoints();
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 
     return true;
@@ -1140,9 +1146,13 @@ bool Settings::setServoReverse(bool value)
 
         steeringCapturedPulses[0] = steeringMin;
         steeringCapturedPulses[2] = steeringMax;
+        servoReverse = value;
     }
-
-    servoReverse = value;
+    else
+    {
+        servoReverse = value;
+        applyFallbackSteeringEndpoints();
+    }
 
     portEXIT_CRITICAL(&settingsMux);
 
@@ -1175,7 +1185,11 @@ bool Settings::setServoTravel(int value)
         return false;
     }
 
+    portENTER_CRITICAL(&settingsMux);
     servoTravel = clamped;
+    applyFallbackSteeringEndpoints();
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
 
     return true;
@@ -1668,6 +1682,9 @@ bool Settings::captureSteeringCalibrationPoint(
 
     portENTER_CRITICAL(&settingsMux);
 
+    int previousPulse = steeringCapturedPulses[point];
+    int previousInputPulse = steeringCapturedInputPulses[point];
+
     steeringCapturedPulses[point] = physicalPulse;
 
     if(inputPulse >= 800 && inputPulse <= 2200)
@@ -1679,18 +1696,13 @@ bool Settings::captureSteeringCalibrationPoint(
 
     if((steeringCalibrationMask & 0x07) == 0x07)
     {
-        int leftDelta =
-            steeringCapturedPulses[0] - steeringCapturedPulses[1];
-
-        int rightDelta =
-            steeringCapturedPulses[2] - steeringCapturedPulses[1];
-
-        bool validCalibration =
-            abs(leftDelta) >= 10 &&
-            abs(rightDelta) >= 10 &&
-            leftDelta * rightDelta < 0;
-
-        if(validCalibration)
+        if(
+            steeringStopsValid(
+                steeringCapturedPulses[0],
+                steeringCapturedPulses[1],
+                steeringCapturedPulses[2]
+            )
+        )
         {
             steeringMin = steeringCapturedPulses[0];
             steeringCenter = steeringCapturedPulses[1];
@@ -1699,7 +1711,10 @@ bool Settings::captureSteeringCalibrationPoint(
         else
         {
             // Keep the two known-good captures and make the rejected position
-            // visibly incomplete on both the display and radio tool.
+            // visibly incomplete on both the display and radio tool. The
+            // rejected pulse is dropped so it can never be saved as a stop.
+            steeringCapturedPulses[point] = previousPulse;
+            steeringCapturedInputPulses[point] = previousInputPulse;
             steeringCalibrationMask &= ~(1U << point);
             accepted = false;
         }
@@ -1712,17 +1727,61 @@ bool Settings::captureSteeringCalibrationPoint(
     return accepted;
 }
 
+bool Settings::steeringStopsValid(
+    int min,
+    int center,
+    int max
+)
+{
+    int leftDelta = min - center;
+    int rightDelta = max - center;
+
+    return
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
+}
+
+bool Settings::setStoredSteeringEndpoints(
+    int min,
+    int center,
+    int max
+)
+{
+    min = constrain(min, 900, 2100);
+    center = constrain(center, 900, 2100);
+    max = constrain(max, 900, 2100);
+
+    if(!steeringStopsValid(min, center, max))
+    {
+        return false;
+    }
+
+    // All three stops and the mask move in one critical section, so the
+    // control task never sees a half-applied set or a cleared mask.
+    portENTER_CRITICAL(&settingsMux);
+
+    steeringMin = min;
+    steeringCenter = center;
+    steeringMax = max;
+    steeringCapturedPulses[0] = min;
+    steeringCapturedPulses[1] = center;
+    steeringCapturedPulses[2] = max;
+    steeringCalibrationMask = 0x07;
+
+    portEXIT_CRITICAL(&settingsMux);
+
+    dirty = true;
+
+    return true;
+}
+
 bool Settings::confirmStoredSteeringCalibration()
 {
     portENTER_CRITICAL(&settingsMux);
 
-    int leftDelta = steeringMin - steeringCenter;
-    int rightDelta = steeringMax - steeringCenter;
-
     bool validCalibration =
-        abs(leftDelta) >= 10 &&
-        abs(rightDelta) >= 10 &&
-        leftDelta * rightDelta < 0;
+        steeringStopsValid(steeringMin, steeringCenter, steeringMax);
 
     if(validCalibration)
     {
