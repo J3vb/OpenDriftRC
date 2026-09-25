@@ -29,6 +29,9 @@
 #endif
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+#include "Backgrounds.h"
+#endif
 
 #if !defined(OPENDRIFT_HEADLESS)
 LGFX lcd;
@@ -72,6 +75,10 @@ AuxChannelOutputs auxChannelOutputs;
 #endif
 
 BlackboxLogger blackbox;
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+Backgrounds backgrounds;
+#endif
 
 unsigned long lastBlackboxLog = 0;
 
@@ -1490,6 +1497,36 @@ void setup()
         settingsOk ? "[ OK ]" : "[WARN]",
         settingsOk ? TFT_GREEN : TFT_YELLOW
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    //-------------------
+    // BACKGROUND STORAGE
+    //-------------------
+
+    // First-use FFat formatting happens before actuator/control tasks exist.
+    // Runtime uploads are explicitly a stationary maintenance operation.
+    const bool backgroundsOk = backgrounds.begin();
+
+    char backgroundMessage[72];
+    snprintf(
+        backgroundMessage,
+        sizeof(backgroundMessage),
+        backgroundsOk
+            ? "ffat: %u backgrounds, %u KB free"
+            : "ffat: background storage unavailable",
+        backgroundsOk ? (unsigned int)backgrounds.getCount() : 0,
+        backgroundsOk ? (unsigned int)(backgrounds.getFreeBytes() / 1024) : 0
+    );
+
+    bootConsole.log(
+        backgroundMessage,
+        backgroundsOk ? "[ OK ]" : "[WARN]",
+        backgroundsOk ? TFT_GREEN : TFT_YELLOW
+    );
+
+    webConfig.setBackgroundStore(backgrounds);
+    ui.setBackgroundStore(backgrounds);
+    #endif
 
     //-------------------
     // IMU

@@ -15,7 +15,14 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 ## Current Features
 
 - ESP32-S3 firmware using PlatformIO and Arduino.
-- 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages.
+- 280 x 456 AMOLED touch UI with swipeable pages and a permanent built-in
+  background fallback.
+- Up to 16 persistent custom AMOLED backgrounds, selectable from the display
+  or web configurator. JPG, PNG, and WebP images can be converted locally at
+  [opendriftrc.com/backgrounds](https://opendriftrc.com/backgrounds/).
+- Persistent AMOLED theme engine with light/dark text, seven accent palettes,
+  and background-aware translucent control panels, based on work contributed
+  by [J3vb](https://github.com/J3vb).
 - Dedicated 250 Hz or 333 Hz IMU/control/steering task isolated from UI, WiFi, and logging work.
 - Continuous yaw-acceleration prediction with throttle-informed look-ahead.
 - Quiet-drift reference feedback that yields to driver steering and throttle changes.
@@ -110,6 +117,21 @@ The servo should be powered from a suitable BEC or ESC receiver rail. Do not rel
 The firmware project is in:
 
 `OpenDrift/`
+
+## Custom AMOLED Backgrounds
+
+OpenDrift keeps the built-in galaxy image in firmware and can additionally
+store up to 16 user backgrounds in the board's FFat partition. Custom images
+must be 456 x 280 raw RGB565 files; the browser-based
+[background converter](https://opendriftrc.com/backgrounds/) creates the exact
+format locally from JPG, PNG, or WebP files.
+
+To install one, join the gyro's `OpenDrift` WiFi network, open
+`http://192.168.4.1`, and use the **AMOLED Backgrounds** card. Uploaded images
+can be selected or deleted there, and can also be selected from the
+**Backgrounds** page on the AMOLED display. Keep the car stationary while an
+image is being written to flash. Leaving the selection on **Built-in** uses the
+factory background and consumes no additional storage.
 
 Build with PlatformIO:
 
@@ -509,11 +531,13 @@ Important folders:
 - `OpenDrift/lib/UI`: onboard touch UI.
 - `OpenDrift/lib/WebConfigurator`: web settings page.
 - `OpenDrift/lib/WIFIManager`: WiFi access point control.
+- `OpenDrift/lib/Backgrounds`: persistent AMOLED background storage and
+  recovery.
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.
 - `OpenDrift/radio/edgetx`: source for the [OpenDrift EdgeTX tuning tool](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
-- `OpenDrift/assets/backgrounds`: flash-resident AMOLED UI background data.
+- `OpenDrift/assets/backgrounds`: built-in AMOLED fallback background data.
 - `OpenDrift/boards`: custom PlatformIO board definitions.
 
 ## License

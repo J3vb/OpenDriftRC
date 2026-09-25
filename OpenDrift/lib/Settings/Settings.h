@@ -9,6 +9,7 @@ public:
 
     static constexpr uint8_t MAX_PROFILES = 12;
     static constexpr size_t PROFILE_NAME_LENGTH = 24;
+    static constexpr size_t BACKGROUND_NAME_LENGTH = 24;
 
     struct DrivingProfile
     {
@@ -130,6 +131,20 @@ public:
     void setDisplayBrightness(int value);
     uint16_t getDisplayDimTimeout();
     void setDisplayDimTimeout(int value);
+
+    // AMOLED theme. Text 0 = light text, 1 = dark text for light
+    // backgrounds. Accent 0 preserves the original mixed page colours.
+    static constexpr uint8_t THEME_ACCENT_COUNT = 7;
+    static const char* themeAccentName(uint8_t accent);
+    uint8_t getThemeText();
+    void setThemeText(int value);
+    uint8_t getThemeAccent();
+    void setThemeAccent(int value);
+
+    // Empty selects the immutable background compiled into the firmware.
+    const char* getBackgroundName();
+    void setBackgroundName(const String& value);
+    static String sanitizeBackgroundName(const String& value);
 
     // WiFi
     bool getWifiEnabled();
@@ -269,6 +284,11 @@ private:
 
     uint8_t displayBrightness = 100;
     uint16_t displayDimTimeout = 0;
+
+    uint8_t themeText = 0;
+    uint8_t themeAccent = 0;
+
+    char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
 
     bool wifiEnabled = true;
 

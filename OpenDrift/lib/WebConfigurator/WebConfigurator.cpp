@@ -15,6 +15,14 @@ server(80)
 }
 
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void WebConfigurator::setBackgroundStore(Backgrounds& store)
+{
+    backgrounds = &store;
+}
+#endif
+
+
 
 void WebConfigurator::begin(
     Settings& settingsRef,
@@ -133,6 +141,27 @@ void WebConfigurator::begin(
         }
     );
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    server.on(
+        "/upload-background",
+        HTTP_POST,
+        [this]() { handleBackgroundUpload(); },
+        [this]() { handleBackgroundUploadChunk(); }
+    );
+
+    server.on(
+        "/use-background",
+        HTTP_POST,
+        [this]() { handleBackgroundUse(); }
+    );
+
+    server.on(
+        "/delete-background",
+        HTTP_POST,
+        [this]() { handleBackgroundDelete(); }
+    );
+    #endif
+
     server.onNotFound(
         [this]()
         {
@@ -198,7 +227,7 @@ void WebConfigurator::handleRoot()
 
     String html;
 
-    html.reserve(20000);
+    html.reserve(30000);
 
     html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
     html += F("<title>OpenDrift Config</title><style>");
@@ -395,7 +424,24 @@ void WebConfigurator::handleRoot()
     html += F(">180&deg; flipped</option></select><p class='sub'>Flips both the AMOLED image and touchscreen coordinates. Changes apply immediately.</p><div class='row'>");
     html += input("Brightness (10-100%)", "displayBrightness", String(settings->getDisplayBrightness()), "number", "10");
     html += input("Idle dim timeout (seconds, 0=off)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
-    html += F("</div></div>");
+    html += F("</div><label>Text colour</label><select name='themeText'><option value='0'");
+    if(settings->getThemeText() == 0) html += F(" selected");
+    html += F(">Light text (default)</option><option value='1'");
+    if(settings->getThemeText() == 1) html += F(" selected");
+    html += F(">Dark text, for light backgrounds</option></select>");
+
+    html += F("<label>Accent colour</label><select name='themeAccent'>");
+    for(uint8_t accent = 0; accent < Settings::THEME_ACCENT_COUNT; accent++)
+    {
+        html += F("<option value='");
+        html += String((int)accent);
+        html += F("'");
+        if(settings->getThemeAccent() == accent) html += F(" selected");
+        html += F(">");
+        html += Settings::themeAccentName(accent);
+        html += F("</option>");
+    }
+    html += F("</select><p class='sub'>Mixed keeps the original page colours. The other presets apply one accent throughout the AMOLED UI. Use dark text with a bright background. Translucent panels keep controls readable while preserving the artwork.</p></div>");
     #endif
 
     html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
@@ -517,6 +563,50 @@ void WebConfigurator::handleRoot()
     html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering will be unavailable during boot.')\"></form>");
     html += F("<form id='factoryResetForm' method='post' action='/factory-reset' onsubmit=\"return confirm('Erase all OpenDrift settings and restart? This cannot be undone.')\"></form>");
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='card' id='backgrounds'><h2>AMOLED Backgrounds</h2>");
+
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        html += F("<p class='sub'>Background storage is unavailable. The built-in background remains active.</p></div>");
+    }
+    else
+    {
+        const char* activeBackground = settings->getBackgroundName();
+        html += F("<p class='sub'>Active: <strong>");
+        html += activeBackground[0] == 0 ? "Built-in" : activeBackground;
+        html += F("</strong> &middot; ");
+        html += String((int)backgrounds->getCount());
+        html += F(" / 16 stored &middot; ");
+        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
+        html += F(" KB free</p>");
+
+        html += F("<div class='profile");
+        if(activeBackground[0] == 0) html += F(" active");
+        html += F("'><div><strong>Built-in</strong><small>Permanent OpenDrift fallback</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
+
+        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
+        {
+            const char* name = backgrounds->getName(i);
+            html += F("<div class='profile");
+            if(strcmp(name, activeBackground) == 0) html += F(" active");
+            html += F("'><div><strong>");
+            html += name;
+            html += F("</strong><small>456 x 280 RGB565</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button type='submit'>Use</button></form><form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
+        }
+
+        html += F("<label>Source image or converted file</label><input id='bgFile' type='file' accept='.rgb,image/png,image/jpeg,image/webp'>");
+        html += F("<label>Background name</label><input id='bgName' type='text' maxlength='23' placeholder='track-night'>");
+        html += F("<canvas id='bgPreview' width='456' height='280' style='display:none;width:100%;height:auto;border:1px solid #3b4148;border-radius:6px;margin-top:12px'></canvas>");
+        html += F("<button type='button' onclick='uploadBackground()'>Convert and upload</button>");
+        html += F("<p class='sub' id='bgStatus'>JPG, PNG, or WebP. The browser center-crops and converts locally; the original image never leaves your device. Do not drive while writing a background.</p></div>");
+    }
+    #endif
+
     html += F("<div class='card'><h2>Blackbox Log</h2>");
 
     if(!settings->getBlackboxEnabled())
@@ -559,7 +649,13 @@ void WebConfigurator::handleRoot()
 
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
+    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);");
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("function uploadBackground(){const f=document.getElementById('bgFile').files[0],n=document.getElementById('bgName').value.trim(),st=document.getElementById('bgStatus'),c=document.getElementById('bgPreview');if(!f||!n){st.textContent='Choose an image and enter a name.';return;}const send=b=>{const fd=new FormData();fd.append('image',b,n+'.rgb');st.textContent='Uploading background...';fetch('/upload-background',{method:'POST',body:fd}).then(async r=>{const t=await r.text();if(r.ok)location.href='/?background='+Date.now()+'#backgrounds';else st.textContent=t;}).catch(()=>st.textContent='Upload failed. Stay connected to OpenDrift WiFi and try again.');};if(f.name.toLowerCase().endsWith('.rgb')){if(f.size!==255360){st.textContent='Converted .rgb file must be exactly 255,360 bytes.';return;}send(f);return;}const img=new Image();img.onload=()=>{URL.revokeObjectURL(img.src);const x=c.getContext('2d'),s=Math.max(456/img.width,280/img.height),w=img.width*s,h=img.height*s;x.clearRect(0,0,456,280);x.drawImage(img,(456-w)/2,(280-h)/2,w,h);c.style.display='block';const d=x.getImageData(0,0,456,280).data,out=new Uint8Array(255360);for(let i=0,j=0;i<d.length;i+=4,j+=2){const v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}send(new Blob([out],{type:'application/octet-stream'}));};img.onerror=()=>st.textContent='That image could not be decoded.';img.src=URL.createObjectURL(f);}");
+    #endif
+
+    html += F("</script></body></html>");
 
     server.send(
         200,
@@ -792,6 +888,20 @@ void WebConfigurator::handleSave()
         getIntArg(
             "displayDimTimeout",
             settings->getDisplayDimTimeout()
+        )
+    );
+
+    settings->setThemeText(
+        getIntArg(
+            "themeText",
+            settings->getThemeText()
+        )
+    );
+
+    settings->setThemeAccent(
+        getIntArg(
+            "themeAccent",
+            settings->getThemeAccent()
         )
     );
     #endif
@@ -1269,6 +1379,121 @@ void WebConfigurator::handleLogClear()
         303
     );
 }
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void WebConfigurator::handleBackgroundUploadChunk()
+{
+    if(backgrounds == nullptr) return;
+    HTTPUpload& upload = server.upload();
+
+    switch(upload.status)
+    {
+        case UPLOAD_FILE_START:
+        {
+            String name = upload.filename;
+            const int dot = name.lastIndexOf('.');
+            if(dot > 0) name = name.substring(0, dot);
+            backgroundUploadOk = backgrounds->beginUpload(name.c_str());
+            break;
+        }
+
+        case UPLOAD_FILE_WRITE:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk = backgrounds->writeUpload(
+                    upload.buf,
+                    upload.currentSize
+                );
+            }
+            break;
+
+        case UPLOAD_FILE_END:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk = backgrounds->endUpload();
+            }
+            else
+            {
+                backgrounds->abortUpload();
+            }
+            break;
+
+        default:
+            backgrounds->abortUpload();
+            backgroundUploadOk = false;
+            break;
+    }
+}
+
+
+void WebConfigurator::handleBackgroundUpload()
+{
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        server.send(503, "text/plain", "Background storage is unavailable");
+        return;
+    }
+
+    server.sendHeader("Cache-Control", "no-store");
+
+    if(backgroundUploadOk)
+    {
+        backgroundUploadOk = false;
+        server.send(200, "text/plain", "OK");
+        return;
+    }
+
+    const char* error = backgrounds->getUploadError();
+    server.send(
+        400,
+        "text/plain",
+        error[0] != 0 ? error : "No complete image was received"
+    );
+}
+
+
+void WebConfigurator::handleBackgroundUse()
+{
+    String name = Backgrounds::sanitizeName(server.arg("name"));
+
+    if(
+        name.length() > 0 &&
+        (backgrounds == nullptr || !backgrounds->exists(name.c_str()))
+    )
+    {
+        name = "";
+    }
+
+    settings->setBackgroundName(name);
+    server.sendHeader("Location", "/#backgrounds");
+    server.send(303);
+}
+
+
+void WebConfigurator::handleBackgroundDelete()
+{
+    if(backgrounds == nullptr)
+    {
+        server.send(503, "text/plain", "Background storage is unavailable");
+        return;
+    }
+
+    const String name = Backgrounds::sanitizeName(server.arg("name"));
+    if(name.length() > 0)
+    {
+        backgrounds->remove(name.c_str());
+
+        if(strcmp(settings->getBackgroundName(), name.c_str()) == 0)
+        {
+            settings->setBackgroundName("");
+        }
+    }
+
+    server.sendHeader("Location", "/#backgrounds");
+    server.send(303);
+}
+#endif
 
 
 void WebConfigurator::handleRestart()

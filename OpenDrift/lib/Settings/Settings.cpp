@@ -200,6 +200,30 @@ bool Settings::begin()
         600
     );
 
+    themeText = constrain(
+        prefs.getUChar("thmText", 0),
+        0,
+        1
+    );
+
+    themeAccent = constrain(
+        prefs.getUChar("thmAccent", 0),
+        0,
+        THEME_ACCENT_COUNT - 1
+    );
+
+    {
+        const String storedBackground =
+            sanitizeBackgroundName(prefs.getString("bgName", ""));
+
+        snprintf(
+            backgroundName,
+            sizeof(backgroundName),
+            "%s",
+            storedBackground.c_str()
+        );
+    }
+
     gain = constrain(
         prefs.getFloat(
             "gain",
@@ -682,6 +706,21 @@ void Settings::save()
         displayDimTimeout
     );
 
+    prefs.putUChar(
+        "thmText",
+        themeText
+    );
+
+    prefs.putUChar(
+        "thmAccent",
+        themeAccent
+    );
+
+    prefs.putString(
+        "bgName",
+        backgroundName
+    );
+
     prefs.putBool(
         "wifi",
         wifiEnabled
@@ -1154,6 +1193,79 @@ void Settings::setDisplayDimTimeout(int value)
 {
     displayDimTimeout = constrain(value, 0, 600);
     dirty = true;
+}
+
+const char* Settings::themeAccentName(uint8_t accent)
+{
+    static const char* const names[THEME_ACCENT_COUNT] =
+    {
+        "MIXED",
+        "CYAN",
+        "BLUE",
+        "MAGENTA",
+        "AMBER",
+        "GREEN",
+        "WHITE"
+    };
+
+    return accent < THEME_ACCENT_COUNT ? names[accent] : names[0];
+}
+
+uint8_t Settings::getThemeText()
+{
+    return themeText;
+}
+
+void Settings::setThemeText(int value)
+{
+    themeText = constrain(value, 0, 1);
+    dirty = true;
+}
+
+uint8_t Settings::getThemeAccent()
+{
+    return themeAccent;
+}
+
+void Settings::setThemeAccent(int value)
+{
+    themeAccent = constrain(value, 0, THEME_ACCENT_COUNT - 1);
+    dirty = true;
+}
+
+const char* Settings::getBackgroundName()
+{
+    return backgroundName;
+}
+
+void Settings::setBackgroundName(const String& value)
+{
+    const String clean = sanitizeBackgroundName(value);
+    snprintf(backgroundName, sizeof(backgroundName), "%s", clean.c_str());
+    dirty = true;
+}
+
+String Settings::sanitizeBackgroundName(const String& value)
+{
+    String input = value;
+    input.trim();
+    String clean;
+    clean.reserve(BACKGROUND_NAME_LENGTH - 1);
+
+    for(
+        size_t i = 0;
+        i < input.length() && clean.length() < BACKGROUND_NAME_LENGTH - 1;
+        i++
+    )
+    {
+        const char character = input.charAt(i);
+        if(isAlphaNumeric(character) || character == '-' || character == '_')
+        {
+            clean += character;
+        }
+    }
+
+    return clean;
 }
 
 // --------------------

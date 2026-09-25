@@ -8,6 +8,10 @@
 #include "RadioInput.h"
 #include "BlackboxLogger.h"
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+#include "Backgrounds.h"
+#endif
+
 
 class WebConfigurator
 {
@@ -25,6 +29,12 @@ public:
     );
 
     void update();
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    void setBackgroundStore(
+        Backgrounds& store
+    );
+    #endif
 
     bool isRunning();
 
@@ -46,6 +56,11 @@ private:
     RadioInput* throttleRadio = nullptr;
 
     BlackboxLogger* blackbox = nullptr;
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    Backgrounds* backgrounds = nullptr;
+    bool backgroundUploadOk = false;
+    #endif
 
     bool running = false;
 
@@ -72,6 +87,13 @@ private:
 
     void handleRestart();
     void handleFactoryReset();
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    void handleBackgroundUpload();
+    void handleBackgroundUploadChunk();
+    void handleBackgroundUse();
+    void handleBackgroundDelete();
+    #endif
 
     void handleNotFound();
 

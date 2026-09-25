@@ -11,6 +11,10 @@
 #include "RadioInput.h"
 #include "Servo.h"
 
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+#include "Backgrounds.h"
+#endif
+
 
 class UI
 {
@@ -30,6 +34,12 @@ public:
     void setThrottleRadio(
         RadioInput& throttleRadio
     );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    void setBackgroundStore(
+        Backgrounds& store
+    );
+    #endif
 
     void requestRefresh();
 
@@ -109,12 +119,17 @@ private:
 
     // Pages
     // Shared order: Drive, Core, Response, Drift Assist, Experimental,
-    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System.
+    // Profiles, Radio, Steering, Physical Endpoints, WiFi, System, and
+    // Backgrounds on AMOLED builds.
 
     uint8_t page = 0;
 
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    const uint8_t totalPages = 12;
+    #else
     const uint8_t totalPages = 11;
+    #endif
 
 
 
@@ -169,6 +184,31 @@ private:
     uint8_t lastBrightnessPercent = 0;
     bool displayDimmed = false;
     bool swallowTouchUntilRelease = false;
+
+    uint8_t appliedThemeText = 0;
+    uint8_t appliedThemeAccent = 0;
+    bool themeApplied = false;
+
+    bool syncTheme(
+        Settings& settings
+    );
+
+    Backgrounds* backgroundStore = nullptr;
+    uint16_t* backgroundPixels = nullptr;
+    char appliedBackgroundName[Backgrounds::NAME_LENGTH] = {0};
+    uint32_t appliedBackgroundRevision = 0;
+    bool backgroundApplied = false;
+    uint8_t backgroundScroll = 0;
+
+    bool applyBackground(
+        Settings& settings
+    );
+
+    void drawBackgroundsPage(
+        Settings& settings
+    );
+
+    bool isBackgroundsPage();
 
     bool updateDisplayBrightness(
         Settings& settings,
