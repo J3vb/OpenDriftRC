@@ -249,7 +249,7 @@ to `100`; `0` bypasses it and `50` is the track-tested default.
 `PCA` (steering gain reduction) on the AMOLED Transition page removes that
 share of the gyro's direct correction at full stick lock, tapering to nothing at
 center. `0` is off. The round display has no free row for it; set it from the
-web page or the EdgeTX tool there.
+web page, or the EdgeTX tool on a CRSF build.
 
 `SMOOTH` is intentionally inverted from raw filter math: higher numbers mean more smoothing and slower gyro response.
 
