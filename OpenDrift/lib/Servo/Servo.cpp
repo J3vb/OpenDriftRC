@@ -92,16 +92,21 @@ void ServoOutput::writeMicroseconds(int us)
         computePulse(us);
 
     uint32_t now = micros();
+    bool clipped = false;
 
     if(speedPercent < 100)
     {
+        // A stale timestamp (first write, or after a failsafe centre) must
+        // not grant a big step, so dt is capped at a few control ticks.
         float dt =
             lastWriteMicros == 0
             ? 0.004f
-            : constrain((now - lastWriteMicros) / 1000000.0f, 0.0005f, 0.05f);
+            : constrain((now - lastWriteMicros) / 1000000.0f, 0.0005f, 0.01f);
 
         float maxStep = maxRateUsPerSecond * dt;
         float delta = (float)targetPulse - limitedPulse;
+
+        clipped = fabsf(delta) > maxStep;
 
         if(delta > maxStep)
         {
@@ -122,8 +127,15 @@ void ServoOutput::writeMicroseconds(int us)
 
     lastWriteMicros = now;
 
+    // The quiet band is skipped while the limiter is ramping and on the
+    // tick it lands, so a slow move always reaches its target instead of
+    // parking a band short of it.
+    bool ramping = clipped || limiterWasClipping;
+    limiterWasClipping = clipped;
+
     if(
         quietBand > 0 &&
+        !ramping &&
         abs(targetPulse - currentPulse) <= quietBand
     )
     {
@@ -151,6 +163,8 @@ void ServoOutput::center()
         );
 
     limitedPulse = (float)currentPulse;
+    limiterWasClipping = false;
+    lastWriteMicros = 0;
 
     servo.writeMicroseconds(
         currentPulse

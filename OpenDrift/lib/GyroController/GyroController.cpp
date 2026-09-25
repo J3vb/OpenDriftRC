@@ -1387,6 +1387,8 @@ int GyroController::update(
         *
         gyroGain
         *
+        steeringGainScale
+        *
         directDampingScale;
 
     // Countersteer Assist is deliberately sourced from the slow learned

@@ -2735,6 +2735,7 @@ void Settings::clampProfile(
     profile.gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
     profile.gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
     profile.gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
+    profile.steeringGainReduction = constrain(profile.steeringGainReduction, 0, 100);
 }
 
 void Settings::captureProfile(

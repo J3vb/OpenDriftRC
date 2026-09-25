@@ -308,7 +308,7 @@ Steering output setup:
   how fast the steering output may move, driver input and gyro correction
   together, like the servo speed setting on commercial drift gyros. The centre
   on signal loss is never slowed. AMOLED only; the round build sets it from the
-  web page or EdgeTX.
+  web page, or the EdgeTX tool on a CRSF build.
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
 

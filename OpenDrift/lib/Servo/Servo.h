@@ -62,6 +62,7 @@ private:
     float maxRateUsPerSecond = 0.0f;
     float limitedPulse = 1500.0f;
     uint32_t lastWriteMicros = 0;
+    bool limiterWasClipping = false;
 
     bool endpointCalibrationActive = false;
 

@@ -9,6 +9,8 @@
   full lock. Off by default. Available on the web page (Tune tab), the AMOLED
   Transition page, the EdgeTX tool and over CRSF (parameter 36), and stored
   per profile. Based on the PCA work by doublej380-pixel.
+  The profile format moved to version 11; older firmware does not read it,
+  so export profiles before flashing back to an older release.
 - Adds a servo speed limit, 1-100 with 100 unlimited: the steering output may
   move at most a set rate, like the servo speed setting on commercial drift
   gyros. The failsafe centre is never slowed. On the web Servo card, the AMOLED
