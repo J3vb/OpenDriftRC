@@ -1,15 +1,14 @@
 # Experimental Transition Response
 
-Transition Speed is a centered direction-change adjustment. A value of `50`
-leaves the normal direct gyro correction and Max Correction authority intact.
+Transition Speed is a direction-change timing adjustment. Start at `50`.
 
-Unlike the former Tail Slide Speed experiment, the adjustment follows the
-complete transition envelope: driver steering announces the transition and
-measured chassis yaw keeps it active through the physical direction reversal.
-Values below 50 add fast yaw damping for a slower, more deliberate transition.
-Values above 50 reduce damping for a faster transition. Transition Speed never
-changes the hard Max Correction ceiling. It does not command rotation, reverse
-gyro correction, or change steady Countersteer Assist.
+Unlike the former gain-based response experiment, this adjustment slews the
+gyro correction through a direction change without multiplying Gyro Gain.
+Driver steering announces the transition and measured chassis yaw keeps the
+timing stage active through the physical reversal. Values below 50 reverse
+correction more slowly; values above 50 reverse it more quickly. Transition
+Speed never changes the hard Max Correction ceiling. It does not command
+rotation, reverse gyro direction, or change steady Countersteer Assist.
 
 Transition prediction is also tapered while a direction change is in progress.
 If acceleration prediction reaches the new yaw direction before the measured
@@ -33,9 +32,11 @@ Gain, Prediction, Hold Assist, or Countersteer Assist during the comparison.
 
 ## Blackbox fields
 
-- `transition_speed`: saved setting from 0-100, centered at 50.
-- `transition_speed_blend`: instantaneous signed -1 to 1 response adjustment.
-  Negative values add damping; positive values release it.
+- `transition_speed`: saved correction-reversal speed from 0-100; start at 50.
+- `transition_speed_blend`: signed configured speed while transition timing is
+  active. Negative values are slower; positive values are faster.
+- `transition_slew_us`: actual correction from the gain-independent timing
+  stage before Memory and Max Correction.
 - `transition_authority_blend`: detected transition envelope from 0 to 1.
 - `transition_prediction_scale`: multiplier applied to optional acceleration
   and throttle look-ahead. It approaches 0.25 during a full transition.

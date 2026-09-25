@@ -12,7 +12,7 @@ public:
 
     struct DrivingProfile
     {
-        uint32_t version = 10;
+        uint32_t version = 11;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -20,19 +20,34 @@ public:
         float gyroSmoothing = 0.10f;
         float gyroIntegralGain = 0.0f;
 
-        int32_t gyroMaxCorrection = 25;
+        int32_t gyroMaxCorrection = 100;
         int32_t gyroIntegralLimit = 120;
         int32_t gyroHoldBoost = 0;
         int32_t predictionStrength = 0;
         int32_t radioSteeringTravel = 100;
-        int32_t gyroCounterSteerAssist = 0;
+        int32_t gyroCounterSteerAssist = 100;
         int32_t gyroTransitionSpeed = 50;
         int32_t gyroHuntStrength = 50;
+        int32_t driverPriority = 0;
+    };
+
+    struct SteeringCalibration
+    {
+        bool calibrated = false;
+        uint8_t mask = 0;
+        int min = 1000;
+        int center = 1500;
+        int max = 2000;
+        int inputMin = 1000;
+        int inputCenter = 1500;
+        int inputMax = 2000;
     };
 
     bool begin();
 
     void update();
+
+    void factoryReset();
 
     // Gyro
     float getGain();
@@ -75,6 +90,15 @@ public:
     int getGyroHuntStrength();
     void setGyroHuntStrength(int value);
 
+    // Reduces only the fast direct gyro path as the driver's steering command
+    // moves away from center. Zero preserves the existing controller exactly.
+    int getDriverPriority();
+    void setDriverPriority(int value);
+
+    // 0 = 1/10 scale steering resonance, 1 = micro scale resonance.
+    uint8_t getAntiWobbleScale();
+    void setAntiWobbleScale(uint8_t value);
+
     // Servo
     int getServoCenter();
     void setServoCenter(int value);
@@ -91,12 +115,31 @@ public:
     uint16_t getControlLoopHz();
     void setControlLoopHz(uint16_t value);
 
+    // Regenerated receiver/ESC PWM rate. 50 Hz is the compatibility default;
+    // 250/333 Hz are opt-in for ESCs that explicitly support high-rate PWM.
+    uint16_t getThrottleOutputHz();
+    void setThrottleOutputHz(uint16_t value);
+
+    // Display orientation is stored as clockwise quarter turns. Matrix builds
+    // support all four positions; AMOLED builds support normal (0) and the
+    // physically useful 180-degree flip (2).
+    uint8_t getDisplayRotation();
+    void setDisplayRotation(uint8_t value);
+
+    uint8_t getDisplayBrightness();
+    void setDisplayBrightness(int value);
+    uint16_t getDisplayDimTimeout();
+    void setDisplayDimTimeout(int value);
+
     // WiFi
     bool getWifiEnabled();
     void setWifiEnabled(bool value);
 
     uint32_t getWifiTimeout();
     void setWifiTimeout(uint32_t value);
+
+    const char* getWifiSsid();
+    void setWifiSsid(const String& value);
 
     // Blackbox
     bool getBlackboxEnabled();
@@ -114,6 +157,7 @@ public:
 
     uint8_t getSteeringCalibrationMask();
     bool isSteeringCalibrated();
+    void getSteeringCalibration(SteeringCalibration& out);
     int getSteeringCapturedPulse(uint8_t point);
     int getSteeringCapturedInputPulse(uint8_t point);
     bool captureSteeringCalibrationPoint(
@@ -122,6 +166,11 @@ public:
         int inputPulse = 0
     );
     bool confirmStoredSteeringCalibration();
+    bool setStoredSteeringEndpoints(
+        int minimum,
+        int center,
+        int maximum
+    );
     void clearSteeringCalibration();
 
     int getRadioSteeringTravel();
@@ -159,6 +208,8 @@ public:
 
 private:
 
+    portMUX_TYPE settingsMux = portMUX_INITIALIZER_UNLOCKED;
+
     Preferences prefs;
 
     bool dirty = false;
@@ -173,7 +224,7 @@ private:
 
     bool gyroReverse = false;
 
-    int gyroMaxCorrection = 25;
+    int gyroMaxCorrection = 100;
 
     float gyroSmoothing = 0.10f;
 
@@ -185,13 +236,17 @@ private:
 
     int gyroHoldBoost = 0;
 
-    int gyroCounterSteerAssist = 0;
+    int gyroCounterSteerAssist = 100;
 
     int gyroTransitionSpeed = 50;
 
     int predictionStrength = 0;
 
     int gyroHuntStrength = 50;
+
+    int driverPriority = 0;
+
+    uint8_t antiWobbleScale = 0;
 
     int servoCenter = 1500;
 
@@ -203,9 +258,24 @@ private:
 
     uint16_t controlLoopHz = 250;
 
+    uint16_t throttleOutputHz = 50;
+
+    uint8_t displayRotation =
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        3;
+        #else
+        0;
+        #endif
+
+    uint8_t displayBrightness = 100;
+    uint16_t displayDimTimeout = 0;
+
     bool wifiEnabled = true;
 
     uint32_t wifiTimeout = 40000;
+
+    static constexpr size_t WIFI_SSID_LENGTH = 33;
+    char wifiSsid[WIFI_SSID_LENGTH] = "OpenDrift";
 
     bool blackboxEnabled = false;
 
@@ -243,8 +313,11 @@ private:
 
     void save();
 
+    void persistSteeringCalibration();
+
     void loadProfiles();
     void captureProfile(DrivingProfile& profile);
+    void clampProfile(DrivingProfile& profile);
     void applyProfile(const DrivingProfile& profile);
     bool persistProfile(uint8_t index);
     String sanitizeProfileName(const String& name);

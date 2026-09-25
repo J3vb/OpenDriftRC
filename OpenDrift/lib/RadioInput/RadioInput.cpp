@@ -14,6 +14,7 @@ bool RadioInput::begin(
 
     riseTime = 0;
     pulseWidth = 1500;
+    externalPulseWidth = 1500.0f;
     lastPulseMicros = 0;
 
     pinMode(
@@ -42,6 +43,7 @@ bool RadioInput::beginExternal()
     active = true;
     riseTime = 0;
     pulseWidth = 1500;
+    externalPulseWidth = 1500.0f;
     lastPulseMicros = 0;
 
     return true;
@@ -49,7 +51,7 @@ bool RadioInput::beginExternal()
 
 
 void RadioInput::updateExternalPulse(
-    uint16_t width,
+    float width,
     bool valid
 )
 {
@@ -64,7 +66,8 @@ void RadioInput::updateExternalPulse(
         return;
     }
 
-    pulseWidth = width;
+    externalPulseWidth = width;
+    pulseWidth = (uint16_t)roundf(width);
     lastPulseMicros = micros();
 }
 
@@ -125,6 +128,20 @@ uint16_t RadioInput::getPulseWidth()
 
     uint16_t pulse =
         pulseWidth;
+
+    interrupts();
+
+    return pulse;
+}
+
+
+float RadioInput::getPulseWidthFloat()
+{
+    noInterrupts();
+
+    float pulse = external
+        ? externalPulseWidth
+        : (float)pulseWidth;
 
     interrupts();
 

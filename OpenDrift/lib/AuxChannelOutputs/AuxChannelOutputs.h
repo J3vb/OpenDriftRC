@@ -24,6 +24,10 @@ public:
         bool signalValid
     );
 
+    // Immediately neutralize every attached output. This is safe from the
+    // control task because it never creates or removes PWM channels.
+    void writeFailsafe();
+
     static bool isPinAvailable(
         uint8_t gpio
     );

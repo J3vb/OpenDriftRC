@@ -6,7 +6,7 @@
 #include "Touch.h"
 #include "GyroController.h"
 #include "IMU.h"
-#include "WiFiManager.h"
+#include "WIFIManager.h"
 #include "Settings.h"
 #include "RadioInput.h"
 #include "Servo.h"
@@ -32,6 +32,10 @@ public:
     );
 
     void requestRefresh();
+
+    void setCalibrationCallback(
+        void (*callback)()
+    );
 
 
     void update(
@@ -67,6 +71,8 @@ private:
     RadioInput* throttleRadioInput = nullptr;
 
     ServoOutput* steeringServoOutput = nullptr;
+
+    void (*calibrationCallback)() = nullptr;
 
     LGFX_Sprite canvas;
 
@@ -132,6 +138,12 @@ private:
 
     bool steeringCalibrationError = false;
 
+    // Completed endpoints are locked against incidental screen touches.
+    // Holding an endpoint button deliberately starts a fresh calibration.
+    int8_t steeringCalibrationResetPoint = -1;
+
+    unsigned long steeringCalibrationResetStartedAt = 0;
+
     int8_t heldRepeatButton = 0;
 
     unsigned long nextRepeatAt = 0;
@@ -150,6 +162,18 @@ private:
     int16_t swipePreviewOffset = 0;
 
     unsigned long lastSwipePreviewAt = 0;
+
+    uint8_t appliedBrightnessLevel = 0xFF;
+    unsigned long lastTouchMs = 0;
+    uint16_t lastDimTimeoutSeconds = 0;
+    uint8_t lastBrightnessPercent = 0;
+    bool displayDimmed = false;
+    bool swallowTouchUntilRelease = false;
+
+    bool updateDisplayBrightness(
+        Settings& settings,
+        bool touched
+    );
     #endif
 
 

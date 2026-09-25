@@ -116,7 +116,17 @@ uint16_t CrsfInput::getChannelMicroseconds(
     uint8_t channel
 ) const
 {
-    return channelToMicroseconds(
+    return (uint16_t)roundf(
+        getChannelMicrosecondsFloat(channel)
+    );
+}
+
+
+float CrsfInput::getChannelMicrosecondsFloat(
+    uint8_t channel
+) const
+{
+    return channelToMicrosecondsFloat(
         getChannelRaw(channel)
     );
 }
@@ -508,6 +518,16 @@ uint16_t CrsfInput::channelToMicroseconds(
     uint16_t raw
 )
 {
+    return (uint16_t)roundf(
+        channelToMicrosecondsFloat(raw)
+    );
+}
+
+
+float CrsfInput::channelToMicrosecondsFloat(
+    uint16_t raw
+)
+{
     raw = constrain(
         raw,
         172,
@@ -515,11 +535,7 @@ uint16_t CrsfInput::channelToMicroseconds(
     );
 
     return
-        988
+        988.0f
         +
-        (
-            ((uint32_t)(raw - 172) * 1024U + 819U)
-            /
-            1639U
-        );
+        ((raw - 172) * (1024.0f / 1639.0f));
 }

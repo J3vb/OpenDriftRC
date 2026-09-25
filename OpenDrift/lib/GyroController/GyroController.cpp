@@ -11,15 +11,23 @@ namespace
     static constexpr uint8_t PHASE_TRANSITION = 3;
 
     static constexpr float TRANSITION_SECONDS = 0.18f;
+    static constexpr float DIRECTION_MEMORY_SECONDS = 0.5f;
+    static constexpr float TRANSITION_SLEW_SLOW_SECONDS = 0.120f;
+    static constexpr float TRANSITION_SLEW_FAST_SECONDS = 0.004f;
+    static constexpr float TRANSITION_SLEW_RELEASE_SECONDS = 0.020f;
+    static constexpr float DRIVER_PRIORITY_FILTER_SECONDS = 0.030f;
     static constexpr float THROTTLE_APPLY_SECONDS = 0.22f;
     static constexpr float THROTTLE_LIFT_SECONDS = 0.48f;
     static constexpr float MEMORY_GAIN_SCALE = 6.0f;
 
     static constexpr float HUNT_BASELINE_SECONDS = 0.45f;
-    static constexpr float HUNT_NOTCH_FREQUENCY_HZ = 3.2f;
     static constexpr float HUNT_NOTCH_Q = 1.25f;
-    static constexpr float HUNT_NOTCH_MIN_HZ = 2.5f;
-    static constexpr float HUNT_NOTCH_MAX_HZ = 3.6f;
+    static constexpr float HUNT_TENTH_INITIAL_HZ = 3.2f;
+    static constexpr float HUNT_TENTH_MIN_HZ = 2.5f;
+    static constexpr float HUNT_TENTH_MAX_HZ = 3.6f;
+    static constexpr float HUNT_MICRO_INITIAL_HZ = 8.5f;
+    static constexpr float HUNT_MICRO_MIN_HZ = 5.0f;
+    static constexpr float HUNT_MICRO_MAX_HZ = 15.0f;
     static constexpr float HUNT_NOTCH_TRACK_SECONDS = 1.20f;
     static constexpr float HUNT_NOTCH_ENTRY_TRACK_SECONDS = 2.40f;
     static constexpr float HUNT_NOTCH_UPDATE_STEP_HZ = 0.01f;
@@ -32,9 +40,32 @@ namespace
     // Blackbox 39-41 identified the repeatable wheel mode at 2.6-3.5 Hz.
     // Keep margin around it without accepting the slower chassis motion that
     // log 41 showed being mistaken for hunt.
-    static constexpr float HUNT_MIN_HALF_PERIOD = 0.11f;
-    static constexpr float HUNT_MAX_HALF_PERIOD = 0.23f;
+    static constexpr float HUNT_TENTH_MIN_HALF_PERIOD = 0.11f;
+    static constexpr float HUNT_TENTH_MAX_HALF_PERIOD = 0.23f;
+    static constexpr float HUNT_MICRO_MIN_HALF_PERIOD = 0.030f;
+    static constexpr float HUNT_MICRO_MAX_HALF_PERIOD = 0.110f;
     static constexpr float HUNT_LATCH_SECONDS = 0.75f;
+
+    float huntInitialHz(uint8_t scale)
+    {
+        return scale == 1
+            ? HUNT_MICRO_INITIAL_HZ
+            : HUNT_TENTH_INITIAL_HZ;
+    }
+
+    float huntMinimumHz(uint8_t scale)
+    {
+        return scale == 1
+            ? HUNT_MICRO_MIN_HZ
+            : HUNT_TENTH_MIN_HZ;
+    }
+
+    float huntMaximumHz(uint8_t scale)
+    {
+        return scale == 1
+            ? HUNT_MICRO_MAX_HZ
+            : HUNT_TENTH_MAX_HZ;
+    }
 }
 
 
@@ -47,6 +78,8 @@ void GyroController::resetDynamicState()
     driftReferenceYaw = 0.0f;
     driftReferenceReady = false;
     driftDirection = 0;
+    lastDefiniteDirection = 0;
+    quietSeconds = 0.0f;
     transitionTime = 0.0f;
 
     integralAccumulator = 0.0f;
@@ -55,6 +88,10 @@ void GyroController::resetDynamicState()
 
     steeringActivity = 0.0f;
     transitionSpeedBlend = 0.0f;
+    transitionSlewCorrection = 0.0f;
+    transitionSlewReady = false;
+    transitionSlewActive = false;
+    driverPriorityScale = 1.0f;
     lastSteeringCommand = 1500;
     steeringReady = false;
 
@@ -112,6 +149,9 @@ void GyroController::resetDynamicState()
     huntLatchTelemetry = 0.0f;
     transitionAuthorityTelemetry = 0.0f;
     transitionPredictionScaleTelemetry = 1.0f;
+    transitionSlewCorrectionTelemetry = 0.0f;
+    driverPriorityScaleTelemetry = 1.0f;
+    effectiveDirectGainTelemetry = gyroGain;
 
     requestedCorrectionOutput = 0;
     correctionOutput = 0;
@@ -148,7 +188,56 @@ void GyroController::calibrate(float yawRate)
 }
 
 
-int GyroController::update(
+void GyroController::startCalibration(uint16_t sampleCount)
+{
+    calibrationSampleTarget = constrain(
+        sampleCount,
+        (uint16_t)25,
+        (uint16_t)1000
+    );
+    calibrationSampleCount = 0;
+    calibrationSum = 0.0f;
+    calibrationMin = 0.0f;
+    calibrationMax = 0.0f;
+    calibrationState = CALIBRATION_RUNNING;
+}
+
+
+void GyroController::abortCalibration()
+{
+    if(calibrationState != CALIBRATION_RUNNING)
+    {
+        return;
+    }
+
+    calibrationSampleCount = 0;
+    calibrationSum = 0.0f;
+    calibrationState = CALIBRATION_REJECTED;
+    resetDynamicState();
+}
+
+
+void GyroController::reverseYawFrame()
+{
+    gyroOffset = -gyroOffset;
+    abortCalibration();
+    resetDynamicState();
+}
+
+
+bool GyroController::isCalibrating() const
+{
+    return calibrationState == CALIBRATION_RUNNING;
+}
+
+
+GyroController::CalibrationState GyroController::getCalibrationState() const
+{
+    return calibrationState;
+}
+
+
+float GyroController::update(
     float yawRate,
     int steeringCommand,
     bool steeringSignal,
@@ -175,7 +264,47 @@ int GyroController::update(
 
     lastUpdateMicros = now;
 
-    if(!calibrated)
+    if(calibrationState == CALIBRATION_RUNNING)
+    {
+        if(calibrationSampleCount == 0)
+        {
+            calibrationMin = yawRate;
+            calibrationMax = yawRate;
+        }
+        else
+        {
+            calibrationMin = min(calibrationMin, yawRate);
+            calibrationMax = max(calibrationMax, yawRate);
+        }
+
+        calibrationSum += yawRate;
+        calibrationSampleCount++;
+
+        if(calibrationSampleCount >= calibrationSampleTarget)
+        {
+            float spread = calibrationMax - calibrationMin;
+            float mean = calibrationSum / (float)calibrationSampleCount;
+
+            if(spread <= 2.0f && fabsf(mean) <= 20.0f)
+            {
+                gyroOffset = mean;
+                calibrated = true;
+                resetDynamicState();
+                calibrationState = CALIBRATION_OK;
+            }
+            else
+            {
+                calibrationState = CALIBRATION_REJECTED;
+                resetDynamicState();
+            }
+        }
+
+        requestedCorrectionOutput = 0;
+        correctionOutput = 0;
+        return 0;
+    }
+
+    if(!calibrated && calibrationState == CALIBRATION_IDLE)
     {
         calibrate(yawRate);
     }
@@ -191,6 +320,12 @@ int GyroController::update(
         steeringReady = false;
         steeringActivity = 0.0f;
         lastSteeringCommand = 1500;
+        settledBlend = 0.0f;
+        transitionAuthorityBlend = 0.0f;
+        driftReferenceReady = false;
+        driftReferenceYaw = 0.0f;
+        integralAccumulator = 0.0f;
+        integralCorrection = 0;
     }
     else if(!steeringReady)
     {
@@ -525,8 +660,8 @@ int GyroController::update(
 
     bool directionChanged =
         definiteDirection != 0 &&
-        driftDirection != 0 &&
-        definiteDirection != driftDirection;
+        lastDefiniteDirection != 0 &&
+        definiteDirection != lastDefiniteDirection;
 
     if(directionChanged)
     {
@@ -538,6 +673,17 @@ int GyroController::update(
     if(definiteDirection != 0)
     {
         driftDirection = definiteDirection;
+        lastDefiniteDirection = definiteDirection;
+        quietSeconds = 0.0f;
+    }
+    else if(yawAbs < 7.0f)
+    {
+        quietSeconds += dt;
+
+        if(quietSeconds >= DIRECTION_MEMORY_SECONDS)
+        {
+            lastDefiniteDirection = 0;
+        }
     }
 
     transitionTime = max(
@@ -856,9 +1002,19 @@ int GyroController::update(
             }
             else if(residualSign != huntResidualSign)
             {
+                float minimumHalfPeriod =
+                    antiWobbleScale == 1
+                    ? HUNT_MICRO_MIN_HALF_PERIOD
+                    : HUNT_TENTH_MIN_HALF_PERIOD;
+
+                float maximumHalfPeriod =
+                    antiWobbleScale == 1
+                    ? HUNT_MICRO_MAX_HALF_PERIOD
+                    : HUNT_TENTH_MAX_HALF_PERIOD;
+
                 bool validHalfCycle =
-                    huntCrossingAge >= HUNT_MIN_HALF_PERIOD &&
-                    huntCrossingAge <= HUNT_MAX_HALF_PERIOD &&
+                    huntCrossingAge >= minimumHalfPeriod &&
+                    huntCrossingAge <= maximumHalfPeriod &&
                     huntHalfCyclePeak >= huntMinimumPeak;
 
                 if(validHalfCycle)
@@ -955,14 +1111,14 @@ int GyroController::update(
     if(
         huntCandidate &&
         huntConsistentHalfCycles > 0 &&
-        huntFrequency >= HUNT_NOTCH_MIN_HZ &&
-        huntFrequency <= HUNT_NOTCH_MAX_HZ
+        huntFrequency >= huntMinimumHz(antiWobbleScale) &&
+        huntFrequency <= huntMaximumHz(antiWobbleScale)
     )
     {
         huntNotchTargetHz = constrain(
             huntFrequency,
-            HUNT_NOTCH_MIN_HZ,
-            HUNT_NOTCH_MAX_HZ
+            huntMinimumHz(antiWobbleScale),
+            huntMaximumHz(antiWobbleScale)
         );
 
         float huntTrackingSeconds =
@@ -1146,28 +1302,6 @@ int GyroController::update(
             integralLimit
         );
 
-    // Transition Speed is centered at 50 and follows the complete transition
-    // envelope rather than the short steering-rate pulse. This keeps the
-    // adjustment active through the physical yaw reversal and makes matched
-    // 25/50/75 tests deliberately obvious.
-    transitionSpeedBlend =
-        ((transitionSpeed - 50) / 50.0f)
-        *
-        transitionAuthorityBlend;
-
-    transitionSpeedBlend = constrain(
-        transitionSpeedBlend,
-        -1.0f,
-        1.0f
-    );
-
-    float directDampingScale =
-        transitionSpeedBlend < 0.0f
-        ?
-        1.0f - 0.75f * transitionSpeedBlend
-        :
-        1.0f - 0.55f * transitionSpeedBlend;
-
     // Run the notch continuously, even while its output is bypassed. This
     // keeps its history aligned with measured motion and prevents a kick when
     // settled-drift suppression engages. The notch passes slow chassis yaw
@@ -1206,19 +1340,58 @@ int GyroController::update(
     float huntDampedYaw =
         predictedYaw - huntRemovedYaw;
 
+    // Driver Priority is position-based gain scheduling inspired by the
+    // contributor's PCA experiment. Full gyro response remains available near
+    // center; deliberate steering progressively yields only the fast direct
+    // correction path to the driver. A short filter prevents an abrupt gain
+    // rise as the steering passes through center, while the downstream
+    // transition slew still controls correction reversal timing.
+    float steeringDeflection =
+        steeringSignal
+        ? constrain(
+            fabsf((float)steeringCommand - 1500.0f) / 500.0f,
+            0.0f,
+            1.0f
+        )
+        : 0.0f;
+
+    float priorityTargetScale =
+        1.0f
+        - steeringDeflection
+        * (driverPriority / 100.0f);
+
+    if(driverPriority <= 0)
+    {
+        // Preserve the existing controller bit-for-bit when the feature is
+        // disabled, including immediately after loading an older profile.
+        driverPriorityScale = 1.0f;
+    }
+    else
+    {
+        driverPriorityScale +=
+            (priorityTargetScale - driverPriorityScale)
+            *
+            (1.0f - expf(-dt / DRIVER_PRIORITY_FILTER_SECONDS));
+    }
+
+    driverPriorityScale = constrain(
+        driverPriorityScale,
+        0.5f,
+        1.0f
+    );
+
+    float effectiveDirectGain =
+        gyroGain * driverPriorityScale;
+
     float directCorrection =
         huntDampedYaw
         *
-        gyroGain
-        *
-        directDampingScale;
+        effectiveDirectGain;
 
     float huntRemovedCorrection =
         huntRemovedYaw
         *
-        gyroGain
-        *
-        directDampingScale;
+        effectiveDirectGain;
 
     // Countersteer Assist is deliberately sourced from the slow learned
     // drift reference. It increases how much of a settled drift OpenDrift
@@ -1241,14 +1414,121 @@ int GyroController::update(
     counterSteerCorrection =
         (int)roundf(steadyAssistCorrection);
 
-    float baseCorrection =
+    float desiredBaseCorrection =
         directCorrection
         +
         steadyAssistCorrection;
 
-    // Transition Speed shapes the response above, but it must never reduce
-    // the hard correction authority. Doing so made fast transitions hit a
-    // moving ceiling and then snap when that ceiling released.
+    // Transition Speed is a time-domain correction-reversal control. The old
+    // implementation multiplied direct gyro gain by the detector envelope;
+    // high-gain cars either overwhelmed that small difference or clipped it
+    // at Max Correction/servo travel. Latch a dedicated slew stage whenever
+    // the controller enters a transition and use a fixed response time that
+    // is independent of gain and detector strength.
+    bool transitionControlRequested =
+        transitionTime > 0.0f ||
+        transitionAuthorityBlend > 0.35f;
+
+    if(!transitionSlewReady)
+    {
+        transitionSlewCorrection = desiredBaseCorrection;
+        transitionSlewReady = true;
+    }
+
+    if(idle)
+    {
+        // Idle is a state-machine classification, not an output deadband.
+        // Forcing the correction to zero here created a hard response cliff
+        // at 7 dps: slow chassis movement received no correction, then the
+        // servo jumped as soon as yaw crossed the threshold. Keep the direct
+        // gyro path continuous; the configured Deadband already controls the
+        // true zero-output region, while the idle block above has cleared all
+        // drift-memory assistance.
+        transitionSlewCorrection = desiredBaseCorrection;
+        transitionSlewActive = false;
+    }
+    else if(transitionControlRequested)
+    {
+        transitionSlewActive = true;
+    }
+
+    transitionSpeedBlend =
+        transitionSlewActive
+        ?
+        (transitionSpeed - 50) / 50.0f
+        :
+        0.0f;
+
+    transitionSpeedBlend = constrain(
+        transitionSpeedBlend,
+        -1.0f,
+        1.0f
+    );
+
+    if(transitionSlewActive)
+    {
+        float speedAmount =
+            transitionSpeed / 100.0f;
+
+        // Exponential mapping gives the slower half enough useful range while
+        // allowing 100 to remain nearly transparent. Because this is
+        // time-based it behaves the same at 250 Hz and 333 Hz.
+        float responseSeconds =
+            TRANSITION_SLEW_SLOW_SECONDS
+            *
+            powf(
+                TRANSITION_SLEW_FAST_SECONDS
+                    /
+                    TRANSITION_SLEW_SLOW_SECONDS,
+                speedAmount
+            );
+
+        if(!transitionControlRequested)
+        {
+            // Finish any remaining correction movement smoothly after the
+            // detector releases, without carrying transition lag into the
+            // next settled drift.
+            responseSeconds = min(
+                responseSeconds,
+                TRANSITION_SLEW_RELEASE_SECONDS
+            );
+        }
+
+        float slewAmount =
+            1.0f - expf(-dt / responseSeconds);
+
+        transitionSlewCorrection +=
+            (
+                desiredBaseCorrection
+                -
+                transitionSlewCorrection
+            )
+            *
+            slewAmount;
+
+        if(
+            !transitionControlRequested &&
+            fabsf(
+                desiredBaseCorrection
+                -
+                transitionSlewCorrection
+            ) < 1.0f
+        )
+        {
+            transitionSlewCorrection = desiredBaseCorrection;
+            transitionSlewActive = false;
+            transitionSpeedBlend = 0.0f;
+        }
+    }
+    else
+    {
+        transitionSlewCorrection = desiredBaseCorrection;
+    }
+
+    float baseCorrection = transitionSlewCorrection;
+
+    // Transition Speed shapes response timing above, but never changes the
+    // hard correction authority.
     int effectiveMaxCorrection = maxCorrection;
 
     // There is no accumulating state to wind up. When direct damping has
@@ -1262,18 +1542,16 @@ int GyroController::update(
         integralCorrection = 0;
     }
 
-    int requestedControllerCorrection =
-        (int)roundf(
-            baseCorrection
-            +
-            integralCorrection
-        );
+    float requestedControllerCorrection =
+        baseCorrection
+        +
+        integralCorrection;
 
-    int targetCorrection =
+    float targetCorrection =
         constrain(
             requestedControllerCorrection,
-            -effectiveMaxCorrection,
-            effectiveMaxCorrection
+            -(float)effectiveMaxCorrection,
+            (float)effectiveMaxCorrection
         );
 
     if(idle && correctedYaw == 0.0f)
@@ -1287,7 +1565,8 @@ int GyroController::update(
     // controller's sign convention is opposite the servo mix convention.
     // The caller combines this with driver input and performs the one final
     // normalized clamp before calibrated physical endpoints are applied.
-    requestedCorrectionOutput = -requestedControllerCorrection;
+    requestedCorrectionOutput =
+        (int)roundf(-requestedControllerCorrection);
     correctionOutput = -targetCorrection;
 
     predictedYawTelemetry = predictedYaw;
@@ -1316,6 +1595,9 @@ int GyroController::update(
     );
     transitionAuthorityTelemetry = transitionAuthorityBlend;
     transitionPredictionScaleTelemetry = transitionPredictionScale;
+    transitionSlewCorrectionTelemetry = transitionSlewCorrection;
+    driverPriorityScaleTelemetry = driverPriorityScale;
+    effectiveDirectGainTelemetry = effectiveDirectGain;
 
     return correctionOutput;
 }
@@ -1387,7 +1669,7 @@ int GyroController::getMaxCorrection()
 
 int GyroController::getCorrection()
 {
-    return correctionOutput;
+    return (int)roundf(correctionOutput);
 }
 
 
@@ -1484,11 +1766,6 @@ int GyroController::getCounterSteerCorrection()
 void GyroController::setTransitionSpeed(int value)
 {
     transitionSpeed = constrain(value, 0, 100);
-
-    if(transitionSpeed == 50)
-    {
-        transitionSpeedBlend = 0.0f;
-    }
 }
 
 int GyroController::getTransitionSpeed()
@@ -1518,6 +1795,35 @@ int GyroController::getPredictionStrength()
 }
 
 
+void GyroController::setDriverPriority(int value)
+{
+    driverPriority = constrain(value, 0, 50);
+
+    if(driverPriority == 0)
+    {
+        driverPriorityScale = 1.0f;
+    }
+}
+
+
+int GyroController::getDriverPriority()
+{
+    return driverPriority;
+}
+
+
+float GyroController::getDriverPriorityScale()
+{
+    return driverPriorityScaleTelemetry;
+}
+
+
+float GyroController::getEffectiveDirectGain()
+{
+    return effectiveDirectGainTelemetry;
+}
+
+
 void GyroController::setHuntStrength(int value)
 {
     huntStrength = constrain(value, 0, 100);
@@ -1527,6 +1833,35 @@ void GyroController::setHuntStrength(int value)
 int GyroController::getHuntStrength()
 {
     return huntStrength;
+}
+
+
+void GyroController::setAntiWobbleScale(uint8_t value)
+{
+    uint8_t normalizedScale = value == 1 ? 1 : 0;
+
+    if(normalizedScale == antiWobbleScale)
+    {
+        return;
+    }
+
+    antiWobbleScale = normalizedScale;
+
+    float initialHz = huntInitialHz(antiWobbleScale);
+    huntFrequency = 0.0f;
+    huntConsistentHalfCycles = 0;
+    huntConfidence = 0.0f;
+    huntLatchTime = 0.0f;
+    huntNotchTrackingHz = initialHz;
+    huntNotchTargetHz = initialHz;
+
+    configureHuntNotch(initialHz, true);
+}
+
+
+uint8_t GyroController::getAntiWobbleScale()
+{
+    return antiWobbleScale;
 }
 
 
@@ -1546,8 +1881,8 @@ void GyroController::setControlLoopHz(int value)
     configureHuntNotch(
         constrain(
             huntNotchTrackingHz,
-            HUNT_NOTCH_MIN_HZ,
-            HUNT_NOTCH_MAX_HZ
+            huntMinimumHz(antiWobbleScale),
+            huntMaximumHz(antiWobbleScale)
         ),
         true
     );
@@ -1561,8 +1896,8 @@ void GyroController::configureHuntNotch(
 {
     centerHz = constrain(
         centerHz,
-        HUNT_NOTCH_MIN_HZ,
-        HUNT_NOTCH_MAX_HZ
+        huntMinimumHz(antiWobbleScale),
+        huntMaximumHz(antiWobbleScale)
     );
 
     huntNotchCenterHz = centerHz;
@@ -1729,6 +2064,12 @@ float GyroController::getTransitionAuthorityBlend()
 float GyroController::getTransitionPredictionScale()
 {
     return transitionPredictionScaleTelemetry;
+}
+
+
+float GyroController::getTransitionSlewCorrection()
+{
+    return transitionSlewCorrectionTelemetry;
 }
 
 

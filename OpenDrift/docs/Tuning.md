@@ -81,7 +81,8 @@ the car quickly. They do not disable the fast direct damping path.
 | Drift Memory | Feedback strength for error from the quiet-drift reference |
 | Memory Limit | Maximum Drift Memory contribution in microseconds |
 | Steering Travel | Scales driver steering only; it does not reduce gyro authority |
-| Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
+| Transition Speed | Correction-reversal timing; lower is slower and smoother, higher is faster and sharper |
+| Driver Priority | Progressively reduces only fast direct gyro gain as steering moves away from center; `0` preserves full gyro response and `10-20` is the recommended first test range |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
 
 Throttle prediction remains active when a valid throttle signal is present,
@@ -103,12 +104,25 @@ because it is a narrow wheel-mode notch rather than a broad yaw low-pass.
 
 ### Transition Speed
 
-Transition Speed is tuned after the core settings. Keep it at `50` for neutral
-response. Lower values add yaw damping through the complete direction change;
-higher values reduce damping for faster rotation. It never changes the hard
-Max Correction ceiling. It follows both the driver's transition intent and the measured yaw
-reversal, then fades out before the next settled drift. Test `25`, `50`, and
-`75` at the same tune first, then refine the preferred direction.
+Transition Speed is tuned after the core settings. Start at `50`. Lower values
+make gyro correction reverse more slowly for a calmer transition; higher values
+move correction into the new direction more quickly for a sharper transition.
+The response timing is independent of Gyro Gain and never changes the hard Max
+Correction ceiling. The timing stage starts from driver transition intent,
+stays active through the measured yaw reversal, and finishes smoothly before
+the next settled drift. Test `25`, `50`, and `75` at the same tune first, then
+refine the preferred direction.
+
+### Driver Priority
+
+Driver Priority is tuned after Gain and Transition Speed. At `0`, the existing
+controller is unchanged. Increasing it progressively yields fast direct gyro
+gain to the driver as the steering command moves away from center; a value of
+`20` retains 80% of direct gain at full steering and 90% at half steering.
+Countersteer Assist, Drift Memory, Max Correction, and physical endpoints are
+not reduced. Start at `10`, then test `20`. Excessive priority can remove useful
+stabilization near full countersteer, so the experimental range is capped at
+`50`.
 
 ## Safe first test
 
@@ -118,9 +132,10 @@ Use a stand or hold the chassis with the wheels clear before driving.
 |---|---:|
 | Gain | `1.50` |
 | Deadband | `4` |
-| Max Correction | `25%` |
+| Max Correction | `100%` |
 | Smoothing | `0.01` |
-| Countersteer Assist | `0` |
+| Countersteer Assist | `100` |
+| Driver Priority | `0` |
 | Prediction | `0` |
 | Hold Assist | `0` |
 | Drift Memory | `0.00` |
@@ -186,13 +201,17 @@ the retired alpha-era tuning fields:
 | `reference_lock` | Continuous quiet-drift confidence |
 | `throttle_prediction` | Active throttle load-change prediction blend |
 | `direct_correction_us` | Gain-based direct correction |
+| `driver_priority_pct` | Saved Driver Priority setting from 0–50 |
+| `driver_priority_scale` | Smoothed multiplier currently applied to direct gyro gain; 1.0 is full gain |
+| `effective_direct_gain` | Live base Gain after Driver Priority scaling |
 | `countersteer_assist` | Saved Countersteer Assist setting from 0–100 |
 | `countersteer_us` | Additional slow-reference countersteer contribution |
 | `memory_feedback_us` | Drift Memory correction after its limit |
 | `driver_activity_blend` | Driver steering-change activity |
 | `steering_activity_us_s` | Filtered receiver steering rate |
-| `transition_speed` | Saved centered response setting; `50` is neutral |
-| `transition_speed_blend` | Instantaneous signed transition adjustment from -1 to 1 |
+| `transition_speed` | Saved correction-reversal speed from 0–100; start at `50` |
+| `transition_speed_blend` | Signed configured speed while the transition timing stage is active; negative is slower and positive is faster |
+| `transition_slew_us` | Actual gain-independent correction produced by the transition timing stage before Memory and Max Correction |
 | `transition_authority_blend` | Detected driver/chassis transition envelope from 0 to 1 |
 | `transition_prediction_scale` | Optional prediction multiplier; reduced while transitioning |
 | `hunt_suppression` | Confidence-weighted attenuation applied to a confirmed periodic residual |

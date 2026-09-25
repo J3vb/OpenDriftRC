@@ -33,6 +33,9 @@ public:
         int throttleRaw,
         int gainRaw,
         float gain,
+        int driverPriority,
+        float driverPriorityScale,
+        float effectiveDirectGain,
         float deadband,
         int maxCorrection,
         float smoothing,
@@ -63,6 +66,7 @@ public:
         bool throttleOutputMode,
         int transitionSpeed,
         float transitionSpeedBlend,
+        float transitionSlewCorrection,
         float huntSuppression,
         float huntFrequency,
         float transitionAuthorityBlend,
@@ -127,6 +131,9 @@ private:
         int32_t throttleRaw;
         int32_t gainRaw;
         float gain;
+        int32_t driverPriority;
+        float driverPriorityScale;
+        float effectiveDirectGain;
         float deadband;
         int32_t maxCorrection;
         float smoothing;
@@ -154,6 +161,7 @@ private:
         uint32_t signalFlags;
         int32_t transitionSpeed;
         float transitionSpeedBlend;
+        float transitionSlewCorrection;
         float huntSuppression;
         float huntFrequency;
         float transitionAuthorityBlend;

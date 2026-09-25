@@ -10,21 +10,28 @@ namespace
 
     mcpwm_unit_t unitForSlot(uint8_t slot)
     {
-        return slot < 6
+        // Timer 0 remains reserved so auxiliary routing stays stable across
+        // firmware revisions and never crowds another time-critical output.
+        return slot < 4
             ? MCPWM_UNIT_0
             : MCPWM_UNIT_1;
     }
 
     uint8_t localSlot(uint8_t slot)
     {
-        return slot < 6
+        return slot < 4
             ? slot
-            : slot - 6;
+            : slot - 4;
     }
 
     mcpwm_timer_t timerForSlot(uint8_t slot)
     {
-        return (mcpwm_timer_t)(localSlot(slot) / 2);
+        uint8_t timer =
+            (localSlot(slot) / 2)
+            +
+            (slot < 4 ? 1 : 0);
+
+        return (mcpwm_timer_t)timer;
     }
 
     mcpwm_generator_t generatorForSlot(uint8_t slot)
@@ -36,7 +43,12 @@ namespace
 
     mcpwm_io_signals_t signalForSlot(uint8_t slot)
     {
-        return (mcpwm_io_signals_t)localSlot(slot);
+        uint8_t signal =
+            ((uint8_t)timerForSlot(slot) * 2)
+            +
+            (generatorForSlot(slot) == MCPWM_GEN_B ? 1 : 0);
+
+        return (mcpwm_io_signals_t)signal;
     }
 }
 
@@ -118,6 +130,18 @@ void AuxChannelOutputs::update(
                 (uint16_t)2012
             )
         );
+    }
+}
+
+
+void AuxChannelOutputs::writeFailsafe()
+{
+    for(uint8_t slot = 0; slot < OUTPUT_COUNT; slot++)
+    {
+        if(attached[slot])
+        {
+            writeOutput(slot, AUX_FAILSAFE_PULSE_US);
+        }
     }
 }
 

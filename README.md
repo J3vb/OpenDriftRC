@@ -38,6 +38,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
   - Prediction
   - Countersteer Assist
   - Transition Speed
+  - Driver Priority
   - Anti Wobble
 - Up to 12 persistent named surface/driving profiles.
 - Scrollable trackside profile selection on both displays.
@@ -47,6 +48,7 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 - Non-blocking PSRAM blackbox logging with controller, prediction, throttle, notch, chassis-motion, and correction telemetry.
 - Persistent settings stored in ESP32 preferences.
 - Transition Speed adjustment centered at the neutral baseline of `50`.
+- Driver Priority adjustment that yields fast direct gyro gain as steering input increases; default `0` preserves the established response.
 - Phase-aware Anti Wobble notch with a track-tested default of `50`.
 - Separate PWM and full-duplex CRSF targets for Waveshare AMOLED V1 and V2.
 - Full-duplex CRSF steering, throttle, gain, link statistics, parameter
@@ -229,9 +231,10 @@ Conservative first-power values:
 | --- | ---: |
 | Gain | 1.50 |
 | Deadband | 4.0 |
-| Max correction | 25% |
+| Max correction | 100% |
 | Smoothing | 0.01 |
-| Countersteer Assist | 0 |
+| Countersteer Assist | 100 |
+| Driver Priority | 0 |
 | Drift memory | 0.00 |
 | Memory limit | 80 |
 | Hold Assist | 0 |
@@ -247,6 +250,7 @@ Tune symptoms:
 | Prediction makes transitions nervous | Lower Prediction |
 | Car is stable but the driver carries too much countersteer | Raise Countersteer Assist in steps of 10 |
 | Gyro feels too hands-on during a settled drift | Lower Countersteer Assist |
+| High gain feels restrictive near full steering | Add Driver Priority in steps of 5; start below 20 |
 | Long drift slowly wanders | Add Hold Assist, then minimal Drift Memory |
 | Transition carries the old drift | Lower Hold Assist or Drift Memory |
 | Mid-drift wheel oscillation | Lower gain first; verify servo and chassis |
@@ -333,7 +337,7 @@ Basic firmware/system information. Tap the GPIO 18 mode button to switch between
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
 
-Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
+Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Driver Priority, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
 
 Hardware and installation settings remain global, including gyro/servo direction, physical steering endpoints, servo center and travel, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
@@ -361,6 +365,7 @@ Current web settings:
 - Smoothing
 - Prediction strength
 - Transition Speed
+- Driver Priority
 - Anti Wobble
 - Drift memory
 - Memory limit
@@ -413,7 +418,8 @@ Log rows include:
 - Servo quiet band
 - Throttle input
 - Gain input and active gain
-- Active deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory, and memory limit
+- Active deadband, max correction, smoothing, Prediction, Countersteer Assist, Driver Priority, Hold Assist, Drift Memory, and memory limit
+- Driver Priority scale and effective live direct gain
 - Predicted yaw, quiet-drift reference, reference error, steady countersteer contribution, and memory correction
 - Driver steering activity and throttle-prediction blend
 - Controller phase (`0` idle, `1` entry, `2` settled, `3` transition) and reference-lock blend

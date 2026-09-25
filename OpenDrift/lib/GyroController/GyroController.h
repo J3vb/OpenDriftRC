@@ -7,9 +7,17 @@ class GyroController
 {
 public:
 
+    enum CalibrationState : uint8_t
+    {
+        CALIBRATION_IDLE = 0,
+        CALIBRATION_RUNNING = 1,
+        CALIBRATION_OK = 2,
+        CALIBRATION_REJECTED = 3
+    };
+
     bool begin();
 
-    int update(
+    float update(
         float yawRate,
         int steeringCommand = 1500,
         bool steeringSignal = false,
@@ -18,6 +26,11 @@ public:
     );
 
     void calibrate(float yawRate);
+    void startCalibration(uint16_t sampleCount);
+    void abortCalibration();
+    void reverseYawFrame();
+    bool isCalibrating() const;
+    CalibrationState getCalibrationState() const;
 
     void setGain(float gain);
     float getGain();
@@ -52,9 +65,9 @@ public:
     int getCounterSteerAssist();
     int getCounterSteerCorrection();
 
-    // Transition Speed follows the controller's complete transition state,
-    // including the chassis direction change after steering movement ends.
-    // Lower values add damping, 50 is neutral, and higher values release it.
+    // Transition Speed controls how quickly gyro correction reverses during a
+    // direction change. It changes response timing, never correction gain or
+    // the Max Correction ceiling.
     void setTransitionSpeed(int value);
     int getTransitionSpeed();
     float getTransitionSpeedBlend();
@@ -62,8 +75,21 @@ public:
     void setPredictionStrength(int value);
     int getPredictionStrength();
 
+    // Driver Priority progressively reduces only the fast direct gyro path as
+    // steering moves away from center. It does not change steady assist,
+    // memory, Max Correction, or the saved base gain.
+    void setDriverPriority(int value);
+    int getDriverPriority();
+    float getDriverPriorityScale();
+    float getEffectiveDirectGain();
+
     void setHuntStrength(int value);
     int getHuntStrength();
+
+    // 0 preserves the proven 1/10-scale 3.2 Hz notch. Micro mode follows
+    // the substantially faster steering resonance found on 1/24 hardware.
+    void setAntiWobbleScale(uint8_t value);
+    uint8_t getAntiWobbleScale();
 
     void setControlLoopHz(int value);
     int getControlLoopHz();
@@ -90,6 +116,7 @@ public:
     float getHuntLatch();
     float getTransitionAuthorityBlend();
     float getTransitionPredictionScale();
+    float getTransitionSlewCorrection();
 
     int getControlPhase();
     float getSettledBlend();
@@ -110,6 +137,8 @@ private:
     int transitionSpeed = 50;
     int predictionStrength = 0;
     int huntStrength = 50;
+    int driverPriority = 0;
+    float driverPriorityScale = 1.0f;
 
     float filteredYaw = 0.0f;
     float previousFilteredYaw = 0.0f;
@@ -118,6 +147,8 @@ private:
     float driftReferenceYaw = 0.0f;
     bool driftReferenceReady = false;
     int8_t driftDirection = 0;
+    int8_t lastDefiniteDirection = 0;
+    float quietSeconds = 0.0f;
     float transitionTime = 0.0f;
 
     float integralAccumulator = 0.0f;
@@ -126,6 +157,9 @@ private:
 
     float steeringActivity = 0.0f;
     float transitionSpeedBlend = 0.0f;
+    float transitionSlewCorrection = 0.0f;
+    bool transitionSlewReady = false;
+    bool transitionSlewActive = false;
     int lastSteeringCommand = 1500;
     bool steeringReady = false;
 
@@ -171,6 +205,7 @@ private:
     float huntNotchCenterHz = 3.2f;
     float huntNotchTrackingHz = 3.2f;
     float huntNotchTargetHz = 3.2f;
+    uint8_t antiWobbleScale = 0;
 
     float predictedYawTelemetry = 0.0f;
     float driftReferenceTelemetry = 0.0f;
@@ -191,12 +226,22 @@ private:
     float huntLatchTelemetry = 0.0f;
     float transitionAuthorityTelemetry = 0.0f;
     float transitionPredictionScaleTelemetry = 1.0f;
+    float transitionSlewCorrectionTelemetry = 0.0f;
+    float driverPriorityScaleTelemetry = 1.0f;
+    float effectiveDirectGainTelemetry = 1.5f;
 
     int requestedCorrectionOutput = 0;
-    int correctionOutput = 0;
+    float correctionOutput = 0.0f;
 
     bool calibrated = false;
     uint32_t lastUpdateMicros = 0;
+
+    CalibrationState calibrationState = CALIBRATION_IDLE;
+    uint16_t calibrationSampleTarget = 0;
+    uint16_t calibrationSampleCount = 0;
+    float calibrationSum = 0.0f;
+    float calibrationMin = 0.0f;
+    float calibrationMax = 0.0f;
 
     void resetDynamicState();
     void configureHuntNotch(float centerHz, bool resetHistory);

@@ -3,9 +3,8 @@
 #include <Arduino.h>
 
 
-// ESC pulses deliberately use LEDC instead of ESP32Servo. On ESP32-S3 the
-// current ESP32Servo MCPWM allocator can route a second frequency through the
-// first timer's signal, causing the throttle pin to mirror steering output.
+// ESC pulses own a separate LEDC timer/channel from the steering driver so
+// their different frame rates cannot affect one another.
 class EscOutput
 {
 public:
@@ -18,7 +17,7 @@ public:
     void end();
 
     void writeMicroseconds(
-        int pulseUs
+        float pulseUs
     );
 
     void configure(
@@ -35,12 +34,13 @@ private:
 
     static constexpr uint8_t LEDC_CHANNEL = 7;
     // ESP32-S3 LEDC supports at most 14-bit duty resolution in this Arduino
-    // core. At 50 Hz this still resolves an ESC pulse to about 1.22 us.
+    // core: about 1.22 us at 50 Hz or 0.18 us at 333 Hz.
     static constexpr uint8_t LEDC_RESOLUTION_BITS = 14;
 
     int pin = -1;
     int frequency = 50;
-    int currentPulse = 1500;
+    float ticksPerMicrosecond = 1.0f;
+    float currentPulse = 1500.0f;
     int center = 1500;
     bool reversed = false;
     int travel = 100;

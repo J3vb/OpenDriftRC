@@ -26,6 +26,12 @@ bool EscOutput::begin(
         return false;
     }
 
+    frequency = (int)configuredFrequency;
+    ticksPerMicrosecond =
+        ((float)(1UL << LEDC_RESOLUTION_BITS) * frequency)
+        /
+        1000000.0f;
+
     ledcAttachPin(
         pin,
         LEDC_CHANNEL
@@ -61,7 +67,7 @@ void EscOutput::end()
 
 
 void EscOutput::writeMicroseconds(
-    int pulseUs
+    float pulseUs
 )
 {
     if(!active)
@@ -69,8 +75,8 @@ void EscOutput::writeMicroseconds(
         return;
     }
 
-    int correction =
-        pulseUs - 1500;
+    float correction =
+        pulseUs - 1500.0f;
 
     if(reversed)
     {
@@ -80,16 +86,16 @@ void EscOutput::writeMicroseconds(
     correction =
         (correction * travel) / 100;
 
-    int target =
+    float target =
         constrain(
             center + correction,
-            1000,
-            2000
+            1000.0f,
+            2000.0f
         );
 
     if(
         quiet > 0 &&
-        abs(target - currentPulse) <= quiet
+        fabsf(target - currentPulse) <= quiet
     )
     {
         return;
@@ -100,15 +106,12 @@ void EscOutput::writeMicroseconds(
     constexpr uint32_t maxDuty =
         (1UL << LEDC_RESOLUTION_BITS) - 1UL;
 
-    uint32_t periodUs =
-        1000000UL / (uint32_t)frequency;
-
     uint32_t duty =
-        (uint32_t)(
-            ((uint64_t)currentPulse * maxDuty + periodUs / 2)
-            /
-            periodUs
+        (uint32_t)roundf(
+            currentPulse * ticksPerMicrosecond
         );
+
+    duty = min(duty, maxDuty);
 
     ledcWrite(
         LEDC_CHANNEL,

@@ -45,6 +45,8 @@ public:
 
     bool begin();
 
+    void setRotation(uint8_t rotation);
+
     void update();
 
 
@@ -83,6 +85,8 @@ private:
     unsigned long lastTouchErrorMs = 0;
 
     uint8_t touchReadFailures = 0;
+
+    uint8_t displayRotation = 0;
 
 
     bool pressed = false;

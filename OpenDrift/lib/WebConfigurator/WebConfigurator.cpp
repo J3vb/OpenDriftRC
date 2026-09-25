@@ -1,5 +1,8 @@
 #include "WebConfigurator.h"
 
+#include <limits.h>
+#include <stdlib.h>
+
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
 #endif
@@ -112,6 +115,24 @@ void WebConfigurator::begin(
         }
     );
 
+    server.on(
+        "/restart",
+        HTTP_POST,
+        [this]()
+        {
+            handleRestart();
+        }
+    );
+
+    server.on(
+        "/factory-reset",
+        HTTP_POST,
+        [this]()
+        {
+            handleFactoryReset();
+        }
+    );
+
     server.onNotFound(
         [this]()
         {
@@ -138,6 +159,14 @@ void WebConfigurator::update()
     }
 
     server.handleClient();
+
+    if(
+        restartPending &&
+        (int32_t)(millis() - restartAtMs) >= 0
+    )
+    {
+        ESP.restart();
+    }
 }
 
 
@@ -145,6 +174,11 @@ void WebConfigurator::update()
 bool WebConfigurator::isRunning()
 {
     return running;
+}
+
+bool WebConfigurator::isRestartPending()
+{
+    return restartPending;
 }
 
 
@@ -197,13 +231,17 @@ void WebConfigurator::handleRoot()
     #if defined(OPENDRIFT_INPUT_CRSF)
     #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
     html += F("</div><div class='pill'>CRSF OOPS: receiver TX to GPIO 17 / RX to GPIO 18");
+    #elif defined(OPENDRIFT_BOARD_MATRIX)
+    html += F("</div><div class='pill'>CRSF: GPIO 3 RX / 4 TX");
     #elif defined(OPENDRIFT_AMOLED_V2)
     html += F("</div><div class='pill'>CRSF: GPIO 1 RX / 2 TX");
     #else
     html += F("</div><div class='pill'>CRSF: GPIO 17 RX / 18 TX");
     #endif
     #else
-    #if defined(OPENDRIFT_AMOLED_V2)
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    html += F("</div><div class='pill'>GPIO 4: ");
+    #elif defined(OPENDRIFT_AMOLED_V2)
     html += F("</div><div class='pill'>GPIO 2: ");
     #else
     html += F("</div><div class='pill'>GPIO 18: ");
@@ -247,16 +285,22 @@ void WebConfigurator::handleRoot()
         html += String(profile->gyroCounterSteerAssist);
         html += F(" &middot; Transition speed ");
         html += String(profile->gyroTransitionSpeed);
+        html += F(" &middot; Driver priority ");
+        html += String(profile->driverPriority);
         html += F(" &middot; Anti Wobble ");
         html += String(profile->gyroHuntStrength);
         html += F("</small></div>");
 
         html += F("<form method='post' action='/activate-profile'><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button type='submit'>Activate</button></form>");
 
         html += F("<form method='post' action='/delete-profile' onsubmit=\"return confirm('Delete this profile?')\"><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
     }
 
@@ -293,11 +337,17 @@ void WebConfigurator::handleRoot()
     html += F(">Off - raw bandwidth</option></select>");
     html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1");
     html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1");
-    html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
+    html += F("<label>Anti Wobble scale</label><select name='antiWobbleScale'><option value='0'");
+    if(settings->getAntiWobbleScale() == 0) html += F(" selected");
+    html += F(">1/10 scale</option><option value='1'");
+    if(settings->getAntiWobbleScale() == 1) html += F(" selected");
+    html += F(">Micro (1/24-1/28)</option></select>");
+    html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Use 1/10 for the proven 2.5-3.6 Hz steering mode, or Micro for faster 5-15 Hz steering systems. Start at 50. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
+    html += F("<div class='card'><h2>Transition &amp; Driver Priority</h2><p class='sub'>Transition Speed controls how quickly gyro correction reverses during a direction change. Driver Priority progressively reduces only fast direct gyro gain as you hold more steering, giving the driver more authority near full lock. Start at 0 and test 10-20; steady Countersteer Assist, Drift Memory, and Max Correction remain unchanged.</p><div class='row'>");
     html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1");
+    html += input("Driver priority (0-50%)", "driverPriority", String(settings->getDriverPriority()), "number", "1");
     html += F("</div></div>");
 
     html += F("<div class='card'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
@@ -314,11 +364,39 @@ void WebConfigurator::handleRoot()
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
     if(settings->getControlLoopHz() == 333) html += F(" selected");
     html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting.</p>");
+    html += F("<label>Throttle output rate</label><select name='throttleOutputHz'><option value='50'");
+    if(settings->getThrottleOutputHz() == 50) html += F(" selected");
+    html += F(">50 Hz - broad ESC compatibility</option><option value='250'");
+    if(settings->getThrottleOutputHz() == 250) html += F(" selected");
+    html += F(">250 Hz - high-rate PWM</option><option value='333'");
+    if(settings->getThrottleOutputHz() == 333) html += F(" selected");
+    html += F(">333 Hz - supported ESCs only</option></select><p class='sub'>Higher rates reduce throttle command latency and increase effective pulse resolution. Use 250 or 333 Hz only when the ESC explicitly supports that input rate. A restart is required.</p>");
     html += F("<div class='row'>");
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
     html += F("</div></div>");
+
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    html += F("<div class='card'><h2>LED Matrix Orientation</h2><label>Status rotation</label><select name='displayRotation'><option value='0'");
+    if(settings->getDisplayRotation() == 0) html += F(" selected");
+    html += F(">0&deg;</option><option value='1'");
+    if(settings->getDisplayRotation() == 1) html += F(" selected");
+    html += F(">90&deg; clockwise</option><option value='2'");
+    if(settings->getDisplayRotation() == 2) html += F(" selected");
+    html += F(">180&deg;</option><option value='3'");
+    if(settings->getDisplayRotation() == 3) html += F(" selected");
+    html += F(">90&deg; counter-clockwise (default)</option></select><p class='sub'>Rotates the complete 8x8 status display, including WiFi and blackbox indicators. Changes apply immediately.</p></div>");
+    #elif defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='card'><h2>Display Orientation</h2><label>AMOLED orientation</label><select name='displayRotation'><option value='0'");
+    if(settings->getDisplayRotation() == 0) html += F(" selected");
+    html += F(">Normal</option><option value='2'");
+    if(settings->getDisplayRotation() == 2) html += F(" selected");
+    html += F(">180&deg; flipped</option></select><p class='sub'>Flips both the AMOLED image and touchscreen coordinates. Changes apply immediately.</p><div class='row'>");
+    html += input("Brightness (10-100%)", "displayBrightness", String(settings->getDisplayBrightness()), "number", "10");
+    html += input("Idle dim timeout (seconds, 0=off)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1");
+    html += F("</div></div>");
+    #endif
 
     html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
     html += settings->isSteeringCalibrated() ? F("CALIBRATED") : F("NOT CALIBRATED");
@@ -326,6 +404,13 @@ void WebConfigurator::handleRoot()
     html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
     html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
     html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
+    html += F("<input type='hidden' name='steeringMinWas' value='");
+    html += String(settings->getSteeringMin());
+    html += F("'><input type='hidden' name='steeringCenterWas' value='");
+    html += String(settings->getSteeringCenter());
+    html += F("'><input type='hidden' name='steeringMaxWas' value='");
+    html += String(settings->getSteeringMax());
+    html += F("'>");
     html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1");
     html += F("</div></div>");
 
@@ -333,6 +418,8 @@ void WebConfigurator::handleRoot()
     #if defined(OPENDRIFT_INPUT_CRSF)
     #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
     html += F("Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.");
+    #elif defined(OPENDRIFT_BOARD_MATRIX)
+    html += F("CRSF channel 3 controls gyro gain. GPIO 1 drives the steering servo. GPIO 2 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 3; receiver RX connects to GPIO 4.");
     #elif defined(OPENDRIFT_AMOLED_V2)
     html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.");
     #else
@@ -344,7 +431,9 @@ void WebConfigurator::handleRoot()
     html += input("Gain high", "gainMax", String(settings->getGainMax()));
     html += F("</div>");
     html += checkbox(
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        "Use GPIO 4 as throttle output instead of gyro gain input",
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "Use GPIO 2 as throttle output instead of gyro gain input",
         #else
         "Use GPIO 18 as throttle output instead of gyro gain input",
@@ -411,6 +500,7 @@ void WebConfigurator::handleRoot()
 
     html += F("<div class='card'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
+    html += input("WiFi network name", "wifiSsid", String(settings->getWifiSsid()), "text", "1");
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
     html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
@@ -419,7 +509,13 @@ void WebConfigurator::handleRoot()
     html += checkbox("Enable onboard logging", "blackboxEnabled", settings->getBlackboxEnabled());
     html += F("</div>");
 
+    html += F("<div class='card'><h2>System</h2><p class='sub'>Restart applies settings that require a reboot. Factory reset erases the tune, profiles, endpoint calibration, GPIO mappings, and board settings.</p>");
+    html += F("<button type='submit' form='restartForm'>Restart OpenDrift</button>");
+    html += F("<button class='danger' type='submit' form='factoryResetForm'>Factory Reset</button></div>");
+
     html += F("<button type='submit'>Save Settings</button></form>");
+    html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering will be unavailable during boot.')\"></form>");
+    html += F("<form id='factoryResetForm' method='post' action='/factory-reset' onsubmit=\"return confirm('Erase all OpenDrift settings and restart? This cannot be undone.')\"></form>");
 
     html += F("<div class='card'><h2>Blackbox Log</h2>");
 
@@ -548,9 +644,11 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setGyroReverse(
-        server.hasArg("gyroReverse")
-    );
+    bool gyroReversePosted = false;
+    if(checkboxChanged("gyroReverse", gyroReversePosted))
+    {
+        settings->setGyroReverse(gyroReversePosted);
+    }
 
     settings->setGyroMaxCorrection(
         getIntArg(
@@ -608,6 +706,13 @@ void WebConfigurator::handleSave()
         )
     );
 
+    settings->setDriverPriority(
+        getIntArg(
+            "driverPriority",
+            settings->getDriverPriority()
+        )
+    );
+
     settings->setPredictionStrength(
         getIntArg(
             "predictionStrength",
@@ -622,9 +727,16 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setServoReverse(
-        server.hasArg("servoReverse")
+    settings->setAntiWobbleScale(
+        getIntArg(
+            "antiWobbleScale",
+            settings->getAntiWobbleScale()
+        )
     );
+
+    bool servoReversePosted = false;
+    bool servoReverseChanged =
+        checkboxChanged("servoReverse", servoReversePosted);
 
     settings->setServoCenter(
         getIntArg(
@@ -654,6 +766,36 @@ void WebConfigurator::handleSave()
         )
     );
 
+    settings->setThrottleOutputHz(
+        getIntArg(
+            "throttleOutputHz",
+            settings->getThrottleOutputHz()
+        )
+    );
+
+    settings->setDisplayRotation(
+        getIntArg(
+            "displayRotation",
+            settings->getDisplayRotation()
+        )
+    );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    settings->setDisplayBrightness(
+        getIntArg(
+            "displayBrightness",
+            settings->getDisplayBrightness()
+        )
+    );
+
+    settings->setDisplayDimTimeout(
+        getIntArg(
+            "displayDimTimeout",
+            settings->getDisplayDimTimeout()
+        )
+    );
+    #endif
+
     int requestedSteeringMin =
         getIntArg(
             "steeringMin",
@@ -673,17 +815,34 @@ void WebConfigurator::handleSave()
         );
 
     bool steeringCalibrationChanged =
-        requestedSteeringMin != settings->getSteeringMin() ||
-        requestedSteeringCenter != settings->getSteeringCenter() ||
-        requestedSteeringMax != settings->getSteeringMax();
-
-    settings->setSteeringMin(requestedSteeringMin);
-    settings->setSteeringCenter(requestedSteeringCenter);
-    settings->setSteeringMax(requestedSteeringMax);
+        endpointFieldEdited(
+            "steeringMin",
+            "steeringMinWas",
+            requestedSteeringMin
+        ) ||
+        endpointFieldEdited(
+            "steeringCenter",
+            "steeringCenterWas",
+            requestedSteeringCenter
+        ) ||
+        endpointFieldEdited(
+            "steeringMax",
+            "steeringMaxWas",
+            requestedSteeringMax
+        );
 
     if(steeringCalibrationChanged)
     {
-        settings->confirmStoredSteeringCalibration();
+        settings->setStoredSteeringEndpoints(
+            requestedSteeringMin,
+            requestedSteeringCenter,
+            requestedSteeringMax
+        );
+    }
+
+    if(servoReverseChanged)
+    {
+        settings->setServoReverse(servoReversePosted);
     }
 
     settings->setRadioSteeringTravel(
@@ -722,9 +881,11 @@ void WebConfigurator::handleSave()
     );
 
     #if !defined(OPENDRIFT_INPUT_CRSF)
-    settings->setThrottleOutputEnabled(
-        server.hasArg("throttleOutputEnabled")
-    );
+    bool throttleOutputPosted = false;
+    if(checkboxChanged("throttleOutputEnabled", throttleOutputPosted))
+    {
+        settings->setThrottleOutputEnabled(throttleOutputPosted);
+    }
     #endif
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -754,9 +915,11 @@ void WebConfigurator::handleSave()
     }
     #endif
 
-    settings->setWifiEnabled(
-        server.hasArg("wifiEnabled")
-    );
+    bool wifiEnabledPosted = false;
+    if(checkboxChanged("wifiEnabled", wifiEnabledPosted))
+    {
+        settings->setWifiEnabled(wifiEnabledPosted);
+    }
 
     settings->setWifiTimeout(
         getIntArg(
@@ -765,9 +928,16 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setBlackboxEnabled(
-        server.hasArg("blackboxEnabled")
-    );
+    if(server.hasArg("wifiSsid"))
+    {
+        settings->setWifiSsid(server.arg("wifiSsid"));
+    }
+
+    bool blackboxPosted = false;
+    if(checkboxChanged("blackboxEnabled", blackboxPosted))
+    {
+        settings->setBlackboxEnabled(blackboxPosted);
+    }
 
     if(gyro != nullptr)
     {
@@ -813,6 +983,10 @@ void WebConfigurator::handleSave()
 
         gyro->setHuntStrength(
             settings->getGyroHuntStrength()
+        );
+
+        gyro->setAntiWobbleScale(
+            settings->getAntiWobbleScale()
         );
     }
 
@@ -873,6 +1047,12 @@ void WebConfigurator::handleProfileActivate()
 
     int index = server.arg("profile").toInt();
 
+    if(!profileRowMatches(index))
+    {
+        server.send(409, "text/plain", "Profile list changed; reload and try again");
+        return;
+    }
+
     if(
         index < 0 ||
         index >= settings->getProfileCount() ||
@@ -901,6 +1081,12 @@ void WebConfigurator::handleProfileDelete()
 
     int index = server.arg("profile").toInt();
 
+    if(!profileRowMatches(index))
+    {
+        server.send(409, "text/plain", "Profile list changed; reload and try again");
+        return;
+    }
+
     if(
         index < 0 ||
         index >= settings->getProfileCount() ||
@@ -913,6 +1099,31 @@ void WebConfigurator::handleProfileDelete()
 
     server.sendHeader("Location", "/");
     server.send(303);
+}
+
+
+bool WebConfigurator::profileRowMatches(int index)
+{
+    if(
+        settings == nullptr ||
+        index < 0 ||
+        index >= settings->getProfileCount()
+    )
+    {
+        return false;
+    }
+
+    if(!server.hasArg("name"))
+    {
+        return true;
+    }
+
+    const Settings::DrivingProfile* profile =
+        settings->getProfile(index);
+
+    return
+        profile != nullptr &&
+        server.arg("name").equalsIgnoreCase(profile->name);
 }
 
 
@@ -970,7 +1181,7 @@ void WebConfigurator::handleLogDownload()
     size_t recordCount =
         blackbox->getRecordCount();
 
-    char line[672];
+    char line[704];
     String chunk;
     chunk.reserve(8192);
 
@@ -1060,6 +1271,40 @@ void WebConfigurator::handleLogClear()
 }
 
 
+void WebConfigurator::handleRestart()
+{
+    server.send(
+        200,
+        "text/html",
+        "<!doctype html><meta name='viewport' content='width=device-width'><title>OpenDrift</title><body style='font-family:sans-serif;background:#101318;color:#eee;padding:2rem'><h1>Restarting OpenDrift</h1><p>Reconnect to the OpenDrift WiFi network in a few seconds.</p></body>"
+    );
+
+    restartPending = true;
+    restartAtMs = millis() + 750;
+}
+
+
+void WebConfigurator::handleFactoryReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(503, "text/plain", "Settings unavailable");
+        return;
+    }
+
+    settings->factoryReset();
+
+    server.send(
+        200,
+        "text/html",
+        "<!doctype html><meta name='viewport' content='width=device-width'><title>OpenDrift</title><body style='font-family:sans-serif;background:#101318;color:#eee;padding:2rem'><h1>Factory reset complete</h1><p>OpenDrift is restarting with default settings.</p></body>"
+    );
+
+    restartPending = true;
+    restartAtMs = millis() + 750;
+}
+
+
 
 void WebConfigurator::handleNotFound()
 {
@@ -1110,7 +1355,11 @@ String WebConfigurator::checkbox(
 {
     String html;
 
-    html += F("<label><input name='");
+    html += F("<input type='hidden' name='");
+    html += name;
+    html += F("Was' value='");
+    html += checked ? '1' : '0';
+    html += F("'><label><input name='");
     html += name;
     html += F("' type='checkbox'");
 
@@ -1127,6 +1376,43 @@ String WebConfigurator::checkbox(
 }
 
 
+bool WebConfigurator::checkboxChanged(
+    const char* name,
+    bool& posted
+)
+{
+    posted = server.hasArg(name);
+    String snapshotName = String(name) + "Was";
+
+    if(!server.hasArg(snapshotName))
+    {
+        return true;
+    }
+
+    return posted != (server.arg(snapshotName) == "1");
+}
+
+
+bool WebConfigurator::endpointFieldEdited(
+    const char* name,
+    const char* snapshotName,
+    int requested
+)
+{
+    if(!server.hasArg(name) || server.arg(name).length() == 0)
+    {
+        return false;
+    }
+
+    if(!server.hasArg(snapshotName) || server.arg(snapshotName).length() == 0)
+    {
+        return true;
+    }
+
+    return requested != server.arg(snapshotName).toInt();
+}
+
+
 
 int WebConfigurator::getIntArg(
     const char* name,
@@ -1138,7 +1424,23 @@ int WebConfigurator::getIntArg(
         return fallback;
     }
 
-    return server.arg(name).toInt();
+    String raw = server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+    long value = strtol(text, &end, 10);
+
+    if(end == text)
+    {
+        return fallback;
+    }
+
+    return (int)constrain(value, (long)INT_MIN, (long)INT_MAX);
 }
 
 
@@ -1153,5 +1455,16 @@ float WebConfigurator::getFloatArg(
         return fallback;
     }
 
-    return server.arg(name).toFloat();
+    String raw = server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+    float value = strtof(text, &end);
+
+    return end == text ? fallback : value;
 }

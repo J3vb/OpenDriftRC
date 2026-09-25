@@ -43,6 +43,10 @@ public:
         uint8_t channel
     ) const;
 
+    float getChannelMicrosecondsFloat(
+        uint8_t channel
+    ) const;
+
     uint32_t getFrameAgeMs() const;
 
     uint32_t getReceivedByteCount() const;
@@ -125,6 +129,10 @@ private:
     );
 
     static uint16_t channelToMicroseconds(
+        uint16_t raw
+    );
+
+    static float channelToMicrosecondsFloat(
         uint16_t raw
     );
 };

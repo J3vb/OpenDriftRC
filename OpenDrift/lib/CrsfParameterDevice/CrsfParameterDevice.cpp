@@ -7,19 +7,19 @@ namespace
 {
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
-        {"Active Gain",       0,  600, 150, 2,   5, "x"},
-        {"Deadband",          0,  200,  20, 1,   1, "dps"},
-        {"Max Correction",    0,  100,  25, 0,   1, "%"},
+        {"Saved Gain",        0,  600, 150, 2,   5, "x"},
+        {"Deadband",          0, 1000,  20, 1,   1, "dps"},
+        {"Max Correction",    0,  100, 100, 0,   1, "%"},
         {"Smoothing",         0,  100,  10, 2,   1, ""},
         {"Drift Memory",      0, 2000,   0, 2,   1, ""},
         {"Memory Limit",      0,  500, 120, 0,   5, "us"},
         {"Hold Assist",       0,  100,   0, 0,   1, "%"},
-        {"Countersteer",      0,  100,   0, 0,   1, "%"},
+        {"Countersteer",      0,  100, 100, 0,   1, "%"},
         {"Transition Speed",  0,  100,  50, 0,   1, "%"},
         {"Prediction",        0,  100,   0, 0,   1, "%"},
         {"Servo Quiet",       0,   50,   0, 0,   1, "us"},
         {"Steering Travel",   0,  100, 100, 0,   1, "%"},
-        {"Servo Travel",     10,  150, 100, 0,   1, "%"},
+        {"Servo Travel",      1,  100, 100, 0,   1, "%"},
         {"Servo Center",   1000, 2000,1500, 0,   1, "us"}
     };
 
@@ -31,6 +31,12 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition CHANNEL_3_GAIN_MAX_PARAMETER =
         {"CH3 Gain Max", 0, 600, 300, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition LIVE_GAIN_PARAMETER =
+        {"Live Gain", 0, 600, 150, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition DRIVER_PRIORITY_PARAMETER =
+        {"Driver Priority", 0, 50, 0, 0, 1, "%"};
 }
 
 
@@ -184,6 +190,14 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 32);
         appendByte(payload, length, 33);
         appendByte(payload, length, 34);
+        appendByte(payload, length, 37);
+        appendByte(payload, length, 38);
+        appendByte(payload, length, 39);
+
+        #if defined(OPENDRIFT_BOARD_MATRIX) || defined(OPENDRIFT_BOARD_AMOLED_164)
+        appendByte(payload, length, 35);
+        appendByte(payload, length, 36);
+        #endif
 
         appendByte(payload, length, 0xFF);
     }
@@ -191,7 +205,9 @@ void CrsfParameterDevice::sendParameter(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 37 ||
+        parameter == 38
     )
     {
         const FloatDefinition* definition =
@@ -212,7 +228,12 @@ void CrsfParameterDevice::sendParameter(
         parameter == 15 ||
         parameter == 16 ||
         parameter == 25 ||
+        parameter == 39 ||
         parameter == 32 ||
+        #if defined(OPENDRIFT_BOARD_MATRIX) || defined(OPENDRIFT_BOARD_AMOLED_164)
+        parameter == 35 ||
+        parameter == 36 ||
+        #endif
         (parameter >= 27 && parameter <= 31)
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
         || (parameter >= 17 && parameter <= 24)
@@ -229,6 +250,33 @@ void CrsfParameterDevice::sendParameter(
             appendByte(payload, length, getScaledValue(parameter));
             appendByte(payload, length, 0);
             appendByte(payload, length, 2);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter == 35)
+        {
+            appendString(payload, length, "Display Rotation");
+
+            #if defined(OPENDRIFT_BOARD_MATRIX)
+            appendString(payload, length, "0 deg;90 CW;180 deg;90 CCW");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 3);
+            appendByte(payload, length, 3);
+            #else
+            appendString(payload, length, "Normal;180 deg");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 1);
+            appendByte(payload, length, 0);
+            #endif
+        }
+        else if(parameter == 36)
+        {
+            appendString(payload, length, "Anti Wobble Scale");
+            appendString(payload, length, "1/10;Micro");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 1);
             appendByte(payload, length, 0);
         }
         else if(parameter == 27)
@@ -263,6 +311,15 @@ void CrsfParameterDevice::sendParameter(
             appendByte(payload, length, getScaledValue(parameter));
             appendByte(payload, length, 0);
             appendByte(payload, length, 1);
+            appendByte(payload, length, 0);
+        }
+        else if(parameter == 39)
+        {
+            appendString(payload, length, "Throttle Rate*");
+            appendString(payload, length, "50 Hz;250 Hz;333 Hz");
+            appendByte(payload, length, getScaledValue(parameter));
+            appendByte(payload, length, 0);
+            appendByte(payload, length, 2);
             appendByte(payload, length, 0);
         }
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -340,6 +397,8 @@ void CrsfParameterDevice::writeParameter(
             || parameter == 26
             || parameter == 33
             || parameter == 34
+            || parameter == 37
+            || parameter == 38
         ) &&
         length >= 4
     )
@@ -353,6 +412,10 @@ void CrsfParameterDevice::writeParameter(
             parameter == 16 ||
             parameter == 25 ||
             parameter == 32 ||
+            #if defined(OPENDRIFT_BOARD_MATRIX) || defined(OPENDRIFT_BOARD_AMOLED_164)
+            parameter == 35 ||
+            parameter == 36 ||
+            #endif
             (parameter >= 27 && parameter <= 31)
             #if defined(OPENDRIFT_BOARD_AMOLED_164)
             || (parameter >= 17 && parameter <= 24)
@@ -369,8 +432,11 @@ void CrsfParameterDevice::writeParameter(
         return;
     }
 
-    setScaledValue(parameter, value);
-    settingsChanged = true;
+    if(parameter != 37)
+    {
+        setScaledValue(parameter, value);
+        settingsChanged = true;
+    }
 
     uint8_t response[5] = {parameter, 0, 0, 0, 0};
 
@@ -404,14 +470,7 @@ int32_t CrsfParameterDevice::getScaledValue(
 {
     switch(parameter)
     {
-        // Channel 3 is authoritative while it has a valid signal. Report the
-        // controller's live value so EdgeTX never shows the saved fallback
-        // while the car is actually running a different gain.
-        case 1:
-            return lroundf(
-                (gyro != nullptr ? gyro->getGain() : settings->getGain())
-                * 100.0f
-            );
+        case 1: return lroundf(settings->getGain() * 100.0f);
         case 2: return lroundf(settings->getDeadband() * 10.0f);
         case 3: return settings->getGyroMaxCorrection();
         case 4: return lroundf(settings->getGyroSmoothing() * 100.0f);
@@ -456,6 +515,25 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 32: return settings->getGyroLpfMode();
         case 33: return lroundf(settings->getChannel3GainMin() * 100.0f);
         case 34: return lroundf(settings->getChannel3GainMax() * 100.0f);
+        case 37:
+            return lroundf(
+                (gyro != nullptr ? gyro->getGain() : settings->getGain())
+                * 100.0f
+            );
+        case 38: return settings->getDriverPriority();
+        case 39:
+        {
+            uint16_t rate = settings->getThrottleOutputHz();
+            return rate == 333 ? 2 : (rate == 250 ? 1 : 0);
+        }
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        case 35: return settings->getDisplayRotation();
+        #elif defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 35: return settings->getDisplayRotation() == 2 ? 1 : 0;
+        #endif
+        #if defined(OPENDRIFT_BOARD_MATRIX) || defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 36: return settings->getAntiWobbleScale();
+        #endif
         default: return 0;
     }
 }
@@ -470,7 +548,8 @@ void CrsfParameterDevice::setScaledValue(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 38
     )
     {
         const FloatDefinition* definition =
@@ -530,6 +609,11 @@ void CrsfParameterDevice::setScaledValue(
         case 25:
             settings->setControlLoopHz(value == 1 ? 333 : 250);
             break;
+        case 39:
+            settings->setThrottleOutputHz(
+                value == 2 ? 333 : (value == 1 ? 250 : 50)
+            );
+            break;
         case 26:
             settings->setGyroHuntStrength(value);
             if(gyro != nullptr)
@@ -548,6 +632,7 @@ void CrsfParameterDevice::setScaledValue(
         case 30:
             if(
                 value == 1 &&
+                !settings->isSteeringCalibrated() &&
                 steeringRadio != nullptr &&
                 steeringRadio->hasSignal() &&
                 steeringServo != nullptr
@@ -555,7 +640,7 @@ void CrsfParameterDevice::setScaledValue(
             {
                 settings->captureSteeringCalibrationPoint(
                     parameter - 28,
-                    steeringServo->getPosition(),
+                    steeringServo->getCommandPosition(),
                     steeringRadio->getPulseWidth()
                 );
             }
@@ -577,6 +662,35 @@ void CrsfParameterDevice::setScaledValue(
         case 34:
             settings->setChannel3GainMax(value / 100.0f);
             break;
+        case 38:
+            settings->setDriverPriority(value);
+            if(gyro != nullptr)
+            {
+                gyro->setDriverPriority(
+                    settings->getDriverPriority()
+                );
+            }
+            break;
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        case 35:
+            settings->setDisplayRotation(constrain(value, 0, 3));
+            break;
+        #elif defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 35:
+            settings->setDisplayRotation(value == 1 ? 2 : 0);
+            break;
+        #endif
+        #if defined(OPENDRIFT_BOARD_MATRIX) || defined(OPENDRIFT_BOARD_AMOLED_164)
+        case 36:
+            settings->setAntiWobbleScale(value);
+            if(gyro != nullptr)
+            {
+                gyro->setAntiWobbleScale(
+                    settings->getAntiWobbleScale()
+                );
+            }
+            break;
+        #endif
     }
 }
 
@@ -589,6 +703,16 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 26)
     {
         return &ANTI_WOBBLE_PARAMETER;
+    }
+
+    if(parameter == 37)
+    {
+        return &LIVE_GAIN_PARAMETER;
+    }
+
+    if(parameter == 38)
+    {
+        return &DRIVER_PRIORITY_PARAMETER;
     }
 
     if(parameter == 33)

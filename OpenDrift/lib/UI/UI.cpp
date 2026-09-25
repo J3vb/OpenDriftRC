@@ -823,6 +823,14 @@ void UI::requestRefresh()
 }
 
 
+void UI::setCalibrationCallback(
+    void (*callback)()
+)
+{
+    calibrationCallback = callback;
+}
+
+
 
 void UI::changePage(
     int8_t direction,
@@ -2487,18 +2495,22 @@ void UI::drawExperimentalPage(
     lcd->setTextSize(2);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("TRANS SPEED", 22, 58);
+    lcd->drawString("DRIVER PRIO", 22, 120);
 
     lcd->setTextSize(3);
     lcd->setTextColor(OD_TEXT);
     lcd->drawNumber(settings.getGyroTransitionSpeed(), 146, 48);
+    lcd->drawNumber(settings.getDriverPriority(), 146, 110);
 
     drawAmoledButton(lcd, 276, 48, 70, 48, "-", OD_MAGENTA);
     drawAmoledButton(lcd, 364, 48, 70, 48, "+", OD_MAGENTA);
+    drawAmoledButton(lcd, 276, 110, 70, 48, "-", OD_MAGENTA);
+    drawAmoledButton(lcd, 364, 110, 70, 48, "+", OD_MAGENTA);
 
-    lcd->setTextSize(2);
+    lcd->setTextSize(1);
     lcd->setTextColor(OD_MUTED);
-    lcd->drawString("50 = NEUTRAL RESPONSE", 22, 132);
-    lcd->drawString("LOWER SLOW / HIGHER FAST", 22, 166);
+    lcd->drawString("PRIORITY: 0 FULL GYRO / START 10-20", 22, 190);
+    lcd->drawString("TRANS: LOWER SMOOTH / HIGHER FAST", 22, 216);
     #else
     lcd->setTextSize(3);
     lcd->setTextColor(TFT_MAGENTA);
@@ -3186,7 +3198,7 @@ void UI::drawRoundRadioPage(
         }
 
         const char* status = calibrationSaved
-            ? "SAVED - TAP TO RESET"
+            ? "SAVED - HOLD TO RESET"
             : (!steeringSignal
                 ? "NO STEERING SIGNAL"
                 : (steeringCalibrationError
@@ -5050,9 +5062,8 @@ bool UI::captureSteeringCalibration(
 {
     if(settings.isSteeringCalibrated())
     {
-        settings.clearSteeringCalibration();
         steeringCalibrationError = false;
-        return true;
+        return false;
     }
 
     if(!steeringRadio.hasSignal())
@@ -5067,7 +5078,7 @@ bool UI::captureSteeringCalibration(
         return false;
     }
 
-    int pulse = steeringServoOutput->getPosition();
+    int pulse = steeringServoOutput->getCommandPosition();
 
     if(pulse < 900 || pulse > 2100)
     {
@@ -5166,6 +5177,12 @@ int8_t UI::repeatButtonAt(
 
         if(buttonPressed(x, y, 364, 48, 70, 48))
             return 30;
+
+        if(buttonPressed(x, y, 276, 110, 70, 48))
+            return 35;
+
+        if(buttonPressed(x, y, 364, 110, 70, 48))
+            return 36;
     }
 
     return 0;
@@ -5596,6 +5613,26 @@ bool UI::applyRepeatButton(
             settings.setControlLoopHz(333);
             break;
 
+        case 35:
+            settings.setDriverPriority(
+                settings.getDriverPriority() - 1
+            );
+
+            gyro.setDriverPriority(
+                settings.getDriverPriority()
+            );
+            break;
+
+        case 36:
+            settings.setDriverPriority(
+                settings.getDriverPriority() + 1
+            );
+
+            gyro.setDriverPriority(
+                settings.getDriverPriority()
+            );
+            break;
+
         default:
             return false;
     }
@@ -5650,6 +5687,14 @@ void UI::update(
 
     bool touched =
         touch.isTouched();
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(updateDisplayBrightness(settings, touched))
+    {
+        lastTouchState = touched;
+        return;
+    }
+    #endif
 
     uint8_t gesture =
         touch.getGesture();
@@ -5962,6 +6007,9 @@ void UI::update(
     )
     {
 
+        steeringCalibrationResetPoint = -1;
+        steeringCalibrationResetStartedAt = 0;
+
         int delta =
             touch.getX()
             -
@@ -6163,6 +6211,65 @@ void UI::update(
     }
 
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(
+        touched &&
+        page == PAGE_STEERING_CAL &&
+        steeringCalibrationResetPoint >= 0
+    )
+    {
+        uint16_t currentX = touch.getX();
+        uint16_t currentY = touch.getY();
+
+        int8_t currentPoint =
+            buttonPressed(currentX, currentY, 22, 54, 412, 54)
+            ? 0
+            : (
+                buttonPressed(currentX, currentY, 22, 116, 412, 54)
+                ? 1
+                : (
+                    buttonPressed(currentX, currentY, 22, 178, 412, 54)
+                    ? 2
+                    : -1
+                )
+            );
+
+        if(currentPoint != steeringCalibrationResetPoint)
+        {
+            steeringCalibrationResetPoint = -1;
+            steeringCalibrationResetStartedAt = 0;
+        }
+        else if(
+            millis() - steeringCalibrationResetStartedAt >= 1200 &&
+            settings.isSteeringCalibrated() &&
+            fabsf(gyro.getFilteredYaw()) < 5.0f
+        )
+        {
+            settings.clearSteeringCalibration();
+
+            captureSteeringCalibration(
+                currentPoint,
+                steeringRadio,
+                settings
+            );
+
+            steeringCalibrationResetPoint = -1;
+            steeringCalibrationResetStartedAt = 0;
+
+            drawSteeringCalibrationPage(
+                steeringRadio,
+                gainRadio,
+                settings,
+                gyro
+            );
+        }
+
+        lastTouchState = touched;
+        return;
+    }
+    #endif
+
+
 
 
 
@@ -6193,11 +6300,10 @@ void UI::update(
             )
         )
         {
-            imu.update();
-
-            gyro.calibrate(
-                imu.getYawRate()
-            );
+            if(calibrationCallback != nullptr)
+            {
+                calibrationCallback();
+            }
 
             drawMainPage(
                 gyro,
@@ -6314,11 +6420,19 @@ void UI::update(
 
             if(calibrationPoint >= 0)
             {
-                captureSteeringCalibration(
-                    calibrationPoint,
-                    steeringRadio,
-                    settings
-                );
+                if(settings.isSteeringCalibrated())
+                {
+                    steeringCalibrationResetPoint = calibrationPoint;
+                    steeringCalibrationResetStartedAt = millis();
+                }
+                else
+                {
+                    captureSteeringCalibration(
+                        calibrationPoint,
+                        steeringRadio,
+                        settings
+                    );
+                }
 
                 drawSteeringCalibrationPage(
                     steeringRadio,
@@ -6483,11 +6597,10 @@ void UI::update(
             ))
             {
 
-                imu.update();
-
-                gyro.calibrate(
-                    imu.getYawRate()
-                );
+                if(calibrationCallback != nullptr)
+                {
+                    calibrationCallback();
+                }
 
             }
 
@@ -6821,3 +6934,66 @@ void UI::update(
         touched;
 
 }
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+bool UI::updateDisplayBrightness(
+    Settings& settings,
+    bool touched
+)
+{
+    unsigned long now = millis();
+    uint16_t timeoutSeconds = settings.getDisplayDimTimeout();
+    uint8_t brightnessPercent = settings.getDisplayBrightness();
+
+    if(
+        timeoutSeconds != lastDimTimeoutSeconds ||
+        brightnessPercent != lastBrightnessPercent
+    )
+    {
+        lastDimTimeoutSeconds = timeoutSeconds;
+        lastBrightnessPercent = brightnessPercent;
+        lastTouchMs = now;
+    }
+
+    if(touched)
+    {
+        if(displayDimmed)
+        {
+            swallowTouchUntilRelease = true;
+        }
+
+        lastTouchMs = now;
+    }
+
+    displayDimmed =
+        timeoutSeconds > 0 &&
+        now - lastTouchMs >= (unsigned long)timeoutSeconds * 1000UL;
+
+    uint8_t level =
+        (uint8_t)((brightnessPercent * 255U + 50U) / 100U);
+
+    if(displayDimmed)
+    {
+        level = max((uint8_t)4, (uint8_t)(level / 10));
+    }
+
+    if(display != nullptr && level != appliedBrightnessLevel)
+    {
+        display->setBrightness(level);
+        appliedBrightnessLevel = level;
+    }
+
+    if(swallowTouchUntilRelease)
+    {
+        if(touched)
+        {
+            return true;
+        }
+
+        swallowTouchUntilRelease = false;
+    }
+
+    return false;
+}
+#endif

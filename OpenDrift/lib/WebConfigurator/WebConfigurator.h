@@ -28,6 +28,8 @@ public:
 
     bool isRunning();
 
+    bool isRestartPending();
+
 
 private:
 
@@ -47,6 +49,9 @@ private:
 
     bool running = false;
 
+    bool restartPending = false;
+    uint32_t restartAtMs = 0;
+
     void handleRoot();
 
     void handleLiveStatus();
@@ -59,9 +64,14 @@ private:
 
     void handleProfileDelete();
 
+    bool profileRowMatches(int index);
+
     void handleLogDownload();
 
     void handleLogClear();
+
+    void handleRestart();
+    void handleFactoryReset();
 
     void handleNotFound();
 
@@ -77,6 +87,17 @@ private:
         const char* label,
         const char* name,
         bool checked
+    );
+
+    bool checkboxChanged(
+        const char* name,
+        bool& posted
+    );
+
+    bool endpointFieldEdited(
+        const char* name,
+        const char* snapshotName,
+        int requested
     );
 
     int getIntArg(

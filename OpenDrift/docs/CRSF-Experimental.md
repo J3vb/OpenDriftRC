@@ -85,7 +85,7 @@ and writes the controller settings over full-duplex CRSF:
 
 - saved gain, deadband, Max Correction percentage, and smoothing;
 - Drift Memory, memory limit, Hold Assist, and Countersteer Assist;
-- Transition Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, Servo Travel,
+- Transition Speed, Driver Priority, Prediction, Anti Wobble, Servo Quiet, Steering Travel, Servo Travel,
   and Servo Center;
 - Servo Reverse and Gyro Reverse.
 - shared physical servo endpoint-calibration status plus live left, center, and

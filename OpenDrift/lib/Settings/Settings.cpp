@@ -14,7 +14,7 @@ namespace
         return constrain((value + 1) / 2, 0, 100);
     }
 
-    struct DrivingProfileV8
+    struct DrivingProfileV10
     {
         uint32_t version;
         char name[Settings::PROFILE_NAME_LENGTH];
@@ -174,6 +174,12 @@ bool Settings::begin()
     // Private round-display recovery build. Keep its calibration and tuning
     // isolated from both the normal CRSF and PWM firmware namespaces.
     prefs.begin("OpenDriftR51", false);
+    #elif defined(OPENDRIFT_BOARD_MATRIX) && defined(OPENDRIFT_INPUT_CRSF)
+    // The private Matrix experiments must not inherit actuator calibration or
+    // tuning from any display-equipped OpenDrift build.
+    prefs.begin("ODMatrixCRSF", false);
+    #elif defined(OPENDRIFT_BOARD_MATRIX)
+    prefs.begin("ODMatrixPWM", false);
     #elif defined(OPENDRIFT_INPUT_CRSF)
     // Keep experimental CRSF tuning completely separate from the RC1 PWM
     // build, even when both firmwares are flashed onto the same board.
@@ -181,6 +187,18 @@ bool Settings::begin()
     #else
     prefs.begin("OpenDrift", false);
     #endif
+
+    displayBrightness = constrain(
+        prefs.getUChar("dispBright", 100),
+        10,
+        100
+    );
+
+    displayDimTimeout = constrain(
+        prefs.getUShort("dispDim", 0),
+        0,
+        600
+    );
 
     gain = constrain(
         prefs.getFloat(
@@ -229,7 +247,7 @@ bool Settings::begin()
     }
     else
     {
-        gyroMaxCorrection = 25;
+        gyroMaxCorrection = 100;
     }
 
     if(!maxCorrectionUsesFullSpan)
@@ -270,7 +288,7 @@ bool Settings::begin()
 
     gyroCounterSteerAssist = prefs.getInt(
         "counterAssist",
-        0
+        100
     );
 
     if(prefs.isKey("tailSpeedC"))
@@ -313,6 +331,18 @@ bool Settings::begin()
         100
     );
 
+    driverPriority = constrain(
+        prefs.getInt("driverPrio", 0),
+        0,
+        50
+    );
+
+    antiWobbleScale = constrain(
+        prefs.getUChar("wobbleScale", 0),
+        0,
+        1
+    );
+
     const char* retiredKeys[] = {
         "gyroAttack", "gyroReturn", "gyroWob", "gyroHunt",
         "strDamp", "huntSense", "terrainAssist"
@@ -348,6 +378,28 @@ bool Settings::begin()
         ? 333
         : 250;
 
+    setThrottleOutputHz(
+        prefs.getUShort("thrOutHz", 50)
+    );
+
+    // Loading a valid stored value is not a user edit.
+    dirty = false;
+
+    displayRotation = prefs.getUChar(
+        "displayRot",
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        3
+        #else
+        0
+        #endif
+    );
+
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    displayRotation = constrain(displayRotation, 0, 3);
+    #else
+    displayRotation = displayRotation == 2 ? 2 : 0;
+    #endif
+
     wifiEnabled = prefs.getBool(
         "wifi",
         true
@@ -357,6 +409,13 @@ bool Settings::begin()
         "timeout",
         40000
     );
+
+    setWifiSsid(
+        prefs.getString("wifiSsid", "OpenDrift")
+    );
+
+    // Loading a valid stored value is not a user edit.
+    dirty = false;
 
     blackboxEnabled = prefs.getBool(
         "blackbox",
@@ -495,6 +554,12 @@ void Settings::update()
     }
 }
 
+void Settings::factoryReset()
+{
+    prefs.clear();
+    dirty = false;
+}
+
 void Settings::save()
 {
     prefs.putFloat(
@@ -563,6 +628,16 @@ void Settings::save()
     );
 
     prefs.putInt(
+        "driverPrio",
+        driverPriority
+    );
+
+    prefs.putUChar(
+        "wobbleScale",
+        antiWobbleScale
+    );
+
+    prefs.putInt(
         "center",
         servoCenter
     );
@@ -587,6 +662,26 @@ void Settings::save()
         controlLoopHz
     );
 
+    prefs.putUShort(
+        "thrOutHz",
+        throttleOutputHz
+    );
+
+    prefs.putUChar(
+        "displayRot",
+        displayRotation
+    );
+
+    prefs.putUChar(
+        "dispBright",
+        displayBrightness
+    );
+
+    prefs.putUShort(
+        "dispDim",
+        displayDimTimeout
+    );
+
     prefs.putBool(
         "wifi",
         wifiEnabled
@@ -595,6 +690,11 @@ void Settings::save()
     prefs.putULong(
         "timeout",
         wifiTimeout
+    );
+
+    prefs.putString(
+        "wifiSsid",
+        wifiSsid
     );
 
     prefs.putBool(
@@ -709,7 +809,7 @@ float Settings::getDeadband()
 
 void Settings::setDeadband(float value)
 {
-    deadband = value;
+    deadband = constrain(value, 0.0f, 100.0f);
     dirty = true;
 }
 
@@ -870,6 +970,28 @@ void Settings::setGyroHuntStrength(int value)
     dirty = true;
 }
 
+int Settings::getDriverPriority()
+{
+    return driverPriority;
+}
+
+void Settings::setDriverPriority(int value)
+{
+    driverPriority = constrain(value, 0, 50);
+    dirty = true;
+}
+
+uint8_t Settings::getAntiWobbleScale()
+{
+    return antiWobbleScale;
+}
+
+void Settings::setAntiWobbleScale(uint8_t value)
+{
+    antiWobbleScale = value == 1 ? 1 : 0;
+    dirty = true;
+}
+
 
 // --------------------
 // Servo
@@ -882,13 +1004,17 @@ int Settings::getServoCenter()
 
 void Settings::setServoCenter(int value)
 {
+    value = constrain(value, 1000, 2000);
+
     if(servoCenter == value)
     {
         return;
     }
 
     servoCenter = value;
-    clearSteeringCalibration();
+    // Physical endpoint calibration is authoritative once captured. Center
+    // is retained as the fallback used only when calibration is explicitly
+    // reset; changing it must not silently discard safe physical limits.
     dirty = true;
 }
 
@@ -904,9 +1030,28 @@ void Settings::setServoReverse(bool value)
         return;
     }
 
+    bool calibrated = isSteeringCalibrated();
+
+    portENTER_CRITICAL(&settingsMux);
+
+    if(calibrated)
+    {
+        int swapped = steeringMin;
+        steeringMin = steeringMax;
+        steeringMax = swapped;
+        steeringCapturedPulses[0] = steeringMin;
+        steeringCapturedPulses[2] = steeringMax;
+    }
+
     servoReverse = value;
-    clearSteeringCalibration();
+    portEXIT_CRITICAL(&settingsMux);
+
     dirty = true;
+
+    if(calibrated)
+    {
+        persistSteeringCalibration();
+    }
 }
 
 int Settings::getServoTravel()
@@ -916,13 +1061,16 @@ int Settings::getServoTravel()
 
 void Settings::setServoTravel(int value)
 {
+    value = constrain(value, 1, 100);
+
     if(servoTravel == value)
     {
         return;
     }
 
     servoTravel = value;
-    clearSteeringCalibration();
+    // Travel is likewise a fallback. Do not make an incidental UI or CRSF
+    // write capable of disabling the calibrated hard stops while driving.
     dirty = true;
 }
 
@@ -954,6 +1102,60 @@ void Settings::setControlLoopHz(uint16_t value)
     dirty = true;
 }
 
+uint16_t Settings::getThrottleOutputHz()
+{
+    return throttleOutputHz;
+}
+
+void Settings::setThrottleOutputHz(uint16_t value)
+{
+    throttleOutputHz =
+        value == 333
+        ? 333
+        : (value == 250 ? 250 : 50);
+
+    dirty = true;
+}
+
+uint8_t Settings::getDisplayRotation()
+{
+    return displayRotation;
+}
+
+void Settings::setDisplayRotation(uint8_t value)
+{
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    displayRotation = constrain(value, 0, 3);
+    #else
+    displayRotation = value == 2 ? 2 : 0;
+    #endif
+
+    dirty = true;
+}
+
+uint8_t Settings::getDisplayBrightness()
+{
+    return displayBrightness;
+}
+
+void Settings::setDisplayBrightness(int value)
+{
+    int rounded = ((value + 5) / 10) * 10;
+    displayBrightness = constrain(rounded, 10, 100);
+    dirty = true;
+}
+
+uint16_t Settings::getDisplayDimTimeout()
+{
+    return displayDimTimeout;
+}
+
+void Settings::setDisplayDimTimeout(int value)
+{
+    displayDimTimeout = constrain(value, 0, 600);
+    dirty = true;
+}
+
 // --------------------
 // WiFi
 // --------------------
@@ -976,7 +1178,56 @@ uint32_t Settings::getWifiTimeout()
 
 void Settings::setWifiTimeout(uint32_t value)
 {
-    wifiTimeout = value;
+    wifiTimeout =
+        value == 0
+        ? 0UL
+        : constrain(value, 5000UL, 3600000UL);
+    dirty = true;
+}
+
+const char* Settings::getWifiSsid()
+{
+    return wifiSsid;
+}
+
+void Settings::setWifiSsid(const String& value)
+{
+    String clean = value;
+    clean.trim();
+
+    String filtered;
+    filtered.reserve(WIFI_SSID_LENGTH - 1);
+
+    for(
+        size_t i = 0;
+        i < clean.length() &&
+        filtered.length() < WIFI_SSID_LENGTH - 1;
+        i++
+    )
+    {
+        char character = clean.charAt(i);
+
+        if(
+            isAlphaNumeric(character) ||
+            character == ' ' ||
+            character == '-' ||
+            character == '_' ||
+            character == '.'
+        )
+        {
+            filtered += character;
+        }
+    }
+
+    filtered.trim();
+
+    snprintf(
+        wifiSsid,
+        sizeof(wifiSsid),
+        "%s",
+        filtered.length() > 0 ? filtered.c_str() : "OpenDrift"
+    );
+
     dirty = true;
 }
 
@@ -1006,15 +1257,20 @@ int Settings::getSteeringMin()
 
 void Settings::setSteeringMin(int value)
 {
+    value = constrain(value, 900, 2100);
+
     if(steeringMin == value)
     {
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
     steeringMin = value;
     steeringCapturedPulses[0] = value;
     steeringCalibrationMask = 0;
     dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
 }
 
 int Settings::getSteeringCenter()
@@ -1024,15 +1280,20 @@ int Settings::getSteeringCenter()
 
 void Settings::setSteeringCenter(int value)
 {
+    value = constrain(value, 900, 2100);
+
     if(steeringCenter == value)
     {
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
     steeringCenter = value;
     steeringCapturedPulses[1] = value;
     steeringCalibrationMask = 0;
     dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
 }
 
 int Settings::getSteeringMax()
@@ -1042,15 +1303,20 @@ int Settings::getSteeringMax()
 
 void Settings::setSteeringMax(int value)
 {
+    value = constrain(value, 900, 2100);
+
     if(steeringMax == value)
     {
         return;
     }
 
+    portENTER_CRITICAL(&settingsMux);
     steeringMax = value;
     steeringCapturedPulses[2] = value;
     steeringCalibrationMask = 0;
     dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
 }
 
 uint8_t Settings::getSteeringCalibrationMask()
@@ -1068,6 +1334,32 @@ bool Settings::isSteeringCalibrated()
         abs(leftDelta) >= 10 &&
         abs(rightDelta) >= 10 &&
         leftDelta * rightDelta < 0;
+}
+
+void Settings::getSteeringCalibration(
+    SteeringCalibration& out
+)
+{
+    portENTER_CRITICAL(&settingsMux);
+
+    out.mask = steeringCalibrationMask & 0x07;
+    out.min = steeringMin;
+    out.center = steeringCenter;
+    out.max = steeringMax;
+    out.inputMin = steeringCapturedInputPulses[0];
+    out.inputCenter = steeringCapturedInputPulses[1];
+    out.inputMax = steeringCapturedInputPulses[2];
+
+    int leftDelta = out.min - out.center;
+    int rightDelta = out.max - out.center;
+
+    out.calibrated =
+        out.mask == 0x07 &&
+        abs(leftDelta) >= 10 &&
+        abs(rightDelta) >= 10 &&
+        leftDelta * rightDelta < 0;
+
+    portEXIT_CRITICAL(&settingsMux);
 }
 
 int Settings::getSteeringCapturedPulse(
@@ -1109,17 +1401,27 @@ bool Settings::captureSteeringCalibrationPoint(
         return false;
     }
 
+    portENTER_CRITICAL(&settingsMux);
+
+    int previousPhysical = steeringCapturedPulses[point];
+    int previousInput = steeringCapturedInputPulses[point];
+    uint8_t previousMask = steeringCalibrationMask & 0x07;
+
     steeringCapturedPulses[point] = physicalPulse;
 
     if(inputPulse >= 800 && inputPulse <= 2200)
     {
         steeringCapturedInputPulses[point] = inputPulse;
     }
-    steeringCalibrationMask |= (1U << point);
-    dirty = true;
+    uint8_t proposedMask =
+        previousMask | (1U << point);
 
-    if(getSteeringCalibrationMask() != 0x07)
+    if(proposedMask != 0x07)
     {
+        steeringCalibrationMask = proposedMask;
+        dirty = true;
+        portEXIT_CRITICAL(&settingsMux);
+        persistSteeringCalibration();
         return true;
     }
 
@@ -1136,21 +1438,33 @@ bool Settings::captureSteeringCalibrationPoint(
 
     if(!validCalibration)
     {
-        // Keep the two known-good captures and make the rejected position
-        // visibly incomplete on both the display and radio tool.
-        steeringCalibrationMask &= ~(1U << point);
+        steeringCapturedPulses[point] = previousPhysical;
+        steeringCapturedInputPulses[point] = previousInput;
+        steeringCalibrationMask = previousMask & ~(1U << point);
+        dirty = true;
+        portEXIT_CRITICAL(&settingsMux);
+        persistSteeringCalibration();
         return false;
     }
 
+    // Publish the completed mask only after all three pulse values are valid
+    // and committed. The controller task can never observe a completed mask
+    // paired with stale endpoints.
     steeringMin = steeringCapturedPulses[0];
     steeringCenter = steeringCapturedPulses[1];
     steeringMax = steeringCapturedPulses[2];
+    steeringCalibrationMask = proposedMask;
+    dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
 
     return true;
 }
 
 bool Settings::confirmStoredSteeringCalibration()
 {
+    portENTER_CRITICAL(&settingsMux);
+
     int leftDelta = steeringMin - steeringCenter;
     int rightDelta = steeringMax - steeringCenter;
 
@@ -1163,6 +1477,8 @@ bool Settings::confirmStoredSteeringCalibration()
     {
         steeringCalibrationMask = 0;
         dirty = true;
+        portEXIT_CRITICAL(&settingsMux);
+        persistSteeringCalibration();
         return false;
     }
 
@@ -1171,14 +1487,85 @@ bool Settings::confirmStoredSteeringCalibration()
     steeringCapturedPulses[2] = steeringMax;
     steeringCalibrationMask = 0x07;
     dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
 
+    return true;
+}
+
+bool Settings::setStoredSteeringEndpoints(
+    int minimum,
+    int center,
+    int maximum
+)
+{
+    minimum = constrain(minimum, 900, 2100);
+    center = constrain(center, 900, 2100);
+    maximum = constrain(maximum, 900, 2100);
+
+    int leftDelta = minimum - center;
+    int rightDelta = maximum - center;
+
+    if(
+        abs(leftDelta) < 10 ||
+        abs(rightDelta) < 10 ||
+        leftDelta * rightDelta >= 0
+    )
+    {
+        return false;
+    }
+
+    portENTER_CRITICAL(&settingsMux);
+    steeringMin = minimum;
+    steeringCenter = center;
+    steeringMax = maximum;
+    steeringCapturedPulses[0] = minimum;
+    steeringCapturedPulses[1] = center;
+    steeringCapturedPulses[2] = maximum;
+    steeringCalibrationMask = 0x07;
+    dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+
+    persistSteeringCalibration();
     return true;
 }
 
 void Settings::clearSteeringCalibration()
 {
+    portENTER_CRITICAL(&settingsMux);
     steeringCalibrationMask = 0;
     dirty = true;
+    portEXIT_CRITICAL(&settingsMux);
+    persistSteeringCalibration();
+}
+
+void Settings::persistSteeringCalibration()
+{
+    int physical[3];
+    int input[3];
+    uint8_t mask;
+
+    portENTER_CRITICAL(&settingsMux);
+    for(uint8_t i = 0; i < 3; i++)
+    {
+        physical[i] = steeringCapturedPulses[i];
+        input[i] = steeringCapturedInputPulses[i];
+    }
+    mask = steeringCalibrationMask & 0x07;
+    portEXIT_CRITICAL(&settingsMux);
+
+    // Invalidate first and publish the mask last. A power interruption during
+    // these writes can leave calibration disabled, but can never enable a
+    // partially written endpoint set.
+    prefs.putUChar("servoCalM", 0);
+    prefs.putBool("servoEndV1", true);
+    prefs.putInt("servoCalL", physical[0]);
+    prefs.putInt("servoCalC", physical[1]);
+    prefs.putInt("servoCalR", physical[2]);
+    prefs.putInt("servoInL", input[0]);
+    prefs.putInt("servoInC", input[1]);
+    prefs.putInt("servoInR", input[2]);
+    prefs.putUChar("servoCalM", mask);
 }
 
 int Settings::getRadioSteeringTravel()
@@ -1205,7 +1592,12 @@ int Settings::getGainMin()
 
 void Settings::setGainMin(int value)
 {
-    gainMin = value;
+    gainMin = constrain(value, 800, 2200);
+
+    if(gainMax <= gainMin)
+    {
+        gainMax = min(2200, gainMin + 1);
+    }
     dirty = true;
 }
 
@@ -1216,7 +1608,12 @@ int Settings::getGainMax()
 
 void Settings::setGainMax(int value)
 {
-    gainMax = value;
+    gainMax = constrain(value, 800, 2200);
+
+    if(gainMin >= gainMax)
+    {
+        gainMin = max(800, gainMax - 1);
+    }
     dirty = true;
 }
 
@@ -1460,6 +1857,7 @@ bool Settings::deleteProfile(
 
     for(uint8_t i = 0; i < profileCount; i++)
     {
+        clampProfile(profiles[i]);
         persistProfile(i);
     }
 
@@ -1487,6 +1885,25 @@ bool Settings::deleteProfile(
     return true;
 }
 
+void Settings::clampProfile(
+    DrivingProfile& profile
+)
+{
+    profile.gain = constrain(profile.gain, 0.0f, 6.0f);
+    profile.deadband = constrain(profile.deadband, 0.0f, 100.0f);
+    profile.gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
+    profile.gyroIntegralGain = constrain(profile.gyroIntegralGain, 0.0f, 20.0f);
+    profile.gyroMaxCorrection = constrain(profile.gyroMaxCorrection, 0, 100);
+    profile.gyroIntegralLimit = constrain(profile.gyroIntegralLimit, 0, 500);
+    profile.gyroHoldBoost = constrain(profile.gyroHoldBoost, 0, 100);
+    profile.predictionStrength = constrain(profile.predictionStrength, 0, 100);
+    profile.radioSteeringTravel = constrain(profile.radioSteeringTravel, 0, 100);
+    profile.gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
+    profile.gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
+    profile.gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
+    profile.driverPriority = constrain(profile.driverPriority, 0, 50);
+}
+
 void Settings::loadProfiles()
 {
     profileCount = constrain(
@@ -1495,10 +1912,15 @@ void Settings::loadProfiles()
         (int)MAX_PROFILES
     );
 
+    uint8_t storedProfileCount = profileCount;
+    int storedActive = prefs.getChar("profAct", -1);
+    int8_t mappedActive = -1;
+
     uint8_t loadedCount = 0;
 
-    for(uint8_t i = 0; i < profileCount; i++)
+    for(uint8_t i = 0; i < storedProfileCount; i++)
     {
+        uint8_t loadedBefore = loadedCount;
         char key[12];
 
         snprintf(
@@ -1517,26 +1939,55 @@ void Settings::loadProfiles()
             if(
                 prefs.getBytes(key, &stored, sizeof(stored)) == sizeof(stored) &&
                 stored.name[0] != '\0' &&
-                (stored.version == 8 || stored.version == 9 || stored.version == 10)
+                stored.version == 11
             )
             {
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = stored;
-                profile.version = 10;
+                profile.version = 11;
                 profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                loadedCount++;
+            }
+        }
+        else if(storedSize == sizeof(DrivingProfileV10))
+        {
+            DrivingProfileV10 legacy = {};
 
-                if(stored.version == 9)
+            if(
+                prefs.getBytes(key, &legacy, sizeof(legacy)) == sizeof(legacy) &&
+                legacy.name[0] != '\0' &&
+                (legacy.version == 8 || legacy.version == 9 || legacy.version == 10)
+            )
+            {
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                profile.gyroHuntStrength = legacy.gyroHuntStrength;
+
+                if(legacy.version == 9)
                 {
                     profile.gyroMaxCorrection =
                         centerSpanPercentToFullSpanPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
-                else if(stored.version == 8)
+                else if(legacy.version == 8)
                 {
                     profile.gyroMaxCorrection =
                         legacyMaxCorrectionToPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
 
@@ -1745,32 +2196,38 @@ void Settings::loadProfiles()
                 loadedCount++;
             }
         }
+
+        if(i == storedActive && loadedCount > loadedBefore)
+        {
+            mappedActive = (int8_t)(loadedCount - 1);
+        }
     }
 
     profileCount = loadedCount;
 
     for(uint8_t i = 0; i < profileCount; i++)
     {
+        clampProfile(profiles[i]);
         persistProfile(i);
     }
 
-    int storedActive =
-        prefs.getChar("profAct", -1);
+    for(uint8_t i = profileCount; i < storedProfileCount; i++)
+    {
+        char key[12];
+        snprintf(key, sizeof(key), "prof%u", i);
+        prefs.remove(key);
+    }
 
-    activeProfileIndex =
-        storedActive >= 0 &&
-        storedActive < profileCount
-        ?
-        storedActive
-        :
-        -1;
+    activeProfileIndex = mappedActive;
+    prefs.putUChar("profCnt", profileCount);
+    prefs.putChar("profAct", activeProfileIndex);
 }
 
 void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 10;
+    profile.version = 11;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;
@@ -1783,6 +2240,7 @@ void Settings::captureProfile(
     profile.gyroCounterSteerAssist = gyroCounterSteerAssist;
     profile.gyroTransitionSpeed = gyroTransitionSpeed;
     profile.gyroHuntStrength = gyroHuntStrength;
+    profile.driverPriority = driverPriority;
 }
 
 void Settings::applyProfile(
@@ -1790,17 +2248,18 @@ void Settings::applyProfile(
 )
 {
     gain = constrain(profile.gain, 0.0f, 6.0f);
-    deadband = profile.deadband;
+    deadband = constrain(profile.deadband, 0.0f, 100.0f);
     gyroSmoothing = constrain(profile.gyroSmoothing, 0.0f, 1.0f);
-    gyroIntegralGain = profile.gyroIntegralGain;
-    gyroMaxCorrection = profile.gyroMaxCorrection;
-    gyroIntegralLimit = profile.gyroIntegralLimit;
-    gyroHoldBoost = profile.gyroHoldBoost;
-    predictionStrength = profile.predictionStrength;
-    radioSteeringTravel = profile.radioSteeringTravel;
-    gyroCounterSteerAssist = profile.gyroCounterSteerAssist;
-    gyroTransitionSpeed = profile.gyroTransitionSpeed;
-    gyroHuntStrength = profile.gyroHuntStrength;
+    gyroIntegralGain = constrain(profile.gyroIntegralGain, 0.0f, 20.0f);
+    gyroMaxCorrection = constrain(profile.gyroMaxCorrection, 0, 100);
+    gyroIntegralLimit = constrain(profile.gyroIntegralLimit, 0, 500);
+    gyroHoldBoost = constrain(profile.gyroHoldBoost, 0, 100);
+    predictionStrength = constrain(profile.predictionStrength, 0, 100);
+    radioSteeringTravel = constrain(profile.radioSteeringTravel, 0, 100);
+    gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
+    gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
+    gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
+    driverPriority = constrain(profile.driverPriority, 0, 50);
 }
 
 bool Settings::persistProfile(

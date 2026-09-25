@@ -35,6 +35,16 @@ bool Touch::begin()
 }
 
 
+void Touch::setRotation(uint8_t rotation)
+{
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    displayRotation = rotation == 2 ? 2 : 0;
+    #else
+    (void)rotation;
+    #endif
+}
+
+
 static bool readTouchBytes(
     uint8_t reg,
     uint8_t* buffer,
@@ -189,6 +199,12 @@ void Touch::update()
 
     y =
         rawX;
+
+    if(displayRotation == 2)
+    {
+        x = TOUCH_HEIGHT - 1 - x;
+        y = TOUCH_WIDTH - 1 - y;
+    }
 
     if(!trackingTouch)
     {

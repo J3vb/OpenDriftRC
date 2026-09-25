@@ -14,7 +14,7 @@ public:
     bool beginExternal();
 
     void updateExternalPulse(
-        uint16_t width,
+        float width,
         bool valid = true
     );
 
@@ -27,6 +27,8 @@ public:
     );
 
     uint16_t getPulseWidth();
+
+    float getPulseWidthFloat();
 
     uint32_t getSignalAgeMs();
 
@@ -43,6 +45,8 @@ private:
     volatile uint32_t riseTime = 0;
 
     volatile uint16_t pulseWidth = 1500;
+
+    volatile float externalPulseWidth = 1500.0f;
 
     volatile uint32_t lastPulseMicros = 0;
 

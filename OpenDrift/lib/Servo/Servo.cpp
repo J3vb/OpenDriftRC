@@ -3,30 +3,40 @@
 
 bool ServoOutput::begin(
     int pin,
-    int frequencyHz
+    int requestedFrequencyHz
 )
 {
     end();
 
-    servo.setPeriodHertz(
-        constrain(
-            frequencyHz,
-            50,
-            333
-        )
+    frequencyHz = constrain(
+        requestedFrequencyHz,
+        50,
+        333
     );
 
-    int channel =
-        servo.attach(
+    servo.setPeriodHertz(frequencyHz);
+
+    int channel = servo.attach(
         pin,
-        1000,
-        2000
+        900,
+        2100
     );
 
     if(channel == 0)
     {
         return false;
     }
+
+    // ESP32Servo defaults to a 10-bit timer on ESP32-S3. At 333 Hz that
+    // quantizes steering into roughly 2.9 us steps, which is visible at the
+    // wheels. Use the S3's maximum supported width and feed it native ticks
+    // so the float correction path remains sub-microsecond at the output.
+    servo.setTimerWidth(14);
+
+    ticksPerMicrosecond =
+        ((float)(1UL << servo.readTimerWidth()) * frequencyHz)
+        /
+        1000000.0f;
 
     active = true;
 
@@ -56,21 +66,25 @@ void ServoOutput::end()
 
 
 
-void ServoOutput::writeMicroseconds(int us)
+float ServoOutput::computePulse(float us)
 {
-    us = constrain(us, 1000, 2000);
+    us = constrain(us, 1000.0f, 2000.0f);
 
-    int targetPulse = centerPulse;
+    float targetPulse = centerPulse;
 
     if(endpointCalibrationActive)
     {
         targetPulse = us <= 1500
-            ? map(us, 1000, 1500, leftEndpointPulse, centerPulse)
-            : map(us, 1500, 2000, centerPulse, rightEndpointPulse);
+            ? leftEndpointPulse
+                + (us - 1000.0f) / 500.0f
+                * (centerPulse - leftEndpointPulse)
+            : centerPulse
+                + (us - 1500.0f) / 500.0f
+                * (rightEndpointPulse - centerPulse);
     }
     else
     {
-        int correction = us - 1500;
+        float correction = us - 1500.0f;
 
         if(reversed)
         {
@@ -81,11 +95,27 @@ void ServoOutput::writeMicroseconds(int us)
         targetPulse = centerPulse + correction;
     }
 
-    targetPulse = constrain(targetPulse, 900, 2100);
+    return constrain(targetPulse, 900.0f, 2100.0f);
+}
+
+
+void ServoOutput::writePulse(float pulseUs)
+{
+    int ticks = (int)roundf(
+        pulseUs * ticksPerMicrosecond
+    );
+
+    servo.writeTicks(ticks);
+}
+
+
+void ServoOutput::writeMicroseconds(float us)
+{
+    float targetPulse = computePulse(us);
 
     if(
         quietBand > 0 &&
-        abs(targetPulse - currentPulse) <= quietBand
+        fabsf(targetPulse - currentPulse) <= quietBand
     )
     {
         return;
@@ -94,9 +124,7 @@ void ServoOutput::writeMicroseconds(int us)
     currentPulse =
         targetPulse;
 
-    servo.writeMicroseconds(
-        currentPulse
-    );
+    writePulse(currentPulse);
 }
 
 
@@ -106,20 +134,30 @@ void ServoOutput::center()
     currentPulse =
         constrain(
             centerPulse,
-            1000,
-            2000
+            900,
+            2100
         );
 
-    servo.writeMicroseconds(
-        currentPulse
-    );
+    writePulse(currentPulse);
 }
 
 
 
 int ServoOutput::getPosition()
 {
-    return currentPulse;
+    return (int)roundf(currentPulse);
+}
+
+
+void ServoOutput::noteCommandPulse(int us)
+{
+    commandPulse = computePulse(us);
+}
+
+
+int ServoOutput::getCommandPosition()
+{
+    return (int)roundf(commandPulse);
 }
 
 

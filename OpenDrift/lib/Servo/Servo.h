@@ -15,11 +15,14 @@ public:
 
     void end();
 
-    void writeMicroseconds(int us);
+    void writeMicroseconds(float us);
 
     void center();
 
     int getPosition();
+
+    void noteCommandPulse(int us);
+    int getCommandPosition();
 
     void configure(
         int centerPulse,
@@ -35,9 +38,18 @@ public:
 
 private:
 
+    float computePulse(float us);
+    void writePulse(float pulseUs);
+
     Servo servo;
 
-    int currentPulse = 1500;
+    int frequencyHz = 50;
+
+    float ticksPerMicrosecond = 1.0f;
+
+    float currentPulse = 1500.0f;
+
+    float commandPulse = 1500.0f;
 
     int centerPulse = 1500;
 
@@ -54,4 +66,5 @@ private:
     int rightEndpointPulse = 2000;
 
     bool active = false;
+
 };

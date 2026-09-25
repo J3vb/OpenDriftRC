@@ -5,14 +5,19 @@
 #include <freertos/task.h>
 #include <esp_system.h>
 
+#if !defined(OPENDRIFT_HEADLESS)
 #include "LGFX_OpenDrift.hpp"
+#include "Touch.h"
+#include "UI.h"
+#endif
+#if defined(OPENDRIFT_BOARD_MATRIX)
+#include "MatrixStatus.h"
+#endif
 #include "IMU.h"
 #include "Servo.h"
 #include "EscOutput.h"
 #include "GyroController.h"
-#include "Touch.h"
-#include "UI.h"
-#include "WiFiManager.h"
+#include "WIFIManager.h"
 #include "Settings.h"
 #include "RadioInput.h"
 #if defined(OPENDRIFT_INPUT_CRSF)
@@ -25,7 +30,9 @@
 #include "WebConfigurator.h"
 #include "BlackboxLogger.h"
 
+#if !defined(OPENDRIFT_HEADLESS)
 LGFX lcd;
+#endif
 
 IMU imu;
 
@@ -35,9 +42,14 @@ EscOutput throttleOutput;
 
 GyroController gyro;
 
+#if !defined(OPENDRIFT_HEADLESS)
 Touch touch;
-
 UI ui;
+#endif
+
+#if defined(OPENDRIFT_BOARD_MATRIX)
+MatrixStatus matrixStatus;
+#endif
 
 WiFiManager wifi;
 
@@ -71,6 +83,7 @@ bool blackboxStartAttempted = false;
 
 static uint32_t controlLoopHz = 250;
 static uint32_t controlLoopPeriodMs = 4;
+static uint8_t appliedDisplayRotation = 0xFF;
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
 static constexpr uint8_t STARTUP_RETRY_COUNT = 3;
@@ -95,6 +108,7 @@ struct ControlTelemetry
     int servoCommand = 1500;
     bool steeringSignal = false;
     bool throttleSignal = false;
+    bool imuHealthy = true;
 };
 
 ControlTelemetry controlTelemetry;
@@ -116,6 +130,11 @@ TaskHandle_t crsfTaskHandle = nullptr;
 #define CRSF_RX_PIN 17
 #define CRSF_TX_PIN 18
 #define CRSF_THROTTLE_OUTPUT_PIN 15
+#elif defined(OPENDRIFT_BOARD_MATRIX)
+#define SERVO_OUTPUT_PIN 1
+#define CRSF_RX_PIN 3
+#define CRSF_TX_PIN 4
+#define CRSF_THROTTLE_OUTPUT_PIN 2
 #elif defined(OPENDRIFT_AMOLED_V2)
 // V2 connects the IMU and touch interrupt outputs to GPIO17/18. Keep the
 // receiver UART off those lines to prevent electrical contention.
@@ -136,15 +155,23 @@ static constexpr uint32_t CRSF_SIGNAL_TIMEOUT_MS = 50;
 static constexpr uint32_t CRSF_THROTTLE_NEUTRAL_MS = 500;
 static constexpr int CRSF_THROTTLE_NEUTRAL_BAND_US = 50;
 #else
-#if defined(OPENDRIFT_AMOLED_V2)
+#if defined(OPENDRIFT_BOARD_MATRIX)
+#define SERVO_OUTPUT_PIN 3
+#define RADIO_STEERING_PIN 1
+#define RADIO_THROTTLE_PIN 2
+#elif defined(OPENDRIFT_AMOLED_V2)
 #define SERVO_OUTPUT_PIN 1
+#define RADIO_STEERING_PIN 15
+#define RADIO_THROTTLE_PIN 16
 #else
 #define SERVO_OUTPUT_PIN 17
-#endif
 #define RADIO_STEERING_PIN 15
 #define RADIO_THROTTLE_PIN 16
 #endif
-#if defined(OPENDRIFT_AMOLED_V2)
+#endif
+#if defined(OPENDRIFT_BOARD_MATRIX)
+#define SHARED_GAIN_THROTTLE_PIN 4
+#elif defined(OPENDRIFT_AMOLED_V2)
 #define SHARED_GAIN_THROTTLE_PIN 2
 #else
 #define SHARED_GAIN_THROTTLE_PIN 18
@@ -152,24 +179,39 @@ static constexpr int CRSF_THROTTLE_NEUTRAL_BAND_US = 50;
 
 bool pin18ModeConfigured = false;
 
-bool pin18ThrottleOutputMode = false;
+volatile bool pin18ThrottleOutputMode = false;
 
-bool throttleOutputActive = false;
+volatile bool throttleOutputActive = false;
 
 #if defined(OPENDRIFT_INPUT_CRSF)
-bool crsfThrottleArmed = false;
+volatile bool crsfThrottleArmed = false;
 bool lastCrsfSignal = false;
-uint32_t crsfThrottleNeutralSinceMs = 0;
+volatile uint32_t crsfThrottleNeutralSinceMs = 0;
 volatile bool crsfThrottleSignalSnapshot = false;
-volatile int crsfThrottlePulseSnapshot = 1500;
+volatile float crsfThrottlePulseSnapshot = 1500.0f;
+volatile bool crsfThrottleOutputArmed = false;
 #endif
 
-const char* ssid = "OpenDrift";
+volatile bool gyroCalibrationRequested = false;
+
+
+void requestGyroCalibration()
+{
+    gyroCalibrationRequested = true;
+}
+
 const char* password = "opendrift";
 
 
 #if defined(OPENDRIFT_BOARD_AMOLED_164)
 static constexpr float AMOLED_BOOT_LOG_TEXT_SIZE = 1.15f;
+#endif
+
+#if defined(OPENDRIFT_HEADLESS)
+static constexpr uint16_t TFT_RED = 0;
+static constexpr uint16_t TFT_GREEN = 0;
+static constexpr uint16_t TFT_YELLOW = 0;
+static constexpr uint16_t TFT_CYAN = 0;
 #endif
 
 
@@ -258,7 +300,34 @@ void resetAmoledPanelHardware()
 #endif
 
 
+void applyDisplayRotation()
+{
+    uint8_t rotation = settings.getDisplayRotation();
 
+    if(rotation == appliedDisplayRotation)
+    {
+        return;
+    }
+
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    matrixStatus.setRotation(rotation);
+    #elif defined(OPENDRIFT_BOARD_AMOLED_164)
+    lcd.setRotation(rotation);
+    touch.setRotation(rotation);
+    ui.requestRefresh();
+    #endif
+
+    appliedDisplayRotation = rotation;
+
+    Serial.printf(
+        "Display rotation: %u degrees\n",
+        (unsigned int)rotation * 90
+    );
+}
+
+
+
+#if !defined(OPENDRIFT_HEADLESS)
 class BootConsole
 {
 
@@ -516,6 +585,31 @@ private:
     }
     #endif
 };
+#else
+class BootConsole
+{
+public:
+    void begin()
+    {
+    }
+
+    void log(
+        const char* message,
+        const char* status = "[ OK ]",
+        uint16_t statusColor = 0
+    )
+    {
+        (void)statusColor;
+        Serial.print(status);
+        Serial.print(" ");
+        Serial.println(message);
+    }
+
+    void end()
+    {
+    }
+};
+#endif
 
 
 BootConsole bootConsole;
@@ -593,20 +687,14 @@ bool configurePin18Mode()
 
 #if defined(OPENDRIFT_INPUT_CRSF)
 void updateCrsfThrottleOutput(
-    int throttlePulse,
+    float throttlePulse,
     bool signalValid
 )
 {
     if(!signalValid)
     {
-        if(throttleOutputActive)
-        {
-            // Active neutral is deterministic and does not depend on the
-            // receiver or ESC having matching failsafe configuration.
-            throttleOutput.writeMicroseconds(1500);
-        }
-
         crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
         crsfThrottleNeutralSinceMs = 0;
 
         return;
@@ -616,28 +704,26 @@ void updateCrsfThrottleOutput(
         abs(throttlePulse - 1500) <=
         CRSF_THROTTLE_NEUTRAL_BAND_US;
 
-    if(!crsfThrottleArmed)
+    if(!crsfThrottleArmed || !crsfThrottleOutputArmed)
     {
         if(!throttleNeutral)
         {
             crsfThrottleNeutralSinceMs = 0;
 
-            if(throttleOutputActive)
-            {
-                throttleOutput.writeMicroseconds(1500);
-            }
-
+            crsfThrottleOutputArmed = false;
             return;
         }
 
-        if(crsfThrottleNeutralSinceMs == 0)
+        uint32_t neutralSince = crsfThrottleNeutralSinceMs;
+
+        if(neutralSince == 0)
         {
             crsfThrottleNeutralSinceMs = millis();
             return;
         }
 
         if(
-            millis() - crsfThrottleNeutralSinceMs <
+            millis() - neutralSince <
             CRSF_THROTTLE_NEUTRAL_MS
         )
         {
@@ -656,7 +742,7 @@ void updateCrsfThrottleOutput(
             throttleOutputActive =
                 throttleOutput.begin(
                     CRSF_THROTTLE_OUTPUT_PIN,
-                    50
+                    settings.getThrottleOutputHz()
                 );
         }
 
@@ -668,31 +754,26 @@ void updateCrsfThrottleOutput(
             return;
         }
 
+        crsfThrottleOutputArmed = true;
+
         Serial.println(
             "CRSF throttle output armed after neutral hold"
         );
     }
 
-    throttleOutput.writeMicroseconds(
-        constrain(
-            throttlePulse,
-            1000,
-            2000
-        )
-    );
 }
 #endif
 
 int mapSteeringPulse(
     int pulse,
-    Settings& settings
+    const Settings::SteeringCalibration& calibration
 )
 {
-    if(settings.isSteeringCalibrated())
+    if(calibration.calibrated)
     {
-        int left = settings.getSteeringCapturedInputPulse(0);
-        int center = settings.getSteeringCapturedInputPulse(1);
-        int right = settings.getSteeringCapturedInputPulse(2);
+        int left = calibration.inputMin;
+        int center = calibration.inputCenter;
+        int right = calibration.inputMax;
         int leftDelta = left - center;
         int rightDelta = right - center;
 
@@ -805,7 +886,7 @@ void runControlIteration()
         );
 
         throttleRadio.updateExternalPulse(
-            crsf.getChannelMicroseconds(
+            crsf.getChannelMicrosecondsFloat(
                 CRSF_THROTTLE_CHANNEL
             )
         );
@@ -879,29 +960,71 @@ void runControlIteration()
         settings.getPredictionStrength()
     );
 
+    gyro.setDriverPriority(
+        settings.getDriverPriority()
+    );
+
     gyro.setHuntStrength(
         settings.getGyroHuntStrength()
     );
 
-    if(i2cBusMutex != nullptr)
-    {
-        xSemaphoreTake(
-            i2cBusMutex,
-            portMAX_DELAY
-        );
-    }
-
-    imu.setGyroLpfMode(
-        settings.getGyroLpfMode()
+    gyro.setAntiWobbleScale(
+        settings.getAntiWobbleScale()
     );
 
-    imu.update();
+    static uint8_t i2cMisses = 0;
+    static float lastYaw = 0.0f;
 
-    if(i2cBusMutex != nullptr)
+    bool i2cReady =
+        i2cBusMutex == nullptr ||
+        xSemaphoreTake(
+            i2cBusMutex,
+            pdMS_TO_TICKS(2)
+        ) == pdTRUE;
+
+    if(i2cReady)
     {
-        xSemaphoreGive(
-            i2cBusMutex
+        i2cMisses = 0;
+
+        imu.setGyroLpfMode(
+            settings.getGyroLpfMode()
         );
+
+        imu.update();
+
+        if(
+            gyroCalibrationRequested &&
+            !gyro.isCalibrating()
+        )
+        {
+            gyro.startCalibration(controlLoopHz / 2);
+            gyroCalibrationRequested = false;
+        }
+
+        if(
+            gyro.isCalibrating() &&
+            (!imu.isYawValid() || !imu.lastGyroReadOk())
+        )
+        {
+            gyro.abortCalibration();
+        }
+
+        if(i2cBusMutex != nullptr)
+        {
+            xSemaphoreGive(i2cBusMutex);
+        }
+    }
+    else
+    {
+        if(i2cMisses < 255)
+        {
+            i2cMisses++;
+        }
+
+        if(gyro.isCalibrating())
+        {
+            gyro.abortCalibration();
+        }
     }
 
     #if defined(OPENDRIFT_INPUT_CRSF)
@@ -912,34 +1035,66 @@ void runControlIteration()
     bool throttleSignal = throttleRadio.hasSignal();
     #endif
 
-    int throttlePulse =
+    float throttleOutputPulse =
         throttleSignal
-        ? throttleRadio.getPulseWidth()
-        : 1500;
+        ? throttleRadio.getPulseWidthFloat()
+        : 1500.0f;
+
+    int throttlePulse =
+        (int)roundf(throttleOutputPulse);
+
+    Settings::SteeringCalibration calibration;
+    settings.getSteeringCalibration(calibration);
 
     int steeringCommand = 1500;
+    int driverCommand = 1500;
 
     if(steeringSignal)
     {
-        steeringCommand =
+        driverCommand =
             mapSteeringPulse(
                 steeringRadio.getPulseWidth(),
-                settings
+                calibration
             );
 
         steeringCommand =
             applyRadioSteeringTravel(
-                steeringCommand,
+                driverCommand,
                 settings
             );
     }
-    float yaw =
-        imu.getYawRate();
 
-    int gyroCorrection =
+    bool imuHealthy = imu.isHealthy();
+    float yaw = 0.0f;
+
+    if(i2cReady)
+    {
+        yaw = imu.isYawValid() ? imu.getYawRate() : 0.0f;
+        lastYaw = yaw;
+    }
+    else if(i2cMisses < 3)
+    {
+        yaw = lastYaw;
+    }
+
+    static bool lastGyroReverse =
+        settings.getGyroReverse();
+
+    bool gyroReverse = settings.getGyroReverse();
+
+    if(gyroReverse != lastGyroReverse)
+    {
+        gyro.reverseYawFrame();
+        lastGyroReverse = gyroReverse;
+    }
+
+    float controllerYaw =
+        gyroReverse ? -yaw : yaw;
+
+    float gyroCorrection =
         gyro.update(
-            yaw,
-            steeringCommand,
+            controllerYaw,
+            driverCommand,
             steeringSignal,
             throttlePulse,
             throttleSignal
@@ -948,20 +1103,13 @@ void runControlIteration()
     int requestedGyroCorrection =
         gyro.getRequestedCorrection();
 
-    if(settings.getGyroReverse())
-    {
-        gyroCorrection =
-            -gyroCorrection;
-        requestedGyroCorrection =
-            -requestedGyroCorrection;
-    }
-
-    int limitedGyroCorrection = gyroCorrection;
+    int limitedGyroCorrection =
+        (int)roundf(gyroCorrection);
     int appliedGyroCorrection = 0;
     bool correctionSaturated =
         requestedGyroCorrection != limitedGyroCorrection;
 
-    int servoCommand =
+    float servoCommand =
         steeringServo.getPosition();
 
     if(steeringSignal)
@@ -971,12 +1119,14 @@ void runControlIteration()
         // the final hard clamp applied by ServoOutput.
         servoCommand = constrain(
             steeringCommand + gyroCorrection,
-            1000,
-            2000
+            1000.0f,
+            2000.0f
         );
 
         appliedGyroCorrection =
-            servoCommand - steeringCommand;
+            (int)roundf(
+                servoCommand - steeringCommand
+            );
 
         correctionSaturated =
             correctionSaturated ||
@@ -987,14 +1137,18 @@ void runControlIteration()
             settings.getServoReverse(),
             settings.getServoTravel(),
             settings.getServoQuiet(),
-            settings.isSteeringCalibrated(),
-            settings.getSteeringMin(),
-            settings.getSteeringCenter(),
-            settings.getSteeringMax()
+            calibration.calibrated,
+            calibration.min,
+            calibration.center,
+            calibration.max
         );
 
         steeringServo.writeMicroseconds(
             servoCommand
+        );
+
+        steeringServo.noteCommandPulse(
+            steeringCommand
         );
 
         servoCommand = steeringServo.getPosition();
@@ -1006,19 +1160,52 @@ void runControlIteration()
         // Do not hold the last steering command after a receiver loss.
         steeringServo.center();
         servoCommand = steeringServo.getPosition();
+
+        #if defined(OPENDRIFT_BOARD_AMOLED_164)
+        auxChannelOutputs.writeFailsafe();
+        #endif
     }
 
     lastCrsfSignal = steeringSignal;
 
-    // The main loop owns throttle PWM attachment and removal. ESP32Servo's
-    // dynamic LEDC allocation must not run inside this high-priority task.
-    crsfThrottlePulseSnapshot = throttlePulse;
+    // The main loop owns throttle PWM attachment and removal so peripheral
+    // setup never runs inside this high-priority task.
+    crsfThrottlePulseSnapshot = throttleOutputPulse;
     crsfThrottleSignalSnapshot = throttleSignal;
+
+    if(!throttleSignal)
+    {
+        crsfThrottleArmed = false;
+        crsfThrottleOutputArmed = false;
+        crsfThrottleNeutralSinceMs = 0;
+    }
+
+    if(throttleOutputActive)
+    {
+        throttleOutput.writeMicroseconds(
+            (
+                !throttleSignal ||
+                !crsfThrottleArmed ||
+                !crsfThrottleOutputArmed
+            )
+            ? 1500
+            : constrain(throttleOutputPulse, 1000.0f, 2000.0f)
+        );
+    }
+    #else
+    if(pin18ThrottleOutputMode && throttleOutputActive)
+    {
+        throttleOutput.writeMicroseconds(
+            throttleSignal
+            ? throttleRadio.getPulseWidthFloat()
+            : 1500
+        );
+    }
     #endif
 
     ControlTelemetry nextTelemetry;
 
-    nextTelemetry.yaw = yaw;
+    nextTelemetry.yaw = controllerYaw;
     nextTelemetry.requestedGyroCorrection =
         requestedGyroCorrection;
     nextTelemetry.limitedGyroCorrection =
@@ -1030,11 +1217,13 @@ void runControlIteration()
     nextTelemetry.steeringCommand =
         steeringCommand;
     nextTelemetry.servoCommand =
-        servoCommand;
+        (int)roundf(servoCommand);
     nextTelemetry.steeringSignal =
         steeringSignal;
     nextTelemetry.throttleSignal =
         throttleSignal;
+    nextTelemetry.imuHealthy =
+        imuHealthy;
 
     portENTER_CRITICAL(
         &controlTelemetryMux
@@ -1081,6 +1270,14 @@ void controlTask(void* parameter)
     while(true)
     {
         runControlIteration();
+
+        if(
+            xTaskGetTickCount() - lastWake >
+            period * 5
+        )
+        {
+            lastWake = xTaskGetTickCount();
+        }
 
         vTaskDelayUntil(
             &lastWake,
@@ -1183,11 +1380,18 @@ void setup()
     Serial.print((int)resetReason);
     Serial.println(")");
 
-    #if !defined(OPENDRIFT_BOARD_AMOLED_164)
+    #if !defined(OPENDRIFT_BOARD_AMOLED_164) && !defined(OPENDRIFT_HEADLESS)
     pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
     #endif
 
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    matrixStatus.begin();
+    bootConsole.begin();
+    bootConsole.log(
+        "ws2812: low-brightness status matrix online"
+    );
+    #else
     bool displayOk = false;
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -1243,6 +1447,7 @@ void setup()
         displayOk ? "[ OK ]" : "[FAIL]",
         displayOk ? TFT_GREEN : TFT_RED
     );
+    #endif
 
     char memoryMessage[48];
 
@@ -1269,6 +1474,17 @@ void setup()
     controlLoopHz = settings.getControlLoopHz();
     controlLoopPeriodMs = 1000 / controlLoopHz;
 
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    if(displayOk)
+    {
+        lcd.setBrightness(
+            (uint8_t)((settings.getDisplayBrightness() * 255U + 50U) / 100U)
+        );
+    }
+    #endif
+
+    applyDisplayRotation();
+
     bootConsole.log(
         "nvs: mounted OpenDrift settings store",
         settingsOk ? "[ OK ]" : "[WARN]",
@@ -1278,6 +1494,9 @@ void setup()
     //-------------------
     // IMU
     //-------------------
+
+    // Keep a stuck I2C peripheral from blocking several control periods.
+    Wire.setTimeOut(5);
 
     bool imuOk = false;
 
@@ -1312,6 +1531,10 @@ void setup()
 
     if(!imuOk)
     {
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        matrixStatus.setState(MatrixStatus::State::Error);
+        #endif
+
         bootConsole.log(
             "qmi8658: probe failed; safe reboot",
             "[FAIL]",
@@ -1333,6 +1556,14 @@ void setup()
         "qmi8658: 6-axis inertial sensor ready"
     );
 
+    // Calibrate with the same hardware filter used while driving.
+    imu.setGyroLpfMode(
+        settings.getGyroLpfMode()
+    );
+
+    delay(80);
+
+    #if !defined(OPENDRIFT_HEADLESS)
     //-------------------
     // TOUCH
     //-------------------
@@ -1388,6 +1619,7 @@ void setup()
     );
 
     Serial.println(touchOk ? "TOUCH OK" : "TOUCH OFFLINE");
+    #endif
 
     //-------------------
     // SERVO
@@ -1398,6 +1630,10 @@ void setup()
         controlLoopHz
     ))
     {
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        matrixStatus.setState(MatrixStatus::State::Error);
+        #endif
+
         bootConsole.log(
             "ledc: steering output failed; safe reboot",
             "[FAIL]",
@@ -1428,13 +1664,17 @@ void setup()
         #if defined(OPENDRIFT_INPUT_CRSF)
         #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
         "ledc: steering servo output attached on gpio16"
+        #elif defined(OPENDRIFT_BOARD_MATRIX)
+        "ledc: steering servo output attached on gpio1"
         #elif defined(OPENDRIFT_AMOLED_V2)
         "ledc: steering servo output attached on gpio15"
         #else
         "ledc: steering servo output attached on gpio15"
         #endif
         #else
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        "ledc: steering servo output attached on gpio3"
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "ledc: steering servo output attached on gpio1"
         #else
         "ledc: steering servo output attached on gpio17"
@@ -1473,7 +1713,7 @@ void setup()
     throttleOutputActive =
         throttleOutput.begin(
             CRSF_THROTTLE_OUTPUT_PIN,
-            50
+            settings.getThrottleOutputHz()
         );
 
     if(throttleOutputActive)
@@ -1528,7 +1768,11 @@ void setup()
 
     #if defined(OPENDRIFT_INPUT_CRSF)
     bootConsole.log(
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        "ledc: esc neutral output attached on gpio2",
+        #else
         "ledc: esc neutral output attached on gpio16",
+        #endif
         throttleOutputOk ? "[ OK ]" : "[FAIL]",
         throttleOutputOk ? TFT_GREEN : TFT_RED
     );
@@ -1556,14 +1800,19 @@ void setup()
 
     bootConsole.log(
         #if defined(OPENDRIFT_INPUT_CRSF)
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        "gpio3/4: crsf rx/tx; gpio1/2: servo/esc out"
+        #elif defined(OPENDRIFT_AMOLED_V2)
         "gpio1/2: crsf rx/tx; gpio15/16: servo/esc out"
         #else
         "gpio17/18: crsf rx/tx; gpio15/16: servo/esc out"
         #endif
         #else
         pin18ThrottleOutputMode
-        #if defined(OPENDRIFT_AMOLED_V2)
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        ? "gpio4: throttle passthrough output"
+        : "gpio4: gyro gain adjustment input"
+        #elif defined(OPENDRIFT_AMOLED_V2)
         ? "gpio2: throttle passthrough output"
         : "gpio2: gyro gain adjustment input"
         #else
@@ -1632,8 +1881,16 @@ void setup()
         settings.getPredictionStrength()
     );
 
+    gyro.setDriverPriority(
+        settings.getDriverPriority()
+    );
+
     gyro.setHuntStrength(
         settings.getGyroHuntStrength()
+    );
+
+    gyro.setAntiWobbleScale(
+        settings.getAntiWobbleScale()
     );
 
     gyro.setControlLoopHz(
@@ -1641,8 +1898,10 @@ void setup()
     );
 
     Serial.printf(
-        "Hunt notch: %s (3.2 Hz initial, 2.5-3.6 Hz tracking, Q 1.25, control %d Hz)\n",
+        "Hunt notch: %s (%s scale, %.1f Hz initial, Q 1.25, control %d Hz)\n",
         gyro.isHuntNotchConfigured() ? "READY" : "FAILED",
+        gyro.getAntiWobbleScale() == 1 ? "micro" : "1/10",
+        gyro.getHuntNotchCenter(),
         gyro.getControlLoopHz()
     );
 
@@ -1656,18 +1915,71 @@ void setup()
         TFT_CYAN
     );
 
-    delay(2000);
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    matrixStatus.setState(
+        MatrixStatus::State::Calibrating
+    );
+    #endif
 
-    imu.update();
+    delay(1500);
 
-    gyro.calibrate(
-        imu.getYawRate()
+    for(uint8_t attempt = 1; attempt <= 2; attempt++)
+    {
+        if(attempt > 1)
+        {
+            delay(500);
+        }
+
+        gyro.startCalibration(controlLoopHz / 2);
+
+        while(gyro.isCalibrating())
+        {
+            imu.update();
+
+            if(!imu.isYawValid() || !imu.lastGyroReadOk())
+            {
+                gyro.abortCalibration();
+                break;
+            }
+
+            gyro.update(
+                settings.getGyroReverse()
+                ? -imu.getYawRate()
+                : imu.getYawRate(),
+                1500,
+                false,
+                1500,
+                false
+            );
+
+            delay(controlLoopPeriodMs);
+        }
+
+        if(
+            gyro.getCalibrationState() ==
+            GyroController::CALIBRATION_OK
+        )
+        {
+            break;
+        }
+    }
+
+    bool gyroBiasOk =
+        gyro.getCalibrationState() ==
+        GyroController::CALIBRATION_OK;
+
+    Serial.println(
+        gyroBiasOk
+        ? "Gyro calibrated"
+        : "Gyro bias rejected; zero offset retained"
     );
 
-    Serial.println("Gyro calibrated");
-
     bootConsole.log(
-        "qmi8658: gyro bias calibration complete"
+        gyroBiasOk
+        ? "qmi8658: gyro bias calibration complete"
+        : "qmi8658: gyro bias rejected (movement), using zero offset",
+        gyroBiasOk ? "[ OK ]" : "[WARN]",
+        gyroBiasOk ? TFT_GREEN : TFT_YELLOW
     );
 
     delay(500);
@@ -1704,7 +2016,7 @@ void setup()
     //-------------------
 
     wifi.begin(
-        ssid,
+        settings.getWifiSsid(),
         password,
         settings.getWifiEnabled()
     );
@@ -1756,6 +2068,7 @@ void setup()
         );
     }
 
+    #if !defined(OPENDRIFT_HEADLESS)
     //-------------------
     // UI
     //-------------------
@@ -1778,13 +2091,21 @@ void setup()
         steeringServo
     );
 
-    #if defined(OPENDRIFT_INPUT_CRSF)
     ui.setThrottleRadio(
         throttleRadio
     );
-    #endif
+
+    ui.setCalibrationCallback(
+        requestGyroCalibration
+    );
 
     touch.update();
+    #else
+    bootConsole.log(
+        "systemd[1]: Reached target OpenDrift headless"
+    );
+    bootConsole.end();
+    #endif
 
     i2cBusMutex =
         xSemaphoreCreateMutex();
@@ -1842,6 +2163,10 @@ void setup()
     else
     {
         Serial.println("Controller: task start failed");
+
+        #if defined(OPENDRIFT_BOARD_MATRIX)
+        matrixStatus.setState(MatrixStatus::State::Error);
+        #endif
     }
 }
 
@@ -1854,7 +2179,9 @@ void loop()
 
     if(crsfParameters.consumeSettingsChanged())
     {
+        #if !defined(OPENDRIFT_HEADLESS)
         ui.requestRefresh();
+        #endif
     }
     #endif
 
@@ -1875,11 +2202,14 @@ void loop()
             (unsigned long)crsf.getFrameAgeMs(),
             crsf.getUplinkLinkQuality(),
             crsf.getUplinkSnr(),
-            crsfThrottleArmed ? "ARMED" : "LOCKED"
+            (crsfThrottleArmed && crsfThrottleOutputArmed)
+            ? "ARMED"
+            : "LOCKED"
         );
         #endif
     }
 
+    #if !defined(OPENDRIFT_HEADLESS)
     if(i2cBusMutex != nullptr)
     {
         xSemaphoreTake(
@@ -1896,6 +2226,7 @@ void loop()
             i2cBusMutex
         );
     }
+    #endif
 
     //-------------------
     // SETTINGS
@@ -1935,13 +2266,17 @@ void loop()
         webConfig.update();
     }
 
+    // Web and CRSF writes become visible immediately. AMOLED touch uses the
+    // same rotation so its hit targets continue to follow the rendered UI.
+    applyDisplayRotation();
+
     configurePin18Mode();
 
     #if defined(OPENDRIFT_INPUT_CRSF)
     bool crsfThrottleSignal =
         crsfThrottleSignalSnapshot;
 
-    int crsfThrottlePulse =
+    float crsfThrottlePulse =
         crsfThrottlePulseSnapshot;
 
     updateCrsfThrottleOutput(
@@ -1973,16 +2308,11 @@ void loop()
 
             throttleOutputActive =
                 throttleOutput.begin(
-                    SHARED_GAIN_THROTTLE_PIN
+                    SHARED_GAIN_THROTTLE_PIN,
+                    settings.getThrottleOutputHz()
                 );
         }
 
-        if(throttleOutputActive)
-        {
-            throttleOutput.writeMicroseconds(
-                throttleRadio.getPulseWidth()
-            );
-        }
     }
     else if(
         pin18ThrottleOutputMode &&
@@ -2001,6 +2331,7 @@ void loop()
     }
     #endif
 
+    #if !defined(OPENDRIFT_HEADLESS)
     //-------------------
     // UI
     //-------------------
@@ -2014,6 +2345,7 @@ void loop()
         steeringRadio,
         gainRadio
     );
+    #endif
 
     ControlTelemetry telemetry;
 
@@ -2027,6 +2359,14 @@ void loop()
     portEXIT_CRITICAL(
         &controlTelemetryMux
     );
+
+    #if defined(OPENDRIFT_BOARD_MATRIX)
+    matrixStatus.update(
+        telemetry.steeringSignal,
+        wifi.isEnabled(),
+        settings.getBlackboxEnabled() && blackbox.isReady()
+    );
+    #endif
 
     //-------------------
     // BLACKBOX LOG
@@ -2066,6 +2406,9 @@ void loop()
             throttleRadio.getPulseWidth(),
             gainRadio.getPulseWidth(),
             gyro.getGain(),
+            settings.getDriverPriority(),
+            gyro.getDriverPriorityScale(),
+            gyro.getEffectiveDirectGain(),
             settings.getDeadband(),
             settings.getGyroMaxCorrection(),
             settings.getGyroSmoothing(),
@@ -2096,6 +2439,7 @@ void loop()
             pin18ThrottleOutputMode,
             settings.getGyroTransitionSpeed(),
             gyro.getTransitionSpeedBlend(),
+            gyro.getTransitionSlewCorrection(),
             gyro.getHuntSuppression(),
             gyro.getHuntFrequency(),
             gyro.getTransitionAuthorityBlend(),
