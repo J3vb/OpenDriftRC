@@ -304,6 +304,11 @@ channel 3 gain decoded from the digital link.
 Steering output setup:
 
 - `TRV`: scales driver steering input without reducing gyro correction authority.
+- `SPEED`: servo speed limit, `1` to `100`. `100` is no limit; lower values slow
+  how fast the steering output may move, driver input and gyro correction
+  together, like the servo speed setting on commercial drift gyros. The centre
+  on signal loss is never slowed. AMOLED only; the round build sets it from the
+  web page or EdgeTX.
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
 
@@ -458,6 +463,7 @@ Current web settings:
 - Servo reverse
 - Servo center
 - Servo travel
+- Servo speed limit
 - Servo quiet band
 - Steering max left / center / max right; Save only writes a value you edited on that page
 - Capture left / center / right and reset for the physical servo endpoints, with the live servo pulse; capture refuses while a calibration is active, reset it first

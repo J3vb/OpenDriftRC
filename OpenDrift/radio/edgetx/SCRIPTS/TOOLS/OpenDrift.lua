@@ -21,6 +21,7 @@ local fields = {
   {26, "Anti Wobble",      0,  100,   1, 0 },
   {36, "PCA",              0,  100,   1, 0 },
   {11, "Servo Quiet",      0,   50,   1, 0 },
+  {37, "Servo Speed",      1,  100,   1, 0 },
   {12, "Steering Travel",  0,  100,   1, 0 },
   {27, "Endpoints",        0,    2,   1, 0, true, false, false, true, false},
   {28, "Capture Left",     0,    1,   1, 0, true, false, false, false, true},

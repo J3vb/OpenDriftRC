@@ -37,6 +37,9 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition STEERING_GAIN_REDUCTION_PARAMETER =
         {"PCA", 0, 100, 0, 0, 1, "%"};
+
+    const CrsfParameterDevice::FloatDefinition SERVO_SPEED_PARAMETER =
+        {"Servo Speed", 1, 100, 100, 0, 1, "%"};
 }
 
 
@@ -192,6 +195,7 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 34);
         appendByte(payload, length, 35);
         appendByte(payload, length, 36);
+        appendByte(payload, length, 37);
 
         appendByte(payload, length, 0xFF);
     }
@@ -201,7 +205,8 @@ void CrsfParameterDevice::sendParameter(
         parameter == 33 ||
         parameter == 34 ||
         parameter == 35 ||
-        parameter == 36
+        parameter == 36 ||
+        parameter == 37
     )
     {
         const FloatDefinition* definition =
@@ -352,6 +357,7 @@ void CrsfParameterDevice::writeParameter(
             || parameter == 34
             || parameter == 35
             || parameter == 36
+            || parameter == 37
         ) &&
         length >= 4
     )
@@ -474,6 +480,7 @@ int32_t CrsfParameterDevice::getScaledValue(
                 * 100.0f
             );
         case 36: return settings->getSteeringGainReduction();
+        case 37: return settings->getServoSpeed();
         default: return 0;
     }
 }
@@ -489,7 +496,8 @@ bool CrsfParameterDevice::setScaledValue(
         parameter == 26 ||
         parameter == 33 ||
         parameter == 34 ||
-        parameter == 36
+        parameter == 36 ||
+        parameter == 37
     )
     {
         const FloatDefinition* definition =
@@ -612,6 +620,9 @@ bool CrsfParameterDevice::setScaledValue(
                 );
             }
             break;
+        case 37:
+            settings->setServoSpeed(value);
+            break;
     }
 
     return true;
@@ -646,6 +657,11 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 36)
     {
         return &STEERING_GAIN_REDUCTION_PARAMETER;
+    }
+
+    if(parameter == 37)
+    {
+        return &SERVO_SPEED_PARAMETER;
     }
 
     return &FLOAT_PARAMETERS[parameter - 1];

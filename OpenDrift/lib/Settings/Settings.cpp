@@ -428,6 +428,12 @@ bool Settings::begin()
         50
     );
 
+    servoSpeed = constrain(
+        prefs.getInt("servoSpeed", 100),
+        1,
+        100
+    );
+
     controlLoopHz =
         prefs.getUShort("loopHz", 250) == 333
         ? 333
@@ -785,6 +791,11 @@ void Settings::save()
     prefs.putInt(
         "quiet",
         servoQuiet
+    );
+
+    prefs.putInt(
+        "servoSpeed",
+        servoSpeed
     );
 
     prefs.putUShort(
@@ -1239,6 +1250,17 @@ bool Settings::setServoTravel(int value)
 int Settings::getServoQuiet()
 {
     return servoQuiet;
+}
+
+int Settings::getServoSpeed()
+{
+    return servoSpeed;
+}
+
+void Settings::setServoSpeed(int value)
+{
+    servoSpeed = constrain(value, 1, 100);
+    dirty = true;
 }
 
 void Settings::setServoQuiet(int value)

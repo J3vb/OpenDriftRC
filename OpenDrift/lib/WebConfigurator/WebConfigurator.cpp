@@ -638,7 +638,9 @@ void WebConfigurator::handleRoot()
     html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked, "1000", "2000");
     html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked, "1", "100");
     html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1", false, "0", "50");
+    html += input("Servo speed (1-100)", "servoSpeed", String(settings->getServoSpeed()), "number", "1", false, "1", "100");
     html += F("</div>");
+    html += F("<p class='sub'>Servo speed limits how fast the steering output may move, driver input and gyro correction together. 100 is no limit. 50 crosses the full throw in about 0.15 s, 25 in about 0.6 s. The centre on signal loss is never slowed.</p>");
 
     if(servoGeometryLocked)
     {
@@ -1291,6 +1293,13 @@ void WebConfigurator::handleSave()
         getIntArg(
             "servoQuiet",
             settings->getServoQuiet()
+        )
+    );
+
+    settings->setServoSpeed(
+        getIntArg(
+            "servoSpeed",
+            settings->getServoSpeed()
         )
     );
 
@@ -1995,6 +2004,7 @@ void WebConfigurator::handleSettingsExport()
     appendJsonField(json, "servoCenter", String(settings->getServoCenter()));
     appendJsonField(json, "servoTravel", String(settings->getServoTravel()));
     appendJsonField(json, "servoQuiet", String(settings->getServoQuiet()));
+    appendJsonField(json, "servoSpeed", String(settings->getServoSpeed()));
 
     appendJsonField(json, "steeringMin", String(settings->getSteeringMin()));
     appendJsonField(json, "steeringCenter", String(settings->getSteeringCenter()));

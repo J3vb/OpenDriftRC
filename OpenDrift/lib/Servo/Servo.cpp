@@ -91,6 +91,37 @@ void ServoOutput::writeMicroseconds(int us)
     int targetPulse =
         computePulse(us);
 
+    uint32_t now = micros();
+
+    if(speedPercent < 100)
+    {
+        float dt =
+            lastWriteMicros == 0
+            ? 0.004f
+            : constrain((now - lastWriteMicros) / 1000000.0f, 0.0005f, 0.05f);
+
+        float maxStep = maxRateUsPerSecond * dt;
+        float delta = (float)targetPulse - limitedPulse;
+
+        if(delta > maxStep)
+        {
+            delta = maxStep;
+        }
+        else if(delta < -maxStep)
+        {
+            delta = -maxStep;
+        }
+
+        limitedPulse += delta;
+        targetPulse = (int)roundf(limitedPulse);
+    }
+    else
+    {
+        limitedPulse = (float)targetPulse;
+    }
+
+    lastWriteMicros = now;
+
     if(
         quietBand > 0 &&
         abs(targetPulse - currentPulse) <= quietBand
@@ -111,12 +142,15 @@ void ServoOutput::writeMicroseconds(int us)
 
 void ServoOutput::center()
 {
+    // Failsafe and boot path: never slowed by the speed limit.
     currentPulse =
         constrain(
             centerPulse,
             900,
             2100
         );
+
+    limitedPulse = (float)currentPulse;
 
     servo.writeMicroseconds(
         currentPulse
@@ -152,6 +186,7 @@ void ServoOutput::configure(
     bool reversedValue,
     int travelPercentValue,
     int quietBandValue,
+    int speedPercentValue,
     bool calibratedEndpointsActive,
     int leftEndpointValue,
     int calibratedCenterValue,
@@ -196,4 +231,16 @@ void ServoOutput::configure(
             0,
             50
         );
+
+    speedPercent =
+        constrain(
+            speedPercentValue,
+            1,
+            100
+        );
+
+    // 50 covers the full 1000 us span in about 0.15 s, 25 in about 0.6 s,
+    // 10 in about 2 s. 100 is unlimited.
+    maxRateUsPerSecond =
+        200.0f + 2.5f * (float)speedPercent * (float)speedPercent;
 }

@@ -4393,6 +4393,12 @@ void UI::drawRadioPage(
             170
         );
 
+        lcd->drawString(
+            "SPEED",
+            22,
+            224
+        );
+
         lcd->setTextSize(3);
 
         lcd->setTextColor(
@@ -4420,6 +4426,12 @@ void UI::drawRadioPage(
             162
         );
 
+        lcd->drawNumber(
+            settings.getServoSpeed(),
+            120,
+            216
+        );
+
         lcd->setTextSize(2);
 
         drawAmoledButton(
@@ -4436,6 +4448,26 @@ void UI::drawRadioPage(
             lcd,
             242,
             158,
+            34,
+            40,
+            "+",
+            OD_WARM
+        );
+
+        drawAmoledButton(
+            lcd,
+            202,
+            212,
+            34,
+            40,
+            "-",
+            OD_WARM
+        );
+
+        drawAmoledButton(
+            lcd,
+            242,
+            212,
             34,
             40,
             "+",
@@ -6272,6 +6304,8 @@ bool UI::actionButtonAt(
         return
             buttonPressed(x, y, 202, 158, 34, 40) ||
             buttonPressed(x, y, 242, 158, 34, 40) ||
+            buttonPressed(x, y, 202, 212, 34, 40) ||
+            buttonPressed(x, y, 242, 212, 34, 40) ||
             buttonPressed(x, y, 294, 66, 134, 64);
     }
 
@@ -7605,6 +7639,44 @@ void UI::update(
             {
                 settings.setRadioSteeringTravel(
                     settings.getRadioSteeringTravel() + 1
+                );
+
+                drawRadioPage(
+                    steeringRadio,
+                    gainRadio,
+                    settings,
+                    gyro
+                );
+
+                lastTouchState =
+                    touched;
+
+                return;
+            }
+
+            if(buttonPressed(x, y, 202, 212, 34, 40))
+            {
+                settings.setServoSpeed(
+                    settings.getServoSpeed() - 1
+                );
+
+                drawRadioPage(
+                    steeringRadio,
+                    gainRadio,
+                    settings,
+                    gyro
+                );
+
+                lastTouchState =
+                    touched;
+
+                return;
+            }
+
+            if(buttonPressed(x, y, 242, 212, 34, 40))
+            {
+                settings.setServoSpeed(
+                    settings.getServoSpeed() + 1
                 );
 
                 drawRadioPage(

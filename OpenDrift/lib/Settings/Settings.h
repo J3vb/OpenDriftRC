@@ -109,6 +109,10 @@ public:
     int getServoQuiet();
     void setServoQuiet(int value);
 
+    // Servo speed limit, 1-100. 100 is unlimited.
+    int getServoSpeed();
+    void setServoSpeed(int value);
+
     uint16_t getControlLoopHz();
     void setControlLoopHz(uint16_t value);
 
@@ -287,6 +291,8 @@ private:
     int servoTravel = 100;
 
     int servoQuiet = 0;
+
+    int servoSpeed = 100;
 
     uint16_t controlLoopHz = 250;
 

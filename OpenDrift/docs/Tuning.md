@@ -81,6 +81,7 @@ the car quickly. They do not disable the fast direct damping path.
 | Drift Memory | Feedback strength for error from the quiet-drift reference |
 | Memory Limit | Maximum Drift Memory contribution in microseconds |
 | Steering Travel | Scales driver steering only; it does not reduce gyro authority |
+| Servo Speed | Rate limit on the steering output, `1`-`100`; `100` is unlimited, `50` crosses the full throw in about 0.15 s, `25` in about 0.6 s. Slows driver input and gyro correction alike; leave at `100` unless you want a softer, more analogue feel |
 | Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
 | Steering gain reduction (PCA) | Share of the gyro's direct correction removed at full stick deflection, linearly from `0` at center; `0` is off. Lets you run a higher Gain for stability near center without the gyro fighting a deliberate full-lock input. Countersteer Assist and Drift Memory are unaffected |
@@ -135,6 +136,7 @@ Use a stand or hold the chassis with the wheels clear before driving.
 | Drift Memory | `0.00` |
 | Memory Limit | `80` |
 | Servo Quiet | `0` |
+| Servo Speed | `100` |
 | Control / servo rate | `250 Hz` |
 | Transition Speed | `50` |
 | Anti Wobble | `50` |
