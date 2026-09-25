@@ -92,8 +92,8 @@ and writes the controller settings over full-duplex CRSF:
   CRSF channel 3 drives the gain;
 - deadband, Max Correction percentage, and smoothing;
 - Drift Memory, memory limit, Hold Assist, and Countersteer Assist;
-- Transition Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, Servo Travel,
-  and Servo Center;
+- Transition Speed, Prediction, Anti Wobble, PCA (steering gain reduction), Servo Quiet,
+  Steering Travel, Servo Travel, and Servo Center;
 - Servo Reverse and Gyro Reverse.
 - shared physical servo endpoint-calibration status plus live left, center, and
   right capture actions and a Reset Cal action. Captures made from EdgeTX

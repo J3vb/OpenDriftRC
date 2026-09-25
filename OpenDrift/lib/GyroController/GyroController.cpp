@@ -1359,10 +1359,26 @@ int GyroController::update(
     float huntDampedYaw =
         predictedYaw - huntRemovedYaw;
 
+    // Steering gain reduction (PCA): the driver's own stick input takes
+    // authority away from the gyro's direct correction, linearly up to
+    // the configured share at full deflection. Countersteer Assist and
+    // Drift Memory are left alone so a settled drift keeps its support.
+    float stickDeflection =
+        constrain(
+            fabsf((float)steeringCommand - 1500.0f) / 500.0f,
+            0.0f,
+            1.0f
+        );
+
+    float steeringGainScale =
+        1.0f - stickDeflection * steeringGainReduction;
+
     float directCorrection =
         huntDampedYaw
         *
         gyroGain
+        *
+        steeringGainScale
         *
         directDampingScale;
 
@@ -1674,6 +1690,12 @@ int GyroController::getPredictionStrength()
 void GyroController::setHuntStrength(int value)
 {
     huntStrength = constrain(value, 0, 100);
+}
+
+
+void GyroController::setSteeringGainReduction(int value)
+{
+    steeringGainReduction = constrain(value, 0, 100) / 100.0f;
 }
 
 

@@ -34,6 +34,9 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition LIVE_GAIN_PARAMETER =
         {"Live Gain", 0, 600, 150, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition STEERING_GAIN_REDUCTION_PARAMETER =
+        {"PCA", 0, 100, 0, 0, 1, "%"};
 }
 
 
@@ -188,6 +191,7 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 33);
         appendByte(payload, length, 34);
         appendByte(payload, length, 35);
+        appendByte(payload, length, 36);
 
         appendByte(payload, length, 0xFF);
     }
@@ -196,7 +200,8 @@ void CrsfParameterDevice::sendParameter(
         parameter == 26 ||
         parameter == 33 ||
         parameter == 34 ||
-        parameter == 35
+        parameter == 35 ||
+        parameter == 36
     )
     {
         const FloatDefinition* definition =
@@ -346,6 +351,7 @@ void CrsfParameterDevice::writeParameter(
             || parameter == 33
             || parameter == 34
             || parameter == 35
+            || parameter == 36
         ) &&
         length >= 4
     )
@@ -467,6 +473,7 @@ int32_t CrsfParameterDevice::getScaledValue(
                 (gyro != nullptr ? gyro->getGain() : settings->getGain())
                 * 100.0f
             );
+        case 36: return settings->getSteeringGainReduction();
         default: return 0;
     }
 }
@@ -481,7 +488,8 @@ bool CrsfParameterDevice::setScaledValue(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 36
     )
     {
         const FloatDefinition* definition =
@@ -595,6 +603,15 @@ bool CrsfParameterDevice::setScaledValue(
             // Read-only. It mirrors the gain the controller is running,
             // which channel 3 owns whenever it has a valid signal.
             return false;
+        case 36:
+            settings->setSteeringGainReduction(value);
+            if(gyro != nullptr)
+            {
+                gyro->setSteeringGainReduction(
+                    settings->getSteeringGainReduction()
+                );
+            }
+            break;
     }
 
     return true;
@@ -624,6 +641,11 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 35)
     {
         return &LIVE_GAIN_PARAMETER;
+    }
+
+    if(parameter == 36)
+    {
+        return &STEERING_GAIN_REDUCTION_PARAMETER;
     }
 
     return &FLOAT_PARAMETERS[parameter - 1];

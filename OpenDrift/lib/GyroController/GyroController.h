@@ -83,6 +83,7 @@ public:
     int getPredictionStrength();
 
     void setHuntStrength(int value);
+    void setSteeringGainReduction(int value);
     int getHuntStrength();
 
     void setControlLoopHz(int value);
@@ -130,6 +131,7 @@ private:
     int transitionSpeed = 50;
     int predictionStrength = 0;
     int huntStrength = 50;
+    float steeringGainReduction = 0.0f;
 
     float filteredYaw = 0.0f;
     float previousFilteredYaw = 0.0f;

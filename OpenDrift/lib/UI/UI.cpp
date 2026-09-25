@@ -3337,26 +3337,30 @@ void UI::drawExperimentalPage(
 
     drawAmoledRowPanel(lcd, 48, 48);
     drawAmoledRowPanel(lcd, 110, 48);
+    drawAmoledRowPanel(lcd, 172, 48);
 
     setAmoledLabelSize(lcd);
     lcd->setTextColor(OD_MUTED);
     lcd->drawString("TRANS SPEED", 22, 58);
     lcd->drawString("ANTI WOBBLE", 22, 120);
+    lcd->drawString("PCA", 22, 182);
 
     lcd->setTextSize(3);
     lcd->setTextColor(OD_TEXT);
     lcd->drawNumber(settings.getGyroTransitionSpeed(), 146, 48);
     lcd->drawNumber(settings.getGyroHuntStrength(), 146, 110);
+    lcd->drawNumber(settings.getSteeringGainReduction(), 146, 172);
 
-    drawAmoledButton(lcd, 276, 48, 70, 48, "-", OD_MAGENTA);
-    drawAmoledButton(lcd, 364, 48, 70, 48, "+", OD_MAGENTA);
-    drawAmoledButton(lcd, 276, 110, 70, 48, "-", OD_MAGENTA);
-    drawAmoledButton(lcd, 364, 110, 70, 48, "+", OD_MAGENTA);
+    for(int row = 0; row < 3; row++)
+    {
+        int y = 48 + (row * 62);
+        drawAmoledButton(lcd, 276, y, 70, 48, "-", OD_MAGENTA);
+        drawAmoledButton(lcd, 364, y, 70, 48, "+", OD_MAGENTA);
+    }
 
     lcd->setTextSize(2);
     lcd->setTextColor(OD_MUTED);
-    lcd->drawString("TRANS 50 = NEUTRAL RESPONSE", 22, 176);
-    lcd->drawString("WOBBLE 0 = OFF, 50 = DEFAULT", 22, 200);
+    lcd->drawString("PCA = LESS GYRO AT FULL LOCK", 22, 228);
     #else
     lcd->setTextSize(2);
     lcd->setTextColor(TFT_MAGENTA);
@@ -6129,6 +6133,12 @@ int8_t UI::repeatButtonAt(
 
         if(buttonPressed(x, y, 364, 110, 70, 48))
             return 32;
+
+        if(buttonPressed(x, y, 276, 172, 70, 48))
+            return 39;
+
+        if(buttonPressed(x, y, 364, 172, 70, 48))
+            return 40;
     }
 
     if(page == PAGE_DISPLAY)
@@ -6561,6 +6571,26 @@ bool UI::applyRepeatButton(
 
             gyro.setHuntStrength(
                 settings.getGyroHuntStrength()
+            );
+            break;
+
+        case 39:
+            settings.setSteeringGainReduction(
+                settings.getSteeringGainReduction() - 1
+            );
+
+            gyro.setSteeringGainReduction(
+                settings.getSteeringGainReduction()
+            );
+            break;
+
+        case 40:
+            settings.setSteeringGainReduction(
+                settings.getSteeringGainReduction() + 1
+            );
+
+            gyro.setSteeringGainReduction(
+                settings.getSteeringGainReduction()
             );
             break;
 

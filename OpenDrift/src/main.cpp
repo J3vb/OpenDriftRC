@@ -898,6 +898,10 @@ void runControlIteration()
         settings.getGyroHuntStrength()
     );
 
+    gyro.setSteeringGainReduction(
+        settings.getSteeringGainReduction()
+    );
+
     static uint8_t i2cMisses = 0;
     static float lastYaw = 0.0f;
 
@@ -1891,6 +1895,10 @@ void setup()
 
     gyro.setHuntStrength(
         settings.getGyroHuntStrength()
+    );
+
+    gyro.setSteeringGainReduction(
+        settings.getSteeringGainReduction()
     );
 
     gyro.setControlLoopHz(

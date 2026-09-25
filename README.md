@@ -246,6 +246,11 @@ Keep it at `50` unless deliberately collecting same-car experimental A/B data.
 `ANTI WOBBLE` on the same page sets the depth of the wheel-wobble notch, `0`
 to `100`; `0` bypasses it and `50` is the track-tested default.
 
+`PCA` (steering gain reduction) on the AMOLED Transition page removes that
+share of the gyro's direct correction at full stick lock, tapering to nothing at
+center. `0` is off. The round display has no free row for it; set it from the
+web page or the EdgeTX tool there.
+
 `SMOOTH` is intentionally inverted from raw filter math: higher numbers mean more smoothing and slower gyro response.
 
 Deadband is applied as a soft deadband. Small yaw noise is still ignored, but correction fades in from zero instead of jumping as soon as yaw crosses the deadband value.
@@ -405,7 +410,7 @@ Lists the built-in background and every image uploaded from the web configurator
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
 
-Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, Transition Speed, Anti Wobble, and radio steering travel. Trackside adjustments automatically save back to the active profile.
+Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, Transition Speed, Anti Wobble, steering gain reduction, and radio steering travel. Trackside adjustments automatically save back to the active profile.
 
 The web configurator's Driving Profiles card can export every profile to one JSON file and import profiles from such a file, or from a full settings export. Your browser reads the file and sends the values to the board, which clamps them to the same ranges as the settings form. A profile whose name already exists is replaced. If that profile is the active one it is deactivated first, because the active profile continuously saves the live tune and would overwrite the import; tap it afterwards to load the imported values. The list holds 12 profiles.
 
@@ -445,6 +450,7 @@ Current web settings:
 - Prediction strength
 - Transition Speed
 - Anti Wobble
+- Steering gain reduction (PCA)
 - Drift memory
 - Memory limit
 - Hold Assist

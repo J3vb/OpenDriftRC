@@ -18,6 +18,25 @@ namespace
         return constrain((value + 1) / 2, 0, 100);
     }
 
+    // Profile layout up to version 10, before steering gain reduction.
+    struct DrivingProfileV10
+    {
+        uint32_t version;
+        char name[Settings::PROFILE_NAME_LENGTH];
+        float gain;
+        float deadband;
+        float gyroSmoothing;
+        float gyroIntegralGain;
+        int32_t gyroMaxCorrection;
+        int32_t gyroIntegralLimit;
+        int32_t gyroHoldBoost;
+        int32_t predictionStrength;
+        int32_t radioSteeringTravel;
+        int32_t gyroCounterSteerAssist;
+        int32_t gyroTransitionSpeed;
+        int32_t gyroHuntStrength;
+    };
+
     struct DrivingProfileV8
     {
         uint32_t version;
@@ -360,6 +379,12 @@ bool Settings::begin()
 
     gyroHuntStrength = constrain(
         prefs.getInt("huntStrength", 50),
+        0,
+        100
+    );
+
+    steeringGainReduction = constrain(
+        prefs.getInt("pca", 0),
         0,
         100
     );
@@ -738,6 +763,11 @@ void Settings::save()
     );
 
     prefs.putInt(
+        "pca",
+        steeringGainReduction
+    );
+
+    prefs.putInt(
         "center",
         servoCenter
     );
@@ -1077,6 +1107,17 @@ int Settings::getGyroHuntStrength()
 void Settings::setGyroHuntStrength(int value)
 {
     gyroHuntStrength = constrain(value, 0, 100);
+    dirty = true;
+}
+
+int Settings::getSteeringGainReduction()
+{
+    return steeringGainReduction;
+}
+
+void Settings::setSteeringGainReduction(int value)
+{
+    steeringGainReduction = constrain(value, 0, 100);
     dirty = true;
 }
 
@@ -2136,6 +2177,7 @@ int8_t Settings::importProfile(
     profile.gyroCounterSteerAssist = constrain(incoming.gyroCounterSteerAssist, 0, 100);
     profile.gyroTransitionSpeed = constrain(incoming.gyroTransitionSpeed, 0, 100);
     profile.gyroHuntStrength = constrain(incoming.gyroHuntStrength, 0, 100);
+    profile.steeringGainReduction = constrain(incoming.steeringGainReduction, 0, 100);
 
     persistProfile(index);
 
@@ -2290,9 +2332,7 @@ void Settings::loadProfiles()
 
         switch(version)
         {
-            case 10:
-            case 9:
-            case 8:
+            case 11:
             {
                 if(storedSize != sizeof(DrivingProfile))
                 {
@@ -2309,21 +2349,61 @@ void Settings::loadProfiles()
 
                 DrivingProfile& profile = profiles[loadedCount];
                 profile = stored;
-                profile.version = 10;
                 profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.steeringGainReduction =
+                    constrain(stored.steeringGainReduction, 0, 100);
+
+                newIndexFor[i] = (int8_t)loadedCount;
+                loadedCount++;
+                break;
+            }
+            case 10:
+            case 9:
+            case 8:
+            {
+                if(storedSize != sizeof(DrivingProfileV10))
+                {
+                    break;
+                }
+
+                DrivingProfileV10 legacy = {};
+                memcpy(&legacy, buffer, sizeof(legacy));
+
+                if(legacy.name[0] == '\0')
+                {
+                    break;
+                }
+
+                DrivingProfile& profile = profiles[loadedCount];
+                profile = DrivingProfile();
+                memcpy(profile.name, legacy.name, PROFILE_NAME_LENGTH);
+                profile.name[PROFILE_NAME_LENGTH - 1] = '\0';
+                profile.gain = legacy.gain;
+                profile.deadband = legacy.deadband;
+                profile.gyroSmoothing = legacy.gyroSmoothing;
+                profile.gyroIntegralGain = legacy.gyroIntegralGain;
+                profile.gyroMaxCorrection = legacy.gyroMaxCorrection;
+                profile.gyroIntegralLimit = legacy.gyroIntegralLimit;
+                profile.gyroHoldBoost = legacy.gyroHoldBoost;
+                profile.predictionStrength = legacy.predictionStrength;
+                profile.radioSteeringTravel = legacy.radioSteeringTravel;
+                profile.gyroCounterSteerAssist = legacy.gyroCounterSteerAssist;
+                profile.gyroTransitionSpeed = legacy.gyroTransitionSpeed;
+                profile.gyroHuntStrength = legacy.gyroHuntStrength;
+                profile.steeringGainReduction = 0;
 
                 if(version == 9)
                 {
                     profile.gyroMaxCorrection =
                         centerSpanPercentToFullSpanPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
                 else if(version == 8)
                 {
                     profile.gyroMaxCorrection =
                         legacyMaxCorrectionToPercent(
-                            stored.gyroMaxCorrection
+                            legacy.gyroMaxCorrection
                         );
                 }
 
@@ -2639,7 +2719,7 @@ void Settings::captureProfile(
     DrivingProfile& profile
 )
 {
-    profile.version = 10;
+    profile.version = 11;
     profile.gain = gain;
     profile.deadband = deadband;
     profile.gyroSmoothing = gyroSmoothing;
@@ -2652,6 +2732,7 @@ void Settings::captureProfile(
     profile.gyroCounterSteerAssist = gyroCounterSteerAssist;
     profile.gyroTransitionSpeed = gyroTransitionSpeed;
     profile.gyroHuntStrength = gyroHuntStrength;
+    profile.steeringGainReduction = steeringGainReduction;
 }
 
 void Settings::applyProfile(
@@ -2672,6 +2753,7 @@ void Settings::applyProfile(
     gyroCounterSteerAssist = constrain(profile.gyroCounterSteerAssist, 0, 100);
     gyroTransitionSpeed = constrain(profile.gyroTransitionSpeed, 0, 100);
     gyroHuntStrength = constrain(profile.gyroHuntStrength, 0, 100);
+    steeringGainReduction = constrain(profile.steeringGainReduction, 0, 100);
 
     portEXIT_CRITICAL(&settingsMux);
 }

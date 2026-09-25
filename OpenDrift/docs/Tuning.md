@@ -83,6 +83,7 @@ the car quickly. They do not disable the fast direct damping path.
 | Steering Travel | Scales driver steering only; it does not reduce gyro authority |
 | Transition Speed | Centered transition damping adjustment; `50` is neutral, lower is slower, higher is faster |
 | Anti Wobble | Depth of the phase-aware dynamic 2.5-3.6 Hz wheel-wobble notch; `0` bypasses it, `50` is the recommended starting point, and `100` applies maximum depth |
+| Steering gain reduction (PCA) | Share of the gyro's direct correction removed at full stick deflection, linearly from `0` at center; `0` is off. Lets you run a higher Gain for stability near center without the gyro fighting a deliberate full-lock input. Countersteer Assist and Drift Memory are unaffected |
 
 Throttle prediction remains active when a valid throttle signal is present,
 even with Prediction set to zero. The Prediction setting adds general

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Control
+
+- Adds steering gain reduction (PCA): the gyro's direct correction is scaled
+  down in proportion to stick deflection, up to the configured percentage at
+  full lock. Off by default. Available on the web page (Tune tab), the AMOLED
+  Transition page, the EdgeTX tool and over CRSF (parameter 36), and stored
+  per profile. Based on the PCA work by doublej380-pixel.
+
 ### Display and web configurator
 
 - Adds a Display page with a 180 degree screen flip for an upside-down board;

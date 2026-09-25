@@ -68,6 +68,7 @@ namespace
         appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
         appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
         appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
+        appendJsonField(json, "steeringGainReduction", String((int)profile->steeringGainReduction));
         json += '}';
     }
 
@@ -605,6 +606,8 @@ void WebConfigurator::handleRoot()
     html += F(">Off - raw bandwidth</option></select></div>");
     html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1", false, "0", "100");
     html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1", false, "0", "100");
+    html += input("Steering gain reduction / PCA (0-100)", "pca", String(settings->getSteeringGainReduction()), "number", "1", false, "0", "100");
+    html += F("<p class='sub'>Steering gain reduction takes gyro authority away as you turn the wheel: at full lock the direct correction is reduced by this percentage, at center nothing changes. 0 is off. Countersteer Assist and Drift Memory are not affected.</p>");
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
@@ -1056,7 +1059,7 @@ void WebConfigurator::handleRoot()
     // The browser parses the JSON and posts plain form fields, so the board
     // needs no JSON parser and every value goes through the same clamps as
     // the settings form.
-    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(list){list=list.filter(function(q){return q&&typeof q==='object';});}if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(list){list=list.filter(function(q){return q&&typeof q==='object';});}if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));p.append('pca'+n,num(q.steeringGainReduction,0));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
 
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
@@ -1250,6 +1253,13 @@ void WebConfigurator::handleSave()
         getIntArg(
             "huntStrength",
             settings->getGyroHuntStrength()
+        )
+    );
+
+    settings->setSteeringGainReduction(
+        getIntArg(
+            "pca",
+            settings->getSteeringGainReduction()
         )
     );
 
@@ -1581,6 +1591,10 @@ void WebConfigurator::handleSave()
 
         gyro->setHuntStrength(
             settings->getGyroHuntStrength()
+        );
+
+        gyro->setSteeringGainReduction(
+            settings->getSteeringGainReduction()
         );
     }
 
@@ -1969,6 +1983,7 @@ void WebConfigurator::handleSettingsExport()
     appendJsonField(json, "gyroLpfMode", String((int)settings->getGyroLpfMode()));
     appendJsonField(json, "predictionStrength", String(settings->getPredictionStrength()));
     appendJsonField(json, "huntStrength", String(settings->getGyroHuntStrength()));
+    appendJsonField(json, "steeringGainReduction", String(settings->getSteeringGainReduction()));
     appendJsonField(json, "transitionSpeed", String(settings->getGyroTransitionSpeed()));
     appendJsonField(json, "counterSteerAssist", String(settings->getGyroCounterSteerAssist()));
     appendJsonField(json, "gyroHoldBoost", String(settings->getGyroHoldBoost()));
@@ -2209,6 +2224,7 @@ void WebConfigurator::handleProfilesImport()
         profile.gyroCounterSteerAssist = profileIntArg("csteer", i, profile.gyroCounterSteerAssist);
         profile.gyroTransitionSpeed = profileIntArg("tspeed", i, profile.gyroTransitionSpeed);
         profile.gyroHuntStrength = profileIntArg("wobble", i, profile.gyroHuntStrength);
+        profile.steeringGainReduction = profileIntArg("pca", i, profile.steeringGainReduction);
 
         bool wasReplaced = false;
 

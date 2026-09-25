@@ -14,7 +14,7 @@ public:
 
     struct DrivingProfile
     {
-        uint32_t version = 10;
+        uint32_t version = 11;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -30,6 +30,7 @@ public:
         int32_t gyroCounterSteerAssist = 0;
         int32_t gyroTransitionSpeed = 50;
         int32_t gyroHuntStrength = 50;
+        int32_t steeringGainReduction = 0;
     };
 
     bool begin();
@@ -87,6 +88,11 @@ public:
 
     int getGyroHuntStrength();
     void setGyroHuntStrength(int value);
+
+    // Steering gain reduction (PCA): percentage of the gyro's direct
+    // correction that is removed at full stick deflection. 0 is off.
+    int getSteeringGainReduction();
+    void setSteeringGainReduction(int value);
 
     // Servo. The geometry setters refuse a change while the steering
     // endpoints are calibrated and return false, because the stored
@@ -271,6 +277,8 @@ private:
     int predictionStrength = 0;
 
     int gyroHuntStrength = 50;
+
+    int steeringGainReduction = 0;
 
     int servoCenter = 1500;
 

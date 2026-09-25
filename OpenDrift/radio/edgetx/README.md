@@ -39,7 +39,7 @@ the controller and Channel 3 mapping support values up to `6.00`.
 
 The tool exposes the gyro and steering values: Saved Gain, Live Gain, Channel 3 gain range, Deadband, Max Correction,
 Smoothing, Gyro LPF, Drift Memory, Memory Limit, Hold Assist, Countersteer, Transition
-Speed, Prediction, Anti Wobble, Servo Quiet, Steering Travel, physical endpoints,
+Speed, Prediction, Anti Wobble, PCA (steering gain reduction), Servo Quiet, Steering Travel, physical endpoints,
 Servo Travel, Servo Center, Servo Rate,
 Servo Reverse, and Gyro Reverse. `Servo Travel` and `Servo Center` are refused
 while the physical endpoint calibration is active; use `Reset Cal` first. The

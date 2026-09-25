@@ -19,6 +19,7 @@ local fields = {
   { 9, "Transition Speed", 0,  100,   1, 0 },
   {10, "Prediction",       0,  100,   1, 0 },
   {26, "Anti Wobble",      0,  100,   1, 0 },
+  {36, "PCA",              0,  100,   1, 0 },
   {11, "Servo Quiet",      0,   50,   1, 0 },
   {12, "Steering Travel",  0,  100,   1, 0 },
   {27, "Endpoints",        0,    2,   1, 0, true, false, false, true, false},
