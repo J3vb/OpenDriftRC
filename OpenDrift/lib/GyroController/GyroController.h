@@ -160,6 +160,8 @@ private:
     float transitionSlewCorrection = 0.0f;
     bool transitionSlewReady = false;
     bool transitionSlewActive = false;
+    float centerReturnCorrection = 0.0f;
+    bool centerReturnReady = false;
     int lastSteeringCommand = 1500;
     bool steeringReady = false;
 

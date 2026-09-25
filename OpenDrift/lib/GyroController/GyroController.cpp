@@ -15,6 +15,7 @@ namespace
     static constexpr float TRANSITION_SLEW_SLOW_SECONDS = 0.120f;
     static constexpr float TRANSITION_SLEW_FAST_SECONDS = 0.004f;
     static constexpr float TRANSITION_SLEW_RELEASE_SECONDS = 0.020f;
+    static constexpr float CENTER_RETURN_SECONDS = 0.055f;
     static constexpr float DRIVER_PRIORITY_FILTER_SECONDS = 0.030f;
     static constexpr float THROTTLE_APPLY_SECONDS = 0.22f;
     static constexpr float THROTTLE_LIFT_SECONDS = 0.48f;
@@ -91,6 +92,8 @@ void GyroController::resetDynamicState()
     transitionSlewCorrection = 0.0f;
     transitionSlewReady = false;
     transitionSlewActive = false;
+    centerReturnCorrection = 0.0f;
+    centerReturnReady = false;
     driverPriorityScale = 1.0f;
     lastSteeringCommand = 1500;
     steeringReady = false;
@@ -1547,19 +1550,64 @@ float GyroController::update(
         +
         integralCorrection;
 
+    if(idle && correctedYaw == 0.0f)
+    {
+        requestedControllerCorrection = 0;
+        filteredYawAcceleration = 0.0f;
+    }
+
+    if(!centerReturnReady)
+    {
+        centerReturnCorrection = requestedControllerCorrection;
+        centerReturnReady = true;
+    }
+
+    // Entering the idle band clears Drift Memory and steady assist. That is
+    // intentional, but copying the newly smaller correction directly to the
+    // servo made the steering snap toward center in a single control tick.
+    // Smooth only correction release while idle. A growing correction, a
+    // direction reversal, or any return to active chassis motion remains
+    // immediate so disturbance rejection and transition response are
+    // untouched.
+    bool correctionShrinking =
+        fabsf(requestedControllerCorrection)
+        < fabsf(centerReturnCorrection);
+
+    if(idle && correctionShrinking)
+    {
+        float centerReturnAmount =
+            1.0f - expf(-dt / CENTER_RETURN_SECONDS);
+
+        centerReturnCorrection +=
+            (
+                requestedControllerCorrection
+                - centerReturnCorrection
+            )
+            * centerReturnAmount;
+
+        if(
+            fabsf(
+                requestedControllerCorrection
+                - centerReturnCorrection
+            ) < 0.25f
+        )
+        {
+            centerReturnCorrection = requestedControllerCorrection;
+        }
+    }
+    else
+    {
+        centerReturnCorrection = requestedControllerCorrection;
+    }
+
+    requestedControllerCorrection = centerReturnCorrection;
+
     float targetCorrection =
         constrain(
             requestedControllerCorrection,
             -(float)effectiveMaxCorrection,
             (float)effectiveMaxCorrection
         );
-
-    if(idle && correctedYaw == 0.0f)
-    {
-        requestedControllerCorrection = 0;
-        targetCorrection = 0;
-        filteredYawAcceleration = 0.0f;
-    }
 
     // Expose a signed correction, not a fake centered servo command. The
     // controller's sign convention is opposite the servo mix convention.
