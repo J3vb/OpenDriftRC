@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- A wobble around zero yaw (straight line, drift entry or exit) no longer
+  counts as a direction change. The reversal trigger fired on every swing of
+  the wobble, which kept the controller in the transition phase: Anti Wobble
+  was held to a shallow 20 percent guard notch at any setting, prediction
+  was cut and the transition slew added lag, so the wobble could not be
+  damped. A reversal now only counts after the old direction was held for
+  0.25 s, longer than any wheel-wobble half cycle; real drift transitions
+  still arm it.
+
 ## v1.0.8 - 2026-09-03
 
 ### Lower-latency gyro experiments
