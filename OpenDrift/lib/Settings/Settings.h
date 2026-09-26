@@ -10,10 +10,11 @@ public:
     static constexpr uint8_t MAX_PROFILES = 12;
     static constexpr size_t PROFILE_NAME_LENGTH = 24;
     static constexpr size_t WIFI_SSID_LENGTH = 33;   // 32 characters + NUL
+    static constexpr size_t BACKGROUND_NAME_LENGTH = 24;   // 23 characters + NUL
 
     struct DrivingProfile
     {
-        uint32_t version = 10;
+        uint32_t version = 11;
         char name[PROFILE_NAME_LENGTH] = {0};
 
         float gain = 1.5f;
@@ -29,11 +30,23 @@ public:
         int32_t gyroCounterSteerAssist = 0;
         int32_t gyroTransitionSpeed = 50;
         int32_t gyroHuntStrength = 50;
+        int32_t steeringGainReduction = 0;
     };
 
     bool begin();
 
     void update();
+
+    // Write pending changes now instead of waiting for the deferred
+    // save. Used right before a restart.
+    void flush();
+
+    // Erase every key in the open preferences namespace. The caller must
+    // restart immediately: the in-memory copy is left as is and would be
+    // written back by the next save.
+    void factoryReset();
+
+    static const char* defaultWifiSsid();
 
     // Gyro
     float getGain();
@@ -76,18 +89,29 @@ public:
     int getGyroHuntStrength();
     void setGyroHuntStrength(int value);
 
-    // Servo
+    // Steering gain reduction (PCA): percentage of the gyro's direct
+    // correction that is removed at full stick deflection. 0 is off.
+    int getSteeringGainReduction();
+    void setSteeringGainReduction(int value);
+
+    // Servo. The geometry setters refuse a change while the steering
+    // endpoints are calibrated and return false, because the stored
+    // pulses would no longer match the servo.
     int getServoCenter();
-    void setServoCenter(int value);
+    bool setServoCenter(int value);
 
     bool getServoReverse();
-    void setServoReverse(bool value);
+    bool setServoReverse(bool value);
 
     int getServoTravel();
-    void setServoTravel(int value);
+    bool setServoTravel(int value);
 
     int getServoQuiet();
     void setServoQuiet(int value);
+
+    // Servo speed limit, 1-100. 100 is unlimited.
+    int getServoSpeed();
+    void setServoSpeed(int value);
 
     uint16_t getControlLoopHz();
     void setControlLoopHz(uint16_t value);
@@ -111,6 +135,36 @@ public:
     bool getBlackboxEnabled();
     void setBlackboxEnabled(bool value);
 
+    // Display (AMOLED). Brightness in percent, steps of 10, 10-100.
+    uint8_t getDisplayBrightness();
+    void setDisplayBrightness(int value);
+
+    // Seconds without a touch before the AMOLED dims. 0 = never.
+    uint16_t getDisplayDimTimeout();
+    void setDisplayDimTimeout(int value);
+
+    // Rotates the rendered UI and the touch input by 180 degrees, for a
+    // board mounted upside down. Purely cosmetic: the gyro has its own
+    // reverse setting and must not be changed with this one.
+    bool getDisplayFlip();
+    void setDisplayFlip(bool value);
+
+    // Name of the stored AMOLED background image, "" for the built-in
+    // one. Letters, digits, - and _ only; the returned pointer is stable.
+    const char* getBackgroundName();
+    void setBackgroundName(const String& value);
+    static String sanitizeBackgroundName(const String& value);
+
+    // AMOLED theme. Text 0 = light text (default), 1 = dark text for light
+    // backgrounds. Accent selects a preset for headers, buttons and
+    // highlights; 0 keeps the original mixed colours.
+    static constexpr uint8_t THEME_ACCENT_COUNT = 7;
+    static const char* themeAccentName(uint8_t accent);
+    uint8_t getThemeText();
+    void setThemeText(int value);
+    uint8_t getThemeAccent();
+    void setThemeAccent(int value);
+
     // Radio
     int getSteeringMin();
     void setSteeringMin(int value);
@@ -121,8 +175,20 @@ public:
     int getSteeringMax();
     void setSteeringMax(int value);
 
+    struct SteeringCalibration
+    {
+        bool calibrated;
+        int min;
+        int center;
+        int max;
+        int inputMin;
+        int inputCenter;
+        int inputMax;
+    };
+
     uint8_t getSteeringCalibrationMask();
     bool isSteeringCalibrated();
+    void getSteeringCalibration(SteeringCalibration& out);
     int getSteeringCapturedPulse(uint8_t point);
     int getSteeringCapturedInputPulse(uint8_t point);
     bool captureSteeringCalibrationPoint(
@@ -131,6 +197,10 @@ public:
         int inputPulse = 0
     );
     bool confirmStoredSteeringCalibration();
+    // Applies a complete hand-entered stop set as a calibration in one
+    // step. Returns false, changing nothing, when the set is not valid.
+    bool setStoredSteeringEndpoints(int min, int center, int max);
+    static bool steeringStopsValid(int min, int center, int max);
     void clearSteeringCalibration();
 
     int getRadioSteeringTravel();
@@ -165,6 +235,16 @@ public:
     int8_t createProfile(const String& name);
     bool activateProfile(uint8_t index);
     bool deleteProfile(uint8_t index);
+
+    // Stores a profile with the given values, replacing one of the same
+    // name. Values are clamped to the setter ranges. Replacing the active
+    // profile deactivates it, because save() would otherwise overwrite the
+    // import with the live tune. Returns the index, -1 for an unusable
+    // name, -2 when the list is full.
+    int8_t importProfile(
+        const DrivingProfile& incoming,
+        bool& replaced
+    );
 
 private:
 
@@ -202,6 +282,8 @@ private:
 
     int gyroHuntStrength = 50;
 
+    int steeringGainReduction = 0;
+
     int servoCenter = 1500;
 
     bool servoReverse = false;
@@ -209,6 +291,8 @@ private:
     int servoTravel = 100;
 
     int servoQuiet = 0;
+
+    int servoSpeed = 100;
 
     uint16_t controlLoopHz = 250;
 
@@ -220,6 +304,18 @@ private:
 
     bool blackboxEnabled = false;
 
+    uint8_t displayBrightness = 100;
+
+    uint16_t displayDimTimeout = 0;
+
+    bool displayFlip = false;
+
+    char backgroundName[BACKGROUND_NAME_LENGTH] = {0};
+
+    uint8_t themeText = 0;
+
+    uint8_t themeAccent = 0;
+
     int steeringMin = 1000;
 
     int steeringCenter = 1500;
@@ -227,6 +323,10 @@ private:
     int steeringMax = 2000;
 
     uint8_t steeringCalibrationMask = 0;
+
+    // Guards the steering endpoint members so the control task always reads
+    // a consistent set while the UI or web writes a new calibration.
+    portMUX_TYPE settingsMux = portMUX_INITIALIZER_UNLOCKED;
 
     int steeringCapturedPulses[3] = {1000, 1500, 2000};
 
@@ -254,7 +354,9 @@ private:
 
     void save();
 
+    void applyFallbackSteeringEndpoints();
     void loadProfiles();
+    void clampProfile(DrivingProfile& profile);
     void captureProfile(DrivingProfile& profile);
     void applyProfile(const DrivingProfile& profile);
     bool persistProfile(uint8_t index);

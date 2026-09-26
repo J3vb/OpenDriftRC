@@ -7,6 +7,14 @@ class GyroController
 {
 public:
 
+    enum CalibrationState : uint8_t
+    {
+        CALIBRATION_IDLE = 0,
+        CALIBRATION_RUNNING = 1,
+        CALIBRATION_OK = 2,
+        CALIBRATION_REJECTED = 3
+    };
+
     bool begin();
 
     int update(
@@ -18,6 +26,18 @@ public:
     );
 
     void calibrate(float yawRate);
+
+    // Averaged bias window. A car handled during the window is rejected
+    // instead of storing the movement as a permanent steering offset.
+    void startCalibration(uint16_t sampleCount);
+    void abortCalibration();
+
+    // Gyro Reverse negates the yaw fed to update(). The stored bias was
+    // measured in the previous frame, so it flips with it; a window that
+    // is still running mixes both frames and is dropped.
+    void reverseYawFrame();
+    bool isCalibrating() const;
+    CalibrationState getCalibrationState() const;
 
     void setGain(float gain);
     float getGain();
@@ -63,6 +83,7 @@ public:
     int getPredictionStrength();
 
     void setHuntStrength(int value);
+    void setSteeringGainReduction(int value);
     int getHuntStrength();
 
     void setControlLoopHz(int value);
@@ -110,6 +131,7 @@ private:
     int transitionSpeed = 50;
     int predictionStrength = 0;
     int huntStrength = 50;
+    float steeringGainReduction = 0.0f;
 
     float filteredYaw = 0.0f;
     float previousFilteredYaw = 0.0f;
@@ -118,6 +140,8 @@ private:
     float driftReferenceYaw = 0.0f;
     bool driftReferenceReady = false;
     int8_t driftDirection = 0;
+    int8_t lastDefiniteDirection = 0;
+    float quietSeconds = 0.0f;
     float transitionTime = 0.0f;
 
     float integralAccumulator = 0.0f;
@@ -198,6 +222,14 @@ private:
     bool calibrated = false;
     uint32_t lastUpdateMicros = 0;
 
+    CalibrationState calibrationState = CALIBRATION_IDLE;
+    uint16_t calibrationSampleTarget = 0;
+    uint16_t calibrationSampleCount = 0;
+    float calibrationSum = 0.0f;
+    float calibrationMin = 0.0f;
+    float calibrationMax = 0.0f;
+
     void resetDynamicState();
     void configureHuntNotch(float centerHz, bool resetHistory);
 };
+

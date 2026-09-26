@@ -190,6 +190,16 @@ void Touch::update()
     y =
         rawX;
 
+    // Flip before the gesture block so swipes invert with the screen.
+    if(flipped)
+    {
+        x =
+            (TOUCH_HEIGHT - 1) - x;
+
+        y =
+            (TOUCH_WIDTH - 1) - y;
+    }
+
     if(!trackingTouch)
     {
         touchStartX = x;
@@ -319,4 +329,12 @@ uint16_t Touch::getY()
 uint8_t Touch::getGesture()
 {
     return gesture;
+}
+
+
+
+
+void Touch::setFlipped(bool value)
+{
+    flipped = value;
 }

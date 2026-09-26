@@ -1,9 +1,116 @@
 #include "WebConfigurator.h"
 #include "../../include/Version.h"
 
+#include <esp_system.h>
+#include <limits.h>
+
 #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
 #include "AuxChannelOutputs.h"
 #endif
+
+namespace
+{
+    // Hand-rolled JSON in the same style as /live-status. Values arrive
+    // already rendered so numbers, booleans and quoted strings share one
+    // path.
+    void appendJsonField(
+        String& json,
+        const char* key,
+        const String& rawValue
+    )
+    {
+        json += F(",\"");
+        json += key;
+        json += F("\":");
+        json += rawValue;
+    }
+
+    String jsonBool(
+        bool value
+    )
+    {
+        return value ? String(F("true")) : String(F("false"));
+    }
+
+    String jsonString(
+        const char* value
+    )
+    {
+        String quoted;
+
+        quoted.reserve(strlen(value) + 2);
+
+        quoted += '"';
+        quoted += value;
+        quoted += '"';
+
+        return quoted;
+    }
+
+    // One profile as a JSON object, shared by the settings and profile
+    // exports so an exported profile always imports.
+    void appendProfileJson(
+        String& json,
+        const Settings::DrivingProfile* profile
+    )
+    {
+        json += F("{\"name\":");
+        json += jsonString(profile->name);
+        appendJsonField(json, "gain", String(profile->gain, 2));
+        appendJsonField(json, "deadband", String(profile->deadband, 2));
+        appendJsonField(json, "gyroSmoothing", String(profile->gyroSmoothing, 2));
+        appendJsonField(json, "gyroIntegralGain", String(profile->gyroIntegralGain, 2));
+        appendJsonField(json, "gyroMaxCorrection", String((int)profile->gyroMaxCorrection));
+        appendJsonField(json, "gyroIntegralLimit", String((int)profile->gyroIntegralLimit));
+        appendJsonField(json, "gyroHoldBoost", String((int)profile->gyroHoldBoost));
+        appendJsonField(json, "predictionStrength", String((int)profile->predictionStrength));
+        appendJsonField(json, "radioSteeringTravel", String((int)profile->radioSteeringTravel));
+        appendJsonField(json, "gyroCounterSteerAssist", String((int)profile->gyroCounterSteerAssist));
+        appendJsonField(json, "gyroTransitionSpeed", String((int)profile->gyroTransitionSpeed));
+        appendJsonField(json, "gyroHuntStrength", String((int)profile->gyroHuntStrength));
+        appendJsonField(json, "steeringGainReduction", String((int)profile->steeringGainReduction));
+        json += '}';
+    }
+
+    const char* resetReasonText(
+        esp_reset_reason_t reason
+    )
+    {
+        switch(reason)
+        {
+            case ESP_RST_POWERON: return "power-on";
+            case ESP_RST_EXT: return "external reset";
+            case ESP_RST_SW: return "software restart";
+            case ESP_RST_PANIC: return "crash (panic)";
+            case ESP_RST_INT_WDT: return "interrupt watchdog";
+            case ESP_RST_TASK_WDT: return "task watchdog";
+            case ESP_RST_WDT: return "watchdog";
+            case ESP_RST_DEEPSLEEP: return "deep sleep";
+            case ESP_RST_BROWNOUT: return "brownout (power dip)";
+            case ESP_RST_SDIO: return "sdio";
+            default: return "unknown";
+        }
+    }
+
+    String uptimeText()
+    {
+        unsigned long seconds =
+            millis() / 1000UL;
+
+        char text[24];
+
+        snprintf(
+            text,
+            sizeof(text),
+            "%lu:%02lu:%02lu",
+            seconds / 3600UL,
+            (seconds / 60UL) % 60UL,
+            seconds % 60UL
+        );
+
+        return String(text);
+    }
+}
 
 WebConfigurator::WebConfigurator()
 :
@@ -20,7 +127,10 @@ void WebConfigurator::begin(
     RadioInput& steeringRadioRef,
     RadioInput& gainRadioRef,
     RadioInput& throttleRadioRef,
-    BlackboxLogger& blackboxRef
+    BlackboxLogger& blackboxRef,
+    WiFiManager& wifiRef,
+    ServoOutput& steeringServoRef,
+    Backgrounds& backgroundsRef
 )
 {
     settings =
@@ -40,6 +150,15 @@ void WebConfigurator::begin(
 
     blackbox =
         &blackboxRef;
+
+    wifi =
+        &wifiRef;
+
+    steeringServo =
+        &steeringServoRef;
+
+    backgrounds =
+        &backgroundsRef;
 
     server.on(
         "/",
@@ -105,6 +224,33 @@ void WebConfigurator::begin(
     );
 
     server.on(
+        "/settings.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleSettingsExport();
+        }
+    );
+
+    server.on(
+        "/profiles.json",
+        HTTP_GET,
+        [this]()
+        {
+            handleProfilesExport();
+        }
+    );
+
+    server.on(
+        "/import-profiles",
+        HTTP_POST,
+        [this]()
+        {
+            handleProfilesImport();
+        }
+    );
+
+    server.on(
         "/clear-log",
         HTTP_POST,
         [this]()
@@ -112,6 +258,77 @@ void WebConfigurator::begin(
             handleLogClear();
         }
     );
+
+    server.on(
+        "/restart",
+        HTTP_POST,
+        [this]()
+        {
+            handleRestart();
+        }
+    );
+
+    server.on(
+        "/factory-reset",
+        HTTP_POST,
+        [this]()
+        {
+            handleFactoryReset();
+        }
+    );
+
+    server.on(
+        "/capture-endpoint",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointCapture();
+        }
+    );
+
+    server.on(
+        "/reset-endpoints",
+        HTTP_POST,
+        [this]()
+        {
+            handleEndpointReset();
+        }
+    );
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // The second handler receives the multipart file in chunks while the
+    // request is parsed; the first one answers once it is complete.
+    server.on(
+        "/upload-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUpload();
+        },
+        [this]()
+        {
+            handleBackgroundUploadChunk();
+        }
+    );
+
+    server.on(
+        "/use-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundUse();
+        }
+    );
+
+    server.on(
+        "/delete-background",
+        HTTP_POST,
+        [this]()
+        {
+            handleBackgroundDelete();
+        }
+    );
+    #endif
 
     server.onNotFound(
         [this]()
@@ -133,6 +350,46 @@ void WebConfigurator::begin(
 
 void WebConfigurator::update()
 {
+    // Checked before the running guard so a WiFi auto-off inside the
+    // delay window cannot strand a requested restart.
+    if(
+        restartAtMs != 0 &&
+        (long)(millis() - restartAtMs) >= 0
+    )
+    {
+        if(settings != nullptr)
+        {
+            // Erasing here, microseconds before the reset, means no
+            // deferred save, display press or CRSF write can put the
+            // in-memory settings back into flash.
+            if(factoryResetPending)
+            {
+                settings->factoryReset();
+
+                #if defined(OPENDRIFT_BOARD_AMOLED_164)
+                if(backgrounds != nullptr)
+                {
+                    backgrounds->eraseAll();
+                }
+                #endif
+            }
+            else
+            {
+                settings->flush();
+            }
+        }
+
+        Serial.println(
+            factoryResetPending
+            ? "Factory reset requested from web configurator"
+            : "Restart requested from web configurator"
+        );
+
+        Serial.flush();
+
+        esp_restart();
+    }
+
     if(!running)
     {
         return;
@@ -150,8 +407,20 @@ bool WebConfigurator::isRunning()
 
 
 
+bool WebConfigurator::isRestartPending()
+{
+    return restartAtMs != 0;
+}
+
+
+
 void WebConfigurator::handleRoot()
 {
+    if(wifi != nullptr)
+    {
+        wifi->noteClientActivity();
+    }
+
     if(settings == nullptr)
     {
         server.send(
@@ -165,7 +434,7 @@ void WebConfigurator::handleRoot()
 
     String html;
 
-    html.reserve(20000);
+    html.reserve(48000);
 
     html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
     html += F("<title>OpenDrift Config</title><style>");
@@ -174,17 +443,24 @@ void WebConfigurator::handleRoot()
     html += F("h1{font-size:28px;margin:8px 0 2px}h2{font-size:18px;margin:22px 0 10px}");
     html += F(".sub{color:#aeb4bb;margin-bottom:20px}.card{border:1px solid #33383f;border-radius:8px;padding:14px;margin:12px 0;background:#171a1f}");
     html += F("label{display:block;font-size:13px;color:#c8cdd2;margin:12px 0 5px}input,select{width:100%;box-sizing:border-box;background:#0b0d10;color:#fff;border:1px solid #3b4148;border-radius:6px;padding:10px;font-size:16px}");
+    html += F("input:disabled,select:disabled{color:#8a9097;-webkit-text-fill-color:#8a9097;opacity:1;background:#15181c;border-color:#2b3036}");
     html += F("input[type=checkbox]{width:auto;transform:scale(1.3);margin-right:8px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}");
     html += F(".status{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pill{background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:10px}");
     html += F("button{width:100%;padding:13px 16px;border:0;border-radius:6px;background:#24a36b;color:#fff;font-size:17px;font-weight:700;margin-top:16px}");
+    html += F("button.secondary{background:#3b4148}button.danger{background:#973b45}.warn{color:#e5a733}.ok{color:#24a36b}.bad{color:#e5484d}");
+    html += F(".endpoints{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.endpoints button{margin:0;padding:10px 6px;font-size:13px}.endpoints small{font-weight:400}");
     html += F(".profile{display:grid;grid-template-columns:1fr 96px 82px;gap:8px;align-items:center;background:#0b0d10;border:1px solid #33383f;border-radius:6px;padding:9px;margin:8px 0}.profile.active{border-color:#24a36b}.profile strong{display:block}.profile small{color:#aeb4bb}.profile form{margin:0}.profile button{margin:0;padding:9px 6px;font-size:13px}.profile .danger{background:#973b45}.create-profile{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:end}.create-profile button{margin:0;height:43px}");
-    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
-    html += F("</style></head><body><main>");
-    html += F("<h1>OpenDrift</h1><div class='sub'>Web configurator &middot; ");
+    html += F("a{color:#65b7ff}@media(max-width:560px){.row,.status,.create-profile{grid-template-columns:1fr}.profile,.endpoints{grid-template-columns:1fr 1fr}.profile>div{grid-column:1/-1}}");
+    html += F("header.top{position:sticky;top:0;z-index:5;background:#101214;border-bottom:1px solid #33383f}.bar{max-width:760px;margin:0 auto;padding:10px 18px 0;display:flex;align-items:center;gap:12px}.bar h1{font-size:20px;margin:0;line-height:1.1}.bar .ver{font-size:12px;color:#aeb4bb;display:block;margin-top:2px}.bar .grow{flex:1}");
+    html += F(".dirty{display:none;align-items:center;gap:6px;font-size:13px;color:#e5a733;white-space:nowrap}.dirty::before{content:'';width:9px;height:9px;border-radius:50%;background:#e5a733}body.is-dirty .dirty{display:flex}#saveTop{width:auto;margin:0;padding:10px 18px;font-size:15px}body.is-dirty #saveTop{box-shadow:0 0 0 2px #e5a733}");
+    html += F("nav.tabs{max-width:760px;margin:0 auto;padding:8px 18px 0;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}nav.tabs::-webkit-scrollbar{display:none}nav.tabs button{width:auto;margin:0;flex:0 0 auto;padding:9px 14px;font-size:14px;font-weight:600;border-radius:8px 8px 0 0;background:transparent;color:#aeb4bb;border:1px solid transparent;border-bottom:0}nav.tabs button.active{background:#171a1f;color:#f5f5f5;border-color:#33383f}");
+    html += F(".card[data-tab]{display:none}.card[data-tab].on{display:block}main{padding-top:6px}");
+    html += F("</style></head><body><header class='top'><div class='bar'><div><h1>OpenDrift</h1><span class='ver'>Web configurator &middot; ");
     html += F(OPENDRIFT_VERSION_STRING);
-    html += F("</div>");
+    html += F("</span></div><div class='grow'></div><span class='dirty'>Unsaved changes</span><button type='submit' form='saveForm' id='saveTop'>Save</button></div>");
+    html += F("<nav class='tabs'><button type='button' data-tab='tune'>Tune</button><button type='button' data-tab='servo'>Servo</button><button type='button' data-tab='radio'>Radio</button><button type='button' data-tab='profiles'>Profiles</button><button type='button' data-tab='board'>Board</button></nav></header><main>");
 
-    html += F("<div class='card'><h2>Live Radio</h2><div class='status'>");
+    html += F("<div class='card' data-tab='radio'><h2>Live Radio</h2><div class='status'>");
     html += F("<div class='pill'>Steering: ");
     html += String(steeringRadio->getPulseWidth());
     html += steeringRadio->hasSignal() ? F(" OK") : F(" NO SIGNAL");
@@ -217,7 +493,7 @@ void WebConfigurator::handleRoot()
     #endif
     html += F("</div></div></div>");
 
-    html += F("<div class='card'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
+    html += F("<div class='card' data-tab='profiles' id='profiles'><h2>Driving Profiles</h2><p class='sub'>Active: <strong>");
     html += settings->getActiveProfileName();
     html += F("</strong>. Active profiles automatically keep trackside tune changes.</p>");
 
@@ -256,10 +532,14 @@ void WebConfigurator::handleRoot()
 
         html += F("<form method='post' action='/activate-profile'><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button type='submit'>Activate</button></form>");
 
         html += F("<form method='post' action='/delete-profile' onsubmit=\"return confirm('Delete this profile?')\"><input type='hidden' name='profile' value='");
         html += String(i);
+        html += F("'><input type='hidden' name='name' value='");
+        html += profile->name;
         html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
     }
 
@@ -272,79 +552,210 @@ void WebConfigurator::handleRoot()
         html += F("<p class='sub'>Profile limit reached. Delete one to create another.</p>");
     }
 
+    html += F("<p class='sub'><a href='/profiles.json'>Export profiles (JSON)</a> saves every driving profile to one file for backup or sharing.</p>");
+    html += F("<label>Import profiles from a file</label><input id='profileFile' type='file' accept='.json,application/json'>");
+    html += F("<button type='button' class='secondary' onclick='importProfiles()'>Import profiles</button>");
+    html += F("<p class='sub' id='profileImportStatus'>Takes a profiles export or a full settings export. A profile whose name already exists is replaced; if that profile is active it is deactivated so the imported values stick, then tap it to load them. The list holds 12; the browser reads the file and the board only receives checked values.</p>");
+
     html += F("</div>");
 
-    html += F("<form method='post' action='/save'>");
+    html += F("<form method='post' action='/save' id='saveForm'>");
 
-    html += F("<div class='card'><h2>Drive &amp; Limits</h2><div class='row'>");
-    html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01");
-    html += input("Deadband", "deadband", String(settings->getDeadband(), 2), "number", "1");
-    html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1");
+    if(server.arg("notice") == "servo-locked")
+    {
+        html += F("<div class='card'><p class='sub bad'>Servo center and travel are locked while endpoint calibration is active. Reset calibration to change them. Reverse servo still works: it swaps the captured left and right stops.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-locked")
+    {
+        html += F("<div class='card'><p class='sub bad'>The endpoints are already calibrated. Reset the calibration before capturing a new stop, or type the pulse values by hand.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-invalid")
+    {
+        html += F("<div class='card'><p class='sub bad'>The endpoint values were not applied. Left and right must sit on opposite sides of center, at least 10 us away from it. The stored endpoints are unchanged.</p></div>");
+    }
+
+    if(server.arg("notice") == "endpoints-confirmed")
+    {
+        html += F("<div class='card'><p class='sub ok'>The typed endpoints are now the steering calibration. Servo center and travel are locked while it is active; use Reset on the Endpoints card to go back to the center/travel setup.</p></div>");
+    }
+
+    if(server.arg("notice") == "profiles-changed")
+    {
+        html += F("<div class='card'><p class='sub bad'>The profile list changed since that page was loaded, so nothing was activated or deleted. Check the list below and try again.</p></div>");
+    }
+
+    html += F("<div class='card' data-tab='tune'><h2>Drive &amp; Limits</h2><div class='row'>");
+    html += input("Saved gain (fallback)", "gain", String(settings->getGain(), 2), "number", "0.01", false, "0", "6");
+    html += input("Deadband", "deadband", String(settings->getDeadband(), 1), "number", "0.1", false, "0", "100");
+    html += input("Max correction (% full steering span)", "gyroMax", String(settings->getGyroMaxCorrection()), "number", "1", false, "0", "100");
     html += F("<p class='sub'>This is the gyro's maximum endpoint-to-endpoint authority. 50% can move from center to one calibrated endpoint; 100% can override one endpoint all the way to the other. Physical endpoint calibration remains the final hard limit.</p>");
     html += F("</div>");
     html += checkbox("Reverse gyro correction", "gyroReverse", settings->getGyroReverse());
     html += F("</div>");
 
-    html += F("<div class='card'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
-    html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01");
-    html += F("<label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
+    html += F("<div class='card' data-tab='tune'><h2>OpenDrift v1.0 Response</h2><div class='row'>");
+    html += input("Smoothing", "gyroSmoothing", String(settings->getGyroSmoothing(), 2), "number", "0.01", false, "0", "1");
+    html += F("<div><label>Gyro sensor LPF</label><select name='gyroLpfMode'><option value='0'");
     if(settings->getGyroLpfMode() == 0) html += F(" selected");
     html += F(">24 Hz - original</option><option value='1'");
     if(settings->getGyroLpfMode() == 1) html += F(" selected");
     html += F(">120 Hz - low latency</option><option value='2'");
     if(settings->getGyroLpfMode() == 2) html += F(" selected");
-    html += F(">Off - raw bandwidth</option></select>");
-    html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1");
-    html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1");
+    html += F(">Off - raw bandwidth</option></select></div>");
+    html += input("Prediction strength (0-100)", "predictionStrength", String(settings->getPredictionStrength()), "number", "1", false, "0", "100");
+    html += input("Anti Wobble (0-100)", "huntStrength", String(settings->getGyroHuntStrength()), "number", "1", false, "0", "100");
+    html += input("Steering gain reduction / PCA (0-100)", "pca", String(settings->getSteeringGainReduction()), "number", "1", false, "0", "100");
+    html += F("<p class='sub'>Steering gain reduction takes gyro authority away as you turn the wheel: at full lock the direct correction is reduced by this percentage, at center nothing changes. 0 is off. Countersteer Assist and Drift Memory are not affected.</p>");
     html += F("<p class='sub'>Anti Wobble controls the depth of OpenDrift's narrow, phase-aware wheel-wobble notch. Start at 50. Raise it only if a repeating wheel oscillation remains; lower it if steering begins to feel soft or unnatural. Zero bypasses the notch and 100 applies its maximum depth.</p>");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
-    html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1");
+    html += F("<div class='card' data-tab='tune'><h2>Transition Response</h2><p class='sub'>Transition Speed follows the complete chassis direction change. 50 is neutral; lower values add damping for slower transitions and higher values release damping for faster transitions. It never changes the Max Correction ceiling. Compare 25, 50, and 75 at the same tune.</p><div class='row'>");
+    html += input("Transition speed (0-100)", "transitionSpeed", String(settings->getGyroTransitionSpeed()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
-    html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1");
-    html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1");
-    html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01");
-    html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1");
+    html += F("<div class='card' data-tab='tune'><h2>Drift Assist</h2><p class='sub'>Countersteer Assist changes only the steady steering workload. Zero preserves the base v1.0 response; higher values let OpenDrift carry more of a settled drift.</p><div class='row'>");
+    html += input("Countersteer assist (0-100)", "counterSteerAssist", String(settings->getGyroCounterSteerAssist()), "number", "1", false, "0", "100");
+    html += input("Hold assist (0-100)", "gyroHoldBoost", String(settings->getGyroHoldBoost()), "number", "1", false, "0", "100");
+    html += input("Drift memory", "gyroIGain", String(settings->getGyroIntegralGain(), 2), "number", "0.01", false, "0", "20");
+    html += input("Memory limit (us)", "gyroILimit", String(settings->getGyroIntegralLimit()), "number", "1", false, "0", "500");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Servo</h2>");
+    bool servoGeometryLocked =
+        settings->isSteeringCalibrated();
+
+    html += F("<div class='card' data-tab='servo'><h2>Servo</h2>");
+
     html += checkbox("Reverse servo", "servoReverse", settings->getServoReverse());
     html += F("<label>Control and servo rate</label><select name='controlLoopHz'><option value='250'");
     if(settings->getControlLoopHz() == 250) html += F(" selected");
     html += F(">250 Hz - broad servo compatibility</option><option value='333'");
     if(settings->getControlLoopHz() == 333) html += F(" selected");
-    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting.</p>");
+    html += F(">333 Hz - supported servos only</option></select><p class='sub'>250 Hz supports a broader range of digital servos. Select 333 Hz only when the servo manufacturer explicitly supports it. A restart is required after changing this setting: save first, then restart.</p>");
+    html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
     html += F("<div class='row'>");
-    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()));
-    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()));
-    html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1");
+    html += input("Center pulse", "servoCenter", String(settings->getServoCenter()), "number", "1", servoGeometryLocked, "1000", "2000");
+    html += input("Travel percent", "servoTravel", String(settings->getServoTravel()), "number", "1", servoGeometryLocked, "1", "100");
+    html += input("Quiet band us", "servoQuiet", String(settings->getServoQuiet()), "number", "1", false, "0", "50");
+    html += input("Servo speed (1-100)", "servoSpeed", String(settings->getServoSpeed()), "number", "1", false, "1", "100");
+    html += F("</div>");
+    html += F("<p class='sub'>Servo speed limits how fast the steering output may move, driver input and gyro correction together. 100 is no limit. 50 crosses the full throw in about 0.15 s, 25 in about 0.6 s. The centre on signal loss is never slowed.</p>");
+
+    if(servoGeometryLocked)
+    {
+        html += F("<p class='sub'>Center pulse and travel percent are not used while the physical endpoint calibration is active; reset the calibration below to change them. Reverse servo keeps working: it swaps the captured left and right stops.</p>");
+    }
+
+    html += F("</div>");
+
+    // Same states and colours as the display's endpoint page.
+    bool endpointsSaved =
+        settings->isSteeringCalibrated();
+
+    if(endpointsSaved)
+    {
+        endpointCaptureError = false;
+    }
+
+    bool steeringSignal =
+        steeringRadio != nullptr &&
+        steeringRadio->hasSignal();
+
+    uint8_t endpointMask =
+        settings->getSteeringCalibrationMask();
+
+    html += F("<div class='card' data-tab='servo' id='endpoints'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong class='");
+    html += endpointsSaved
+        ? F("ok")
+        : (
+            (!steeringSignal || endpointCaptureError)
+            ? F("bad")
+            : F("")
+        );
+    html += F("'>");
+    html += endpointsSaved
+        ? F("CALIBRATED")
+        : (
+            !steeringSignal
+            ? F("NO STEERING SIGNAL")
+            : (
+                endpointCaptureError
+                ? F("INVALID - RETRY")
+                : (
+                    endpointMask != 0
+                    ? F("CAPTURE REMAINING")
+                    : F("CAPTURE ALL 3")
+                )
+            )
+        );
+    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Steer the wheels to each safe physical stop with the transmitter, then capture it here, on the display, or in the EdgeTX tool. Entering all three pulse values by hand also works.</p>");
+    html += F("<p class='sub'>Servo now: <strong id='servoPulse'>");
+    html += steeringServo != nullptr
+        ? String(steeringServo->getCommandPosition())
+        : String(F("--"));
+    html += F("</strong> us &middot; steering signal <strong id='steeringSignal'>");
+    html += steeringSignal ? F("OK") : F("NONE");
+    html += F("</strong></p><div class='endpoints'>");
+
+    static const char* const endpointLabels[3] =
+    {
+        "Capture left",
+        "Capture center",
+        "Capture right"
+    };
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        bool captured =
+            (endpointMask & (1U << point)) != 0;
+
+        html += F("<button type='submit' form='captureEndpoint");
+        html += String(point);
+        html += captured ? F("'>") : F("' class='danger'>");
+        html += endpointLabels[point];
+
+        if(captured)
+        {
+            html += F("<br><small>");
+            html += String(settings->getSteeringCapturedPulse(point));
+            html += F(" us</small>");
+        }
+
+        html += F("</button>");
+    }
+
+    html += F("<button type='submit' form='resetEndpoints' class='secondary'>Reset calibration</button></div><div class='row'>");
+    html += input("Max left", "steeringMin", String(settings->getSteeringMin()), "number", "1", false, "900", "2100");
+    html += input("Center", "steeringCenter", String(settings->getSteeringCenter()), "number", "1", false, "900", "2100");
+    html += input("Max right", "steeringMax", String(settings->getSteeringMax()), "number", "1", false, "900", "2100");
+
+    // What the page rendered. Save only applies an endpoint the user
+    // actually edited, so a page that went stale while the stops were
+    // captured, reset or swapped elsewhere cannot write old values back.
+    html += F("<input type='hidden' name='steeringMinWas' value='");
+    html += String(settings->getSteeringMin());
+    html += F("'><input type='hidden' name='steeringCenterWas' value='");
+    html += String(settings->getSteeringCenter());
+    html += F("'><input type='hidden' name='steeringMaxWas' value='");
+    html += String(settings->getSteeringMax());
+    html += F("'>");
+    html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1", false, "0", "100");
     html += F("</div></div>");
 
-    html += F("<div class='card'><h2>Physical Servo Endpoints</h2><p class='sub'>Status: <strong>");
-    html += settings->isSteeringCalibrated() ? F("CALIBRATED") : F("NOT CALIBRATED");
-    html += F("</strong>. These are the servo's physical PWM stops and the final hard limits for both driver and gyro movement. Position the wheels at each safe physical endpoint and capture it from the display or EdgeTX tool, or enter all three pulse values below.</p><div class='row'>");
-    html += input("Max left", "steeringMin", String(settings->getSteeringMin()));
-    html += input("Center", "steeringCenter", String(settings->getSteeringCenter()));
-    html += input("Max right", "steeringMax", String(settings->getSteeringMax()));
-    html += input("Steering travel percent", "radioSteeringTravel", String(settings->getRadioSteeringTravel()), "number", "1");
-    html += F("</div></div>");
-
-    html += F("<div class='card'><h2>Gain Channel Calibration</h2><div class='row'>");
+    html += F("<div class='card' data-tab='radio'><h2>Gain Channel Calibration</h2>");
     #if defined(OPENDRIFT_INPUT_CRSF)
     #if defined(OPENDRIFT_CRSF_OOPS_SWAPPED_PINS)
-    html += F("Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.");
+    html += F("<p class='sub'>Personal swapped-pin build: CRSF channel 3 controls gyro gain. GPIO 16 drives the steering servo. GPIO 15 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 17; receiver RX connects to GPIO 18.</p>");
     #elif defined(OPENDRIFT_AMOLED_V2)
-    html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.");
+    html += F("<p class='sub'>CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold. Receiver TX feeds GPIO 1; receiver RX connects to GPIO 2.</p>");
     #else
-    html += F("CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold.");
+    html += F("<p class='sub'>CRSF channel 3 controls gyro gain. GPIO 15 drives the steering servo. GPIO 16 actively outputs neutral throttle during failsafe and passes throttle only after a valid neutral hold.</p>");
     #endif
-    html += F("</div>");
     #else
-    html += input("Gain low", "gainMin", String(settings->getGainMin()));
-    html += input("Gain high", "gainMax", String(settings->getGainMax()));
+    html += F("<div class='row'>");
+    html += input("Gain low", "gainMin", String(settings->getGainMin()), "number", "1", false, "800", "2200");
+    html += input("Gain high", "gainMax", String(settings->getGainMax()), "number", "1", false, "800", "2200");
     html += F("</div>");
     html += checkbox(
         #if defined(OPENDRIFT_AMOLED_V2)
@@ -357,13 +768,14 @@ void WebConfigurator::handleRoot()
     );
     #endif
     html += F("<div class='row'>");
-    html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.05");
-    html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.05");
-    html += F("</div><p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
+    html += input("CH3 gain minimum", "channel3GainMin", String(settings->getChannel3GainMin(), 2), "number", "0.01", false, "0", "6");
+    html += input("CH3 gain maximum", "channel3GainMax", String(settings->getChannel3GainMax(), 2), "number", "0.01", false, "0", "6");
+    html += F("</div><p class='sub'>The minimum must not exceed the maximum; reversed values are swapped on save.</p>");
+    html += F("<p class='sub'>Maps the full Channel 3 control range to gyro gain. Defaults are 0.50 to 3.00; both ends support 0.00 to 6.00.</p>");
     html += F("</div>");
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
-    html += F("<div class='card'><h2>Auxiliary Channel Outputs</h2><p class='sub'>Route any CRSF channel to a standard 50 Hz receiver-style PWM signal. Outputs return to 1500 us on signal loss. GPIO is 3.3 V signal only: power accessories externally and connect a common ground.</p><div class='row'>");
+    html += F("<div class='card' data-tab='radio'><h2>Auxiliary Channel Outputs</h2><p class='sub'>Route any CRSF channel to a standard 50 Hz receiver-style PWM signal. Outputs return to 1500 us on signal loss. GPIO is 3.3 V signal only: power accessories externally and connect a common ground.</p><div class='row'>");
 
     for(uint8_t gpio = 1; gpio <= 8; gpio++)
     {
@@ -412,21 +824,104 @@ void WebConfigurator::handleRoot()
     html += F("</div><p class='sub'>Mappings take effect immediately after Save Settings. Multiple GPIOs may mirror the same channel.</p></div>");
     #endif
 
-    html += F("<div class='card'><h2>WiFi</h2>");
+    html += F("<div class='card' data-tab='board'><h2>WiFi</h2>");
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
+    html += F("<p class='sub'>Connected devices now: <strong id='wifiClients'>");
+    html += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
+    html += F("</strong></p>");
     html += input("Network name (SSID)", "wifiSsid", String(settings->getWifiSsid()), "text", "");
-    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. Applies the next time WiFi starts: toggle WiFi off and on from the display, or reboot, then join the new network.</p>");
-    html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
-    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
+    html += F("<p class='sub'>1-32 letters, numbers, spaces, - _ . Give each car its own name when several OpenDrift boards share a track. A new name applies after a restart, or the next time WiFi is switched on from the display.</p>");
+
+    if(
+        wifi != nullptr &&
+        wifi->isSsidChangePending()
+    )
+    {
+        // The active name is sanitized to the same character set as the
+        // form values, so it is safe to inline.
+        html += F("<p class='sub warn'>Rename pending: the access point still broadcasts <strong>");
+        html += wifi->getActiveSsid();
+        html += F("</strong>. Restart to switch to the new name.</p>");
+        html += F("<button type='submit' form='restartForm' class='secondary'>Restart OpenDrift</button>");
+    }
+    html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()), "number", "1", false, "0", "3600000");
+    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected device pauses the timer, and a device that is connecting, getting its address, or reconnecting after a drop holds it for 30 seconds more. A disconnect then starts a fresh timeout. 0 never switches WiFi off, and anything from 1 to 4999 ms is treated as 5000 ms.</p>");
     html += F("</div>");
 
-    html += F("<div class='card'><h2>Blackbox</h2>");
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    html += F("<div class='card' data-tab='board'><h2>Display</h2><label>Brightness</label><select name='displayBrightness'>");
+
+    for(uint8_t percent = 10; percent <= 100; percent += 10)
+    {
+        html += F("<option value='");
+        html += String(percent);
+        html += F("'");
+
+        if(settings->getDisplayBrightness() == percent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += String(percent);
+        html += F("%</option>");
+    }
+
+    html += F("</select><p class='sub'>Applies right after Save Settings. The System page on the display has the same control.</p>");
+    html += checkbox("Flip the screen 180 degrees (board mounted upside down)", "displayFlip", settings->getDisplayFlip());
+    html += input("Dim after idle (seconds, 0 = never)", "displayDimTimeout", String(settings->getDisplayDimTimeout()), "number", "1", false, "0", "600");
+    html += F("<p class='sub'>After this many seconds without a touch the AMOLED drops to a tenth of its brightness, up to 600 seconds. The first touch only wakes the screen. Off by default.</p>");
+
+    html += F("<label>Text colour</label><select name='themeText'><option value='0'");
+    if(settings->getThemeText() == 0) html += F(" selected");
+    html += F(">Light text (default)</option><option value='1'");
+    if(settings->getThemeText() == 1) html += F(" selected");
+    html += F(">Dark text, for light backgrounds</option></select>");
+
+    html += F("<label>Accent colour</label><select name='themeAccent'>");
+
+    for(uint8_t accent = 0; accent < Settings::THEME_ACCENT_COUNT; accent++)
+    {
+        html += F("<option value='");
+        html += String((int)accent);
+        html += F("'");
+
+        if(settings->getThemeAccent() == accent)
+        {
+            html += F(" selected");
+        }
+
+        html += F(">");
+        html += Settings::themeAccentName(accent);
+        html += F("</option>");
+    }
+
+    html += F("</select><p class='sub'>Headers, buttons and highlights use the accent; Mixed keeps the original colour per page. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any photo. The System page has the same two controls.</p></div>");
+
+    #endif
+
+    html += F("<div class='card' data-tab='board'><h2>Blackbox</h2>");
     html += checkbox("Enable onboard logging", "blackboxEnabled", settings->getBlackboxEnabled());
     html += F("</div>");
 
     html += F("<button type='submit'>Save Settings</button></form>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> downloads every setting, the endpoint calibration and all profiles as one backup file.</p>");
 
-    html += F("<div class='card'><h2>Blackbox Log</h2>");
+    // The capture and reset buttons live inside the settings form above,
+    // which cannot nest another form, so they target these through their
+    // form attribute.
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        html += F("<form id='captureEndpoint");
+        html += String(point);
+        html += F("' method='post' action='/capture-endpoint'><input type='hidden' name='point' value='");
+        html += String(point);
+        html += F("'></form>");
+    }
+
+    html += F("<form id='resetEndpoints' method='post' action='/reset-endpoints' onsubmit=\"return confirm('Clear the physical endpoint calibration? The servo returns to the plain center and travel map until all three points are captured again.')\"></form>");
+
+    html += F("<div class='card' data-tab='board'><h2>Blackbox Log</h2>");
 
     if(!settings->getBlackboxEnabled())
     {
@@ -468,7 +963,121 @@ void WebConfigurator::handleRoot()
 
     html += F("</div>");
 
-    html += F("</main><script>function updateLive(){fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';}).catch(()=>{});}updateLive();setInterval(updateLive,500);</script></body></html>");
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Outside the settings form on purpose: the Use and Delete buttons
+    // are forms of their own, and forms cannot nest.
+    html += F("<div class='card' data-tab='board' id='backgrounds'><h2>Backgrounds</h2>");
+
+    if(backgrounds == nullptr || !backgrounds->isReady())
+    {
+        html += F("<p class='sub bad'>Background storage is not available on this board.</p></div>");
+    }
+    else
+    {
+        const char* activeBackground =
+            settings->getBackgroundName();
+
+        html += F("<p class='sub'>Active: <strong>");
+        html += activeBackground[0] != 0 ? activeBackground : "Built-in";
+        html += F("</strong> &middot; stored: ");
+        html += String((int)backgrounds->getCount());
+        html += F(" of ");
+        html += String((int)Backgrounds::MAX_BACKGROUNDS);
+        html += F(" &middot; free: ");
+        html += String((unsigned long)(backgrounds->getFreeBytes() / 1024));
+        html += F(" KB</p>");
+
+        html += F("<div class='profile");
+
+        if(activeBackground[0] == 0)
+        {
+            html += F(" active");
+        }
+
+        html += F("'><div><strong>Built-in</strong><small>The image compiled into the firmware</small></div><form method='post' action='/use-background'><input type='hidden' name='name' value=''><button type='submit'>Use</button></form><div></div></div>");
+
+        // Names are sanitized to letters, digits, - and _ so they are safe
+        // inside attributes without escaping.
+        for(uint8_t i = 0; i < backgrounds->getCount(); i++)
+        {
+            const char* name =
+                backgrounds->getName(i);
+
+            html += F("<div class='profile");
+
+            if(strcmp(name, activeBackground) == 0)
+            {
+                html += F(" active");
+            }
+
+            html += F("'><div><strong>");
+            html += name;
+            html += F("</strong><small>456 x 280 &middot; 250 KB</small></div>");
+            html += F("<form method='post' action='/use-background'><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button type='submit'>Use</button></form>");
+            html += F("<form method='post' action='/delete-background' onsubmit=\"return confirm('Delete this background?')\"><input type='hidden' name='name' value='");
+            html += name;
+            html += F("'><button class='danger' type='submit'>Delete</button></form></div>");
+        }
+
+        html += F("<label>Image file</label><input id='bgFile' type='file' accept='image/*'>");
+        html += F("<label>Name (letters, digits, - and _)</label><input id='bgName' type='text' maxlength='23' placeholder='Example: track-night'>");
+        html += F("<button type='button' class='secondary' onclick='uploadBackground()'>Convert and upload</button>");
+        html += F("<p class='sub' id='bgStatus'>Any JPG or PNG. Your browser scales and crops it to 456 x 280 and converts it to the panel's pixel format, so the board only stores 250 KB per image and holds up to 16. Upload at the bench, not while driving: it writes flash.</p>");
+        html += F("</div>");
+    }
+    #endif
+
+    // The settings form above cannot contain another form, so the restart
+    // form lives here and the restart buttons elsewhere on the page point
+    // at it through their form attribute.
+    html += F("<div class='card' data-tab='board'><h2>System</h2><p class='sub'>Last reset: <strong>");
+    html += resetReasonText(esp_reset_reason());
+    html += F("</strong> &middot; up ");
+    html += uptimeText();
+    html += F(". A crash or watchdog here means the board rebooted on its own; check the serial monitor for the backtrace.</p>");
+    html += F("<p class='sub'>Restart applies a changed control rate and a pending WiFi name. Steering is uncontrolled for a few seconds while OpenDrift boots, and the RAM blackbox log is lost.</p>");
+    html += F("<form id='restartForm' method='post' action='/restart' onsubmit=\"return confirm('Restart OpenDrift now? Steering is uncontrolled for a few seconds, the RAM blackbox log is lost, and unsaved edits on this page are discarded. Save first if you changed anything.')\"><button type='submit' class='secondary'>Restart OpenDrift</button></form>");
+    html += F("<p class='sub'><a href='/settings.json'>Export settings (JSON)</a> before a factory reset to keep a copy of the tune and profiles.</p>");
+    html += F("<p class='sub'>Factory reset erases everything this firmware has stored on the board and restarts with defaults.</p>");
+    html += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset erases EVERYTHING stored on this board: gyro tune, all driving profiles, physical endpoint calibration, servo center, travel and direction, GPIO and aux channel mappings, WiFi name and options, logging settings, and every uploaded background. OpenDrift restarts with defaults and the WiFi name ");
+    html += Settings::defaultWifiSsid();
+    html += F(". Continue?')\"><button type='submit' class='danger'>Factory reset</button></form>");
+    html += F("</div>");
+
+    // Tabs hide cards in place, so form membership and the form= buttons
+    // are untouched. The active tab survives the save redirect through
+    // localStorage; the unsaved dot follows any input inside the save form.
+    // It runs in its own script ahead of the live poller, so a failure
+    // down there can never leave the page with every card hidden.
+    html += F("</main><script>(function(){var tabs=document.querySelectorAll('nav.tabs button'),cards=document.querySelectorAll('.card[data-tab]');function show(n,keep){tabs.forEach(function(b){b.classList.toggle('active',b.dataset.tab===n)});cards.forEach(function(c){c.classList.toggle('on',c.dataset.tab===n)});try{localStorage.setItem('odTab',n)}catch(e){}if(keep){return}if(location.hash!=='#'+n){history.replaceState(null,'','#'+n)}window.scrollTo(0,0)}");
+    html += F("tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.tab)})});var names=['tune','servo','radio','profiles','board'];function known(n){return names.indexOf(n)>=0}var st=(location.hash||'').slice(1),el=st?document.getElementById(st):null,card=el?el.closest('.card[data-tab]'):null;if(card){show(card.dataset.tab,true);el.scrollIntoView()}else{if(!known(st)){st='';try{st=localStorage.getItem('odTab')||''}catch(e){}}if(!known(st)){st='tune'}show(st)}");
+    html += F("var f=document.getElementById('saveForm'),dirty=false;function setDirty(v){dirty=v;document.body.classList.toggle('is-dirty',v)}if(f){f.addEventListener('input',function(){setDirty(true)});f.addEventListener('change',function(){setDirty(true)});f.addEventListener('submit',function(){setDirty(false)})}window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue=''}})})();");
+    html += F("</script>");
+
+    html += F("<script>var liveBusy=false;function updateLive(){if(liveBusy){return;}liveBusy=true;fetch('/live-status',{cache:'no-store'}).then(r=>r.json()).then(s=>{document.getElementById('activeGain').textContent=Number(s.gain).toFixed(2);document.getElementById('gainOverride').textContent=s.override?'CH3 gain override active':'Saved gain active';document.getElementById('servoPulse').textContent=s.command;document.getElementById('steeringSignal').textContent=s.steering?'OK':'NONE';document.getElementById('wifiClients').textContent=s.clients;}).catch(()=>{document.getElementById('servoPulse').textContent='--';document.getElementById('steeringSignal').textContent='offline';}).finally(()=>{liveBusy=false;});}updateLive();setInterval(updateLive,500);");
+
+    // The browser parses the JSON and posts plain form fields, so the board
+    // needs no JSON parser and every value goes through the same clamps as
+    // the settings form.
+    html += F("function importProfiles(){var f=document.getElementById('profileFile').files[0];var st=document.getElementById('profileImportStatus');if(!f){st.textContent='Choose a JSON file first.';return;}var r=new FileReader();r.onload=function(){var d;try{d=JSON.parse(r.result);}catch(e){st.textContent='That file is not valid JSON.';return;}if(!d||typeof d!=='object'){st.textContent='No profiles found in that file.';return;}var list=Array.isArray(d)?d:(Array.isArray(d.profiles)?d.profiles:(d.profiles&&Array.isArray(d.profiles.items)?d.profiles.items:null));if(list){list=list.filter(function(q){return q&&typeof q==='object';});}if(!list||!list.length){st.textContent='No profiles found in that file.';return;}var num=function(v,dflt){v=Number(v);return isFinite(v)?v:dflt;};var p=new URLSearchParams();var n=0;list.slice(0,12).forEach(function(q){p.append('n'+n,String(q.name||''));p.append('gain'+n,num(q.gain,1.5));p.append('deadband'+n,num(q.deadband,2));p.append('smooth'+n,num(q.gyroSmoothing,0.1));p.append('igain'+n,num(q.gyroIntegralGain,0));p.append('max'+n,num(q.gyroMaxCorrection,25));p.append('ilimit'+n,num(q.gyroIntegralLimit,120));p.append('hold'+n,num(q.gyroHoldBoost,0));p.append('pred'+n,num(q.predictionStrength,0));p.append('travel'+n,num(q.radioSteeringTravel,100));p.append('csteer'+n,num(q.gyroCounterSteerAssist,0));p.append('tspeed'+n,num(q.gyroTransitionSpeed,50));p.append('wobble'+n,num(q.gyroHuntStrength,50));p.append('pca'+n,num(q.steeringGainReduction,0));n++;});p.append('count',n);st.textContent='Importing '+n+' profile(s)...';fetch('/import-profiles',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()}).then(function(resp){return resp.text().then(function(t){st.textContent=t;if(resp.ok){setTimeout(function(){location.href='/?r='+Date.now()+'#profiles';},1500);}});}).catch(function(){st.textContent='Import failed. Stay on the OpenDrift network and try again.';});};r.onerror=function(){st.textContent='The browser could not read that file.';};r.readAsText(f);}");
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    // Scale and crop to 456 x 280, pack RGB565 little-endian, and post the
+    // raw pixels as a multipart file named <name>.rgb. The board never has
+    // to decode an image format.
+    html += F("function uploadBackground(){var f=document.getElementById('bgFile').files[0];var n=document.getElementById('bgName').value.trim();var st=document.getElementById('bgStatus');if(!f||!n){st.textContent='Choose an image and give it a name.';return;}var img=new Image();img.onload=function(){URL.revokeObjectURL(img.src);try{var c=document.createElement('canvas');c.width=456;c.height=280;var x=c.getContext('2d');var s=Math.max(456/img.width,280/img.height);var w=img.width*s,h=img.height*s;x.drawImage(img,(456-w)/2,(280-h)/2,w,h);var d=x.getImageData(0,0,456,280).data;var out=new Uint8Array(456*280*2);for(var i=0,j=0;i<d.length;i+=4,j+=2){var v=((d[i]&248)<<8)|((d[i+1]&252)<<3)|(d[i+2]>>3);out[j]=v&255;out[j+1]=v>>8;}}catch(e){st.textContent='This image could not be converted in the browser. Try a smaller photo.';return;}var fd=new FormData();fd.append('image',new Blob([out]),n+'.rgb');st.textContent='Uploading 250 KB...';fetch('/upload-background',{method:'POST',body:fd}).then(function(r){return r.text().then(function(t){if(r.ok){location.href='/?r='+Date.now()+'#backgrounds';}else{st.textContent=t;}});}).catch(function(){st.textContent='Upload failed. Stay on the OpenDrift network and try again.';});};img.onerror=function(){st.textContent='The browser could not read that image.';};img.src=URL.createObjectURL(f);}");
+    #endif
+
+    html += F("</script></body></html>");
+
+    // A cached copy of this page carries stale profile rows and stale
+    // checkbox snapshots, so Back must fetch it again.
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
 
     server.send(
         200,
@@ -480,6 +1089,11 @@ void WebConfigurator::handleRoot()
 
 void WebConfigurator::handleLiveStatus()
 {
+    if(wifi != nullptr)
+    {
+        wifi->noteClientActivity();
+    }
+
     if(
         settings == nullptr ||
         gyro == nullptr ||
@@ -504,13 +1118,25 @@ void WebConfigurator::handleLiveStatus()
     #endif
 
     String json;
-    json.reserve(72);
+    json.reserve(128);
     json += F("{\"gain\":");
     json += String(gyro->getGain(), 2);
     json += F(",\"pulse\":");
     json += String(gainRadio->getPulseWidth());
     json += F(",\"override\":");
     json += gainOverride ? F("true") : F("false");
+    json += F(",\"steering\":");
+    json += (steeringRadio != nullptr && steeringRadio->hasSignal()) ? F("true") : F("false");
+    json += F(",\"servo\":");
+    json += steeringServo != nullptr
+        ? String(steeringServo->getPosition())
+        : String(0);
+    json += F(",\"command\":");
+    json += steeringServo != nullptr
+        ? String(steeringServo->getCommandPosition())
+        : String(0);
+    json += F(",\"clients\":");
+    json += String((int)(wifi != nullptr ? wifi->getClientCount() : 0));
     json += F("}");
 
     server.sendHeader(
@@ -553,9 +1179,14 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setGyroReverse(
-        server.hasArg("gyroReverse")
-    );
+    bool gyroReversePosted = false;
+
+    if(checkboxChanged("gyroReverse", gyroReversePosted))
+    {
+        settings->setGyroReverse(
+            gyroReversePosted
+        );
+    }
 
     settings->setGyroMaxCorrection(
         getIntArg(
@@ -627,28 +1258,48 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setServoReverse(
-        server.hasArg("servoReverse")
-    );
-
-    settings->setServoCenter(
+    settings->setSteeringGainReduction(
         getIntArg(
-            "servoCenter",
-            settings->getServoCenter()
+            "pca",
+            settings->getSteeringGainReduction()
         )
     );
 
-    settings->setServoTravel(
-        getIntArg(
-            "servoTravel",
-            settings->getServoTravel()
-        )
-    );
+    // Physical endpoint calibration owns the servo geometry. The form
+    // renders center and travel disabled while it is active, so the
+    // fallbacks below keep the stored values, and a request that still
+    // tries to change them is reported back on the page.
+    bool servoCenterRejected =
+        !settings->setServoCenter(
+            getIntArg(
+                "servoCenter",
+                settings->getServoCenter()
+            )
+        );
+
+    bool servoTravelRejected =
+        !settings->setServoTravel(
+            getIntArg(
+                "servoTravel",
+                settings->getServoTravel()
+            )
+        );
+
+    bool servoGeometryRejected =
+        servoCenterRejected ||
+        servoTravelRejected;
 
     settings->setServoQuiet(
         getIntArg(
             "servoQuiet",
             settings->getServoQuiet()
+        )
+    );
+
+    settings->setServoSpeed(
+        getIntArg(
+            "servoSpeed",
+            settings->getServoSpeed()
         )
     );
 
@@ -659,6 +1310,10 @@ void WebConfigurator::handleSave()
         )
     );
 
+    // An endpoint counts as edited only when it differs from the value the
+    // page rendered, so a stale page leaves stops captured, reset or
+    // swapped elsewhere alone. A request without the snapshot fields
+    // treats every posted value as an edit.
     int requestedSteeringMin =
         getIntArg(
             "steeringMin",
@@ -677,18 +1332,76 @@ void WebConfigurator::handleSave()
             settings->getSteeringMax()
         );
 
-    bool steeringCalibrationChanged =
-        requestedSteeringMin != settings->getSteeringMin() ||
-        requestedSteeringCenter != settings->getSteeringCenter() ||
-        requestedSteeringMax != settings->getSteeringMax();
+    bool steeringMinEdited =
+        endpointFieldEdited(
+            "steeringMin",
+            "steeringMinWas",
+            requestedSteeringMin
+        );
 
-    settings->setSteeringMin(requestedSteeringMin);
-    settings->setSteeringCenter(requestedSteeringCenter);
-    settings->setSteeringMax(requestedSteeringMax);
+    bool steeringCenterEdited =
+        endpointFieldEdited(
+            "steeringCenter",
+            "steeringCenterWas",
+            requestedSteeringCenter
+        );
 
-    if(steeringCalibrationChanged)
+    bool steeringMaxEdited =
+        endpointFieldEdited(
+            "steeringMax",
+            "steeringMaxWas",
+            requestedSteeringMax
+        );
+
+    // The three stops are applied as one set. An invalid set changes
+    // nothing and is reported; a valid set on an uncalibrated board is
+    // reported too, because it locks servo center and travel.
+    const char* endpointNotice = nullptr;
+
+    if(
+        steeringMinEdited ||
+        steeringCenterEdited ||
+        steeringMaxEdited
+    )
     {
-        settings->confirmStoredSteeringCalibration();
+        bool wasCalibrated = settings->isSteeringCalibrated();
+
+        int min =
+            steeringMinEdited
+            ? requestedSteeringMin
+            : settings->getSteeringMin();
+
+        int center =
+            steeringCenterEdited
+            ? requestedSteeringCenter
+            : settings->getSteeringCenter();
+
+        int max =
+            steeringMaxEdited
+            ? requestedSteeringMax
+            : settings->getSteeringMax();
+
+        if(!settings->setStoredSteeringEndpoints(min, center, max))
+        {
+            endpointNotice = "endpoints-invalid";
+        }
+        else if(!wasCalibrated)
+        {
+            endpointNotice = "endpoints-confirmed";
+        }
+    }
+
+    // After the endpoints: while calibrated, reverse swaps the stored left
+    // and right stops, and the page posted them in their pre-swap layout.
+    // Only a checkbox the user actually changed is applied, so a page left
+    // open cannot undo a reverse change made on the display or the radio.
+    bool servoReversePosted = false;
+
+    if(checkboxChanged("servoReverse", servoReversePosted))
+    {
+        settings->setServoReverse(
+            servoReversePosted
+        );
     }
 
     settings->setRadioSteeringTravel(
@@ -712,24 +1425,37 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setChannel3GainMin(
+    float channel3GainMin =
         getFloatArg(
             "channel3GainMin",
             settings->getChannel3GainMin()
-        )
-    );
+        );
 
-    settings->setChannel3GainMax(
+    float channel3GainMax =
         getFloatArg(
             "channel3GainMax",
             settings->getChannel3GainMax()
-        )
-    );
+        );
+
+    if(channel3GainMin > channel3GainMax)
+    {
+        float swapped = channel3GainMin;
+        channel3GainMin = channel3GainMax;
+        channel3GainMax = swapped;
+    }
+
+    settings->setChannel3GainMin(channel3GainMin);
+    settings->setChannel3GainMax(channel3GainMax);
 
     #if !defined(OPENDRIFT_INPUT_CRSF)
-    settings->setThrottleOutputEnabled(
-        server.hasArg("throttleOutputEnabled")
-    );
+    bool throttleOutputPosted = false;
+
+    if(checkboxChanged("throttleOutputEnabled", throttleOutputPosted))
+    {
+        settings->setThrottleOutputEnabled(
+            throttleOutputPosted
+        );
+    }
     #endif
 
     #if defined(OPENDRIFT_INPUT_CRSF) && defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -759,9 +1485,14 @@ void WebConfigurator::handleSave()
     }
     #endif
 
-    settings->setWifiEnabled(
-        server.hasArg("wifiEnabled")
-    );
+    bool wifiEnabledPosted = false;
+
+    if(checkboxChanged("wifiEnabled", wifiEnabledPosted))
+    {
+        settings->setWifiEnabled(
+            wifiEnabledPosted
+        );
+    }
 
     if(server.hasArg("wifiSsid"))
     {
@@ -777,9 +1508,53 @@ void WebConfigurator::handleSave()
         )
     );
 
-    settings->setBlackboxEnabled(
-        server.hasArg("blackboxEnabled")
+    bool blackboxPosted = false;
+
+    if(checkboxChanged("blackboxEnabled", blackboxPosted))
+    {
+        settings->setBlackboxEnabled(
+            blackboxPosted
+        );
+    }
+
+    #if defined(OPENDRIFT_BOARD_AMOLED_164)
+    settings->setDisplayBrightness(
+        getIntArg(
+            "displayBrightness",
+            settings->getDisplayBrightness()
+        )
     );
+
+    settings->setDisplayDimTimeout(
+        getIntArg(
+            "displayDimTimeout",
+            settings->getDisplayDimTimeout()
+        )
+    );
+
+    bool displayFlipPosted = false;
+
+    if(checkboxChanged("displayFlip", displayFlipPosted))
+    {
+        settings->setDisplayFlip(
+            displayFlipPosted
+        );
+    }
+
+    settings->setThemeText(
+        getIntArg(
+            "themeText",
+            settings->getThemeText()
+        )
+    );
+
+    settings->setThemeAccent(
+        getIntArg(
+            "themeAccent",
+            settings->getThemeAccent()
+        )
+    );
+    #endif
 
     if(gyro != nullptr)
     {
@@ -826,16 +1601,33 @@ void WebConfigurator::handleSave()
         gyro->setHuntStrength(
             settings->getGyroHuntStrength()
         );
+
+        gyro->setSteeringGainReduction(
+            settings->getSteeringGainReduction()
+        );
+    }
+
+    String location = "/";
+
+    if(servoGeometryRejected)
+    {
+        location = "/?notice=servo-locked";
+    }
+    else if(endpointNotice != nullptr)
+    {
+        location = String("/?notice=") + endpointNotice;
     }
 
     server.sendHeader(
         "Location",
-        "/"
+        location
     );
 
     server.send(
         303
     );
+
+    notifyChanged();
 }
 
 
@@ -867,8 +1659,10 @@ void WebConfigurator::handleProfileCreate()
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
 }
 
 
@@ -885,18 +1679,23 @@ void WebConfigurator::handleProfileActivate()
 
     int index = server.arg("profile").toInt();
 
-    if(
-        index < 0 ||
-        index >= settings->getProfileCount() ||
-        !settings->activateProfile(index)
-    )
+    if(!profileRowMatches(index))
+    {
+        server.sendHeader("Location", "/?notice=profiles-changed#profiles");
+        server.send(303);
+        return;
+    }
+
+    if(!settings->activateProfile(index))
     {
         server.send(404, "text/plain", "Profile not found");
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
 }
 
 
@@ -913,18 +1712,93 @@ void WebConfigurator::handleProfileDelete()
 
     int index = server.arg("profile").toInt();
 
-    if(
-        index < 0 ||
-        index >= settings->getProfileCount() ||
-        !settings->deleteProfile(index)
-    )
+    if(!profileRowMatches(index))
+    {
+        server.sendHeader("Location", "/?notice=profiles-changed#profiles");
+        server.send(303);
+        return;
+    }
+
+    if(!settings->deleteProfile(index))
     {
         server.send(404, "text/plain", "Profile not found");
         return;
     }
 
-    server.sendHeader("Location", "/");
+    server.sendHeader("Location", "/#profiles");
     server.send(303);
+
+    notifyChanged();
+}
+
+
+
+// A profile row posts its list position and its name. The position alone
+// is not enough: a page rendered before a delete points at the wrong row.
+bool WebConfigurator::profileRowMatches(
+    int index
+)
+{
+    if(
+        settings == nullptr ||
+        index < 0 ||
+        index >= settings->getProfileCount()
+    )
+    {
+        return false;
+    }
+
+    if(!server.hasArg("name"))
+    {
+        return true;
+    }
+
+    const Settings::DrivingProfile* profile =
+        settings->getProfile(index);
+
+    return
+        profile != nullptr &&
+        server.arg("name").equalsIgnoreCase(profile->name);
+}
+
+
+
+bool WebConfigurator::checkboxChanged(
+    const char* name,
+    bool& posted
+)
+{
+    posted = server.hasArg(name);
+
+    String snapshotName = String(name) + "Was";
+
+    if(!server.hasArg(snapshotName))
+    {
+        return true;
+    }
+
+    bool rendered = server.arg(snapshotName) == "1";
+
+    return posted != rendered;
+}
+
+
+
+void WebConfigurator::setChangeCallback(
+    void (*callback)()
+)
+{
+    changeCallback = callback;
+}
+
+
+
+void WebConfigurator::notifyChanged()
+{
+    if(changeCallback != nullptr)
+    {
+        changeCallback();
+    }
 }
 
 
@@ -982,7 +1856,7 @@ void WebConfigurator::handleLogDownload()
     size_t recordCount =
         blackbox->getRecordCount();
 
-    char line[672];
+    char line[1024];
     String chunk;
     chunk.reserve(8192);
 
@@ -998,6 +1872,15 @@ void WebConfigurator::handleLogDownload()
         if(length == 0)
         {
             continue;
+        }
+
+        // A truncated record loses its newline, which would merge it with
+        // the next row. Close the line instead.
+        if(length >= sizeof(line) - 1)
+        {
+            line[sizeof(line) - 2] = '\n';
+            line[sizeof(line) - 1] = '\0';
+            length = sizeof(line) - 1;
         }
 
         if(chunk.length() + length > 8192)
@@ -1073,8 +1956,835 @@ void WebConfigurator::handleLogClear()
 
 
 
+void WebConfigurator::handleSettingsExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Keys are the web form field names so a future import can post the
+    // same values straight back through /save. No escaping is needed: the
+    // WiFi name and profile names are sanitized to letters, digits, space
+    // and - _ . on the way in.
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
+
+    String json;
+
+    json.reserve(6144);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\"");
+
+    appendJsonField(json, "gain", String(settings->getGain(), 2));
+    appendJsonField(json, "deadband", String(settings->getDeadband(), 2));
+    appendJsonField(json, "gyroReverse", jsonBool(settings->getGyroReverse()));
+    appendJsonField(json, "gyroMax", String(settings->getGyroMaxCorrection()));
+    appendJsonField(json, "gyroSmoothing", String(settings->getGyroSmoothing(), 2));
+    appendJsonField(json, "gyroLpfMode", String((int)settings->getGyroLpfMode()));
+    appendJsonField(json, "predictionStrength", String(settings->getPredictionStrength()));
+    appendJsonField(json, "huntStrength", String(settings->getGyroHuntStrength()));
+    appendJsonField(json, "steeringGainReduction", String(settings->getSteeringGainReduction()));
+    appendJsonField(json, "transitionSpeed", String(settings->getGyroTransitionSpeed()));
+    appendJsonField(json, "counterSteerAssist", String(settings->getGyroCounterSteerAssist()));
+    appendJsonField(json, "gyroHoldBoost", String(settings->getGyroHoldBoost()));
+    appendJsonField(json, "gyroIGain", String(settings->getGyroIntegralGain(), 2));
+    appendJsonField(json, "gyroILimit", String(settings->getGyroIntegralLimit()));
+
+    appendJsonField(json, "servoReverse", jsonBool(settings->getServoReverse()));
+    appendJsonField(json, "controlLoopHz", String((int)settings->getControlLoopHz()));
+    appendJsonField(json, "servoCenter", String(settings->getServoCenter()));
+    appendJsonField(json, "servoTravel", String(settings->getServoTravel()));
+    appendJsonField(json, "servoQuiet", String(settings->getServoQuiet()));
+    appendJsonField(json, "servoSpeed", String(settings->getServoSpeed()));
+
+    appendJsonField(json, "steeringMin", String(settings->getSteeringMin()));
+    appendJsonField(json, "steeringCenter", String(settings->getSteeringCenter()));
+    appendJsonField(json, "steeringMax", String(settings->getSteeringMax()));
+    appendJsonField(json, "radioSteeringTravel", String(settings->getRadioSteeringTravel()));
+
+    appendJsonField(json, "gainMin", String(settings->getGainMin()));
+    appendJsonField(json, "gainMax", String(settings->getGainMax()));
+    appendJsonField(json, "channel3GainMin", String(settings->getChannel3GainMin(), 2));
+    appendJsonField(json, "channel3GainMax", String(settings->getChannel3GainMax(), 2));
+    appendJsonField(json, "throttleOutputEnabled", jsonBool(settings->getThrottleOutputEnabled()));
+
+    // Emitted on every build so the file layout does not depend on the
+    // firmware variant that wrote it.
+    for(uint8_t gpio = 1; gpio <= 8; gpio++)
+    {
+        char key[12];
+
+        snprintf(
+            key,
+            sizeof(key),
+            "auxGpio%u",
+            gpio
+        );
+
+        appendJsonField(json, key, String((int)settings->getAuxChannelForGpio(gpio)));
+    }
+
+    appendJsonField(json, "wifiEnabled", jsonBool(settings->getWifiEnabled()));
+    appendJsonField(json, "wifiSsid", jsonString(settings->getWifiSsid()));
+    appendJsonField(json, "wifiTimeout", String(settings->getWifiTimeout()));
+    appendJsonField(json, "blackboxEnabled", jsonBool(settings->getBlackboxEnabled()));
+    appendJsonField(json, "displayBrightness", String((int)settings->getDisplayBrightness()));
+    appendJsonField(json, "displayDimTimeout", String((int)settings->getDisplayDimTimeout()));
+    appendJsonField(json, "displayFlip", jsonBool(settings->getDisplayFlip()));
+    appendJsonField(json, "themeText", String((int)settings->getThemeText()));
+    appendJsonField(json, "themeAccent", String((int)settings->getThemeAccent()));
+    appendJsonField(json, "backgroundName", jsonString(settings->getBackgroundName()));
+
+    json += F(",\"endpointCalibration\":{\"calibrated\":");
+    json += jsonBool(settings->isSteeringCalibrated());
+    json += F(",\"mask\":");
+    json += String((int)settings->getSteeringCalibrationMask());
+    json += F(",\"servoPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedPulse(point));
+    }
+
+    json += F("],\"inputPulse\":[");
+
+    for(uint8_t point = 0; point < 3; point++)
+    {
+        if(point > 0)
+        {
+            json += ',';
+        }
+
+        json += String(settings->getSteeringCapturedInputPulse(point));
+    }
+
+    json += F("]},\"profiles\":{\"active\":");
+    json += String((int)settings->getActiveProfileIndex());
+    json += F(",\"activeName\":");
+    json += jsonString(settings->getActiveProfileName());
+    json += F(",\"items\":[");
+
+    bool firstProfile = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!firstProfile)
+        {
+            json += ',';
+        }
+
+        firstProfile = false;
+
+        appendProfileJson(json, profile);
+    }
+
+    json += F("]}}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-settings-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
+    );
+}
+
+
+
+void WebConfigurator::handleProfilesExport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // An adjustment from the display or CRSF lands in the live tune at once
+    // but is copied into the active profile only by the deferred save().
+    // Run it now so the export never carries a value up to a second old.
+    settings->flush();
+
+    String json;
+
+    json.reserve(4096);
+
+    json += F("{\"schema\":1,\"version\":\"" OPENDRIFT_VERSION "\",\"build\":\"" OPENDRIFT_BUILD_NAME "\",\"profiles\":[");
+
+    bool first = true;
+
+    for(uint8_t i = 0; i < settings->getProfileCount(); i++)
+    {
+        const Settings::DrivingProfile* profile =
+            settings->getProfile(i);
+
+        if(profile == nullptr)
+        {
+            continue;
+        }
+
+        if(!first)
+        {
+            json += ',';
+        }
+
+        first = false;
+
+        appendProfileJson(json, profile);
+    }
+
+    json += F("]}");
+
+    server.sendHeader(
+        "Content-Disposition",
+        "attachment; filename=opendrift-profiles-" OPENDRIFT_VERSION ".json"
+    );
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "application/json",
+        json
+    );
+}
+
+
+
+void WebConfigurator::handleProfilesImport()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    int count =
+        constrain(
+            getIntArg("count", 0),
+            0,
+            (int)Settings::MAX_PROFILES
+        );
+
+    uint8_t added = 0;
+    uint8_t replaced = 0;
+    uint8_t invalid = 0;
+    uint8_t full = 0;
+
+    for(int i = 0; i < count; i++)
+    {
+        Settings::DrivingProfile profile;
+
+        char key[16];
+
+        snprintf(key, sizeof(key), "n%d", i);
+        server.arg(key).toCharArray(profile.name, Settings::PROFILE_NAME_LENGTH);
+
+        profile.gain = profileFloatArg("gain", i, profile.gain);
+        profile.deadband = profileFloatArg("deadband", i, profile.deadband);
+        profile.gyroSmoothing = profileFloatArg("smooth", i, profile.gyroSmoothing);
+        profile.gyroIntegralGain = profileFloatArg("igain", i, profile.gyroIntegralGain);
+        profile.gyroMaxCorrection = profileIntArg("max", i, profile.gyroMaxCorrection);
+        profile.gyroIntegralLimit = profileIntArg("ilimit", i, profile.gyroIntegralLimit);
+        profile.gyroHoldBoost = profileIntArg("hold", i, profile.gyroHoldBoost);
+        profile.predictionStrength = profileIntArg("pred", i, profile.predictionStrength);
+        profile.radioSteeringTravel = profileIntArg("travel", i, profile.radioSteeringTravel);
+        profile.gyroCounterSteerAssist = profileIntArg("csteer", i, profile.gyroCounterSteerAssist);
+        profile.gyroTransitionSpeed = profileIntArg("tspeed", i, profile.gyroTransitionSpeed);
+        profile.gyroHuntStrength = profileIntArg("wobble", i, profile.gyroHuntStrength);
+        profile.steeringGainReduction = profileIntArg("pca", i, profile.steeringGainReduction);
+
+        bool wasReplaced = false;
+
+        int8_t result =
+            settings->importProfile(
+                profile,
+                wasReplaced
+            );
+
+        if(result == -1)
+        {
+            invalid++;
+        }
+        else if(result == -2)
+        {
+            full++;
+        }
+        else if(wasReplaced)
+        {
+            replaced++;
+        }
+        else
+        {
+            added++;
+        }
+    }
+
+    String summary;
+
+    summary += F("Imported ");
+    summary += String((int)(added + replaced));
+    summary += F(" profile(s): ");
+    summary += String((int)added);
+    summary += F(" added, ");
+    summary += String((int)replaced);
+    summary += F(" replaced");
+
+    if(invalid > 0)
+    {
+        summary += F(", ");
+        summary += String((int)invalid);
+        summary += F(" skipped (unusable name)");
+    }
+
+    if(full > 0)
+    {
+        summary += F(", ");
+        summary += String((int)full);
+        summary += F(" skipped (list full)");
+    }
+
+    summary += '.';
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        (added + replaced) > 0 ? 200 : 400,
+        "text/plain",
+        summary
+    );
+}
+
+
+
+float WebConfigurator::profileFloatArg(
+    const char* prefix,
+    int index,
+    float fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    float value =
+        server.arg(key).toFloat();
+
+    // strtod accepts "nan" and "inf"; neither may reach the controller.
+    return isfinite(value) ? value : fallback;
+}
+
+
+
+int32_t WebConfigurator::profileIntArg(
+    const char* prefix,
+    int index,
+    int32_t fallback
+)
+{
+    char key[24];
+
+    snprintf(key, sizeof(key), "%s%d", prefix, index);
+
+    if(!server.hasArg(key))
+    {
+        return fallback;
+    }
+
+    return server.arg(key).toInt();
+}
+
+
+
+void WebConfigurator::handleRestart()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Persist anything still waiting for the deferred save so a change
+    // made moments ago cannot be lost by the reset.
+    settings->flush();
+
+    // The configured name is the one the access point uses after boot.
+    sendRestartPage(
+        "Restarting",
+        settings->getWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleFactoryReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    // Nothing is flushed here on purpose: the deferred restart erases
+    // the namespace and the board boots with defaults.
+    factoryResetPending = true;
+
+    sendRestartPage(
+        "Factory reset",
+        Settings::defaultWifiSsid()
+    );
+
+    restartAtMs =
+        millis() + RESTART_DELAY_MS;
+}
+
+
+
+void WebConfigurator::handleEndpointCapture()
+{
+    if(
+        settings == nullptr ||
+        steeringRadio == nullptr ||
+        steeringServo == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Endpoint capture unavailable"
+        );
+
+        return;
+    }
+
+    int point =
+        getIntArg(
+            "point",
+            -1
+        );
+
+    if(point < 0 || point > 2)
+    {
+        server.send(
+            400,
+            "text/plain",
+            "Invalid endpoint"
+        );
+
+        return;
+    }
+
+    // While calibrated the servo is already mapped through the stored
+    // stops, so a capture would only read the stored value back. The
+    // display clears the calibration on that tap; the page has its own
+    // Reset button, so it refuses and says why.
+    if(settings->isSteeringCalibrated())
+    {
+        server.sendHeader(
+            "Location",
+            "/?notice=endpoints-locked"
+        );
+
+        server.send(
+            303
+        );
+
+        return;
+    }
+
+    // Same gate and same inputs as the display and the EdgeTX tool: the
+    // servo's current position is only meaningful while the transmitter
+    // is steering it, and the captured pulse must be a sane servo value.
+    if(!steeringRadio->hasSignal())
+    {
+        endpointCaptureError = true;
+    }
+    else
+    {
+        int pulse =
+            steeringServo->getCommandPosition();
+
+        if(pulse < 900 || pulse > 2100)
+        {
+            endpointCaptureError = true;
+        }
+        else
+        {
+            endpointCaptureError =
+                !settings->captureSteeringCalibrationPoint(
+                    (uint8_t)point,
+                    pulse,
+                    steeringRadio->getPulseWidth()
+                );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
+
+    notifyChanged();
+}
+
+
+
+void WebConfigurator::handleEndpointReset()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    settings->clearSteeringCalibration();
+
+    endpointCaptureError = false;
+
+    server.sendHeader(
+        "Location",
+        "/#endpoints"
+    );
+
+    server.send(
+        303
+    );
+
+    notifyChanged();
+}
+
+
+
+#if defined(OPENDRIFT_BOARD_AMOLED_164)
+void WebConfigurator::handleBackgroundUploadChunk()
+{
+    if(backgrounds == nullptr)
+    {
+        return;
+    }
+
+    HTTPUpload& upload =
+        server.upload();
+
+    switch(upload.status)
+    {
+        case UPLOAD_FILE_START:
+        {
+            // A client that drops after the last chunk never reaches
+            // handleBackgroundUpload, so a stale success flag must not
+            // survive into the next upload.
+            backgroundUploadOk = false;
+
+            // The browser sends <name>.rgb; beginUpload() validates the
+            // name and refuses when the list or the partition is full.
+            String name =
+                upload.filename;
+
+            int dot =
+                name.lastIndexOf('.');
+
+            if(dot > 0)
+            {
+                name = name.substring(0, dot);
+            }
+
+            backgroundUploadOk =
+                backgrounds->beginUpload(
+                    name.c_str()
+                );
+
+            break;
+        }
+
+        case UPLOAD_FILE_WRITE:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->writeUpload(
+                        upload.buf,
+                        upload.currentSize
+                    );
+            }
+            break;
+
+        case UPLOAD_FILE_END:
+            if(backgroundUploadOk)
+            {
+                backgroundUploadOk =
+                    backgrounds->endUpload();
+            }
+            else
+            {
+                backgrounds->abortUpload();
+            }
+            break;
+
+        default:
+            backgrounds->abortUpload();
+            backgroundUploadOk = false;
+            break;
+    }
+}
+
+
+
+void WebConfigurator::handleBackgroundUpload()
+{
+    if(
+        backgrounds == nullptr ||
+        !backgrounds->isReady()
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    if(backgroundUploadOk)
+    {
+        backgroundUploadOk = false;
+
+        server.send(
+            200,
+            "text/plain",
+            "OK"
+        );
+
+        return;
+    }
+
+    const char* error =
+        backgrounds->getUploadError();
+
+    server.send(
+        400,
+        "text/plain",
+        error[0] != 0 ? error : "No image was received"
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundUse()
+{
+    if(settings == nullptr)
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Settings unavailable"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    // An unknown name selects the built-in image rather than leaving a
+    // dangling choice behind.
+    if(
+        name.length() > 0 &&
+        (
+            backgrounds == nullptr ||
+            !backgrounds->exists(name.c_str())
+        )
+    )
+    {
+        name = "";
+    }
+
+    settings->setBackgroundName(
+        name
+    );
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+
+
+
+void WebConfigurator::handleBackgroundDelete()
+{
+    if(
+        settings == nullptr ||
+        backgrounds == nullptr
+    )
+    {
+        server.send(
+            503,
+            "text/plain",
+            "Background storage is not available"
+        );
+
+        return;
+    }
+
+    String name =
+        Backgrounds::sanitizeName(
+            server.arg("name")
+        );
+
+    if(name.length() > 0)
+    {
+        backgrounds->remove(
+            name.c_str()
+        );
+
+        if(strcmp(settings->getBackgroundName(), name.c_str()) == 0)
+        {
+            settings->setBackgroundName(
+                ""
+            );
+        }
+    }
+
+    server.sendHeader(
+        "Location",
+        "/#backgrounds"
+    );
+
+    server.send(
+        303
+    );
+}
+#endif
+
+
+
+void WebConfigurator::sendRestartPage(
+    const char* heading,
+    const char* ssid
+)
+{
+    String html;
+
+    html.reserve(1200);
+
+    html += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><meta http-equiv='refresh' content='12;url=/'>");
+    html += F("<title>OpenDrift</title><style>body{font-family:system-ui,Arial,sans-serif;margin:0;background:#101214;color:#f5f5f5}main{max-width:760px;margin:0 auto;padding:18px}h1{font-size:28px;margin:8px 0 2px}p{color:#aeb4bb;font-size:16px}a{color:#65b7ff}</style></head><body><main><h1>");
+    html += heading;
+    html += F("</h1><p>OpenDrift is restarting. Rejoin the WiFi network <strong>");
+    html += ssid;
+    html += F("</strong> in about 10 seconds. This page reloads by itself once you are back on the network, or <a href='/'>reload it</a> yourself.</p>");
+    html += F("<p>The RAM blackbox log does not survive a restart.</p></main></body></html>");
+
+    server.sendHeader(
+        "Cache-Control",
+        "no-store"
+    );
+
+    server.send(
+        200,
+        "text/html",
+        html
+    );
+}
+
+
+
 void WebConfigurator::handleNotFound()
 {
+    // Browsers ask for this on every page load; a redirect to the
+    // configurator only wastes a second request.
+    if(server.uri() == "/favicon.ico")
+    {
+        server.send(
+            204
+        );
+
+        return;
+    }
+
     server.sendHeader(
         "Location",
         "/"
@@ -1092,7 +2802,10 @@ String WebConfigurator::input(
     const char* name,
     String value,
     const char* type,
-    const char* step
+    const char* step,
+    bool disabled,
+    const char* minValue,
+    const char* maxValue
 )
 {
     String html;
@@ -1105,9 +2818,32 @@ String WebConfigurator::input(
     html += type;
     html += F("' step='");
     html += step;
+
+    if(minValue != nullptr)
+    {
+        html += F("' min='");
+        html += minValue;
+    }
+
+    if(maxValue != nullptr)
+    {
+        html += F("' max='");
+        html += maxValue;
+    }
+
     html += F("' value='");
     html += value;
-    html += F("'></div>");
+
+    if(disabled)
+    {
+        html += F("' disabled");
+    }
+    else
+    {
+        html += F("'");
+    }
+
+    html += F("></div>");
 
     return html;
 }
@@ -1117,18 +2853,30 @@ String WebConfigurator::input(
 String WebConfigurator::checkbox(
     const char* label,
     const char* name,
-    bool checked
+    bool checked,
+    bool disabled
 )
 {
     String html;
 
-    html += F("<label><input name='");
+    // The rendered state travels with the form, so a save only applies a
+    // checkbox the user actually changed on this page.
+    html += F("<input type='hidden' name='");
+    html += name;
+    html += F("Was' value='");
+    html += checked ? '1' : '0';
+    html += F("'><label><input name='");
     html += name;
     html += F("' type='checkbox'");
 
     if(checked)
     {
         html += F(" checked");
+    }
+
+    if(disabled)
+    {
+        html += F(" disabled");
     }
 
     html += F(">");
@@ -1150,7 +2898,54 @@ int WebConfigurator::getIntArg(
         return fallback;
     }
 
-    return server.arg(name).toInt();
+    String raw =
+        server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+
+    long value =
+        strtol(text, &end, 10);
+
+    // Text that is not a number must not silently become zero.
+    if(end == text)
+    {
+        return fallback;
+    }
+
+    return (int)constrain(value, (long)INT_MIN, (long)INT_MAX);
+}
+
+
+
+bool WebConfigurator::endpointFieldEdited(
+    const char* name,
+    const char* snapshotName,
+    int requested
+)
+{
+    if(
+        !server.hasArg(name) ||
+        server.arg(name).length() == 0
+    )
+    {
+        return false;
+    }
+
+    if(
+        !server.hasArg(snapshotName) ||
+        server.arg(snapshotName).length() == 0
+    )
+    {
+        return true;
+    }
+
+    return requested != server.arg(snapshotName).toInt();
 }
 
 
@@ -1165,5 +2960,25 @@ float WebConfigurator::getFloatArg(
         return fallback;
     }
 
-    return server.arg(name).toFloat();
+    String raw =
+        server.arg(name);
+
+    if(raw.length() == 0)
+    {
+        return fallback;
+    }
+
+    const char* text = raw.c_str();
+    char* end = nullptr;
+
+    double value =
+        strtod(text, &end);
+
+    // strtod accepts "nan" and "inf"; neither may reach the controller.
+    if(end == text || !isfinite(value))
+    {
+        return fallback;
+    }
+
+    return (float)value;
 }

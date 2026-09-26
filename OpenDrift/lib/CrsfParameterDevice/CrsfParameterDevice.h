@@ -29,7 +29,7 @@ public:
 private:
 
     static constexpr uint8_t DEVICE_ADDRESS = 0xC8;
-    static constexpr uint8_t PARAMETER_COUNT = 34;
+    static constexpr uint8_t PARAMETER_COUNT = 37;
 
     static constexpr uint8_t TYPE_PARAMETER_PING = 0x28;
     static constexpr uint8_t TYPE_DEVICE_INFO = 0x29;
@@ -88,7 +88,8 @@ private:
         uint8_t parameter
     );
 
-    void setScaledValue(
+    // Returns false when the write changed nothing (read-only or refused).
+    bool setScaledValue(
         uint8_t parameter,
         int32_t value
     );

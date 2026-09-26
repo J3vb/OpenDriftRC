@@ -50,7 +50,7 @@ Both `waveshare_128_crsf` and `waveshare_amoled_164_crsf` enable the complete
 full-duplex path. They remain separate from the normal PWM environments because
 the GPIO routing and settings namespace differ.
 
-AMOLED V2 CRSF uses GPIO 1 RX, GPIO 2 TX, GPIO 15 steering-servo output, and GPIO 16 ESC output. Its targets are `waveshare_amoled_164_v2` and `waveshare_amoled_164_v2_crsf`.
+AMOLED V2 CRSF uses GPIO 1 RX, GPIO 2 TX, GPIO 15 steering-servo output, and GPIO 16 ESC output. Its target is `waveshare_amoled_164_v2_crsf`.
 
 CRSF channel mapping is channel 1 steering, channel 2 throttle, and channel 3
 gain. A stale channel frame centers steering and commands neutral throttle.

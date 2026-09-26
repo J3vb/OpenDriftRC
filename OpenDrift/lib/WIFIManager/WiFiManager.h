@@ -35,6 +35,26 @@ public:
 
     bool hasClient();
 
+    // Called by the web server on each request, so a client that is still
+    // talking counts as present even when the station list under-reports.
+    void noteClientActivity();
+
+    // Stations currently associated with the access point: the larger of
+    // the driver's station list and the count kept from connect and
+    // disconnect events, because the list has been seen to report zero
+    // for a connected client.
+    uint8_t getClientCount();
+
+    // Count kept from the connect/disconnect events alone, for diagnostics.
+    uint8_t getEventClientCount();
+
+    // While held, the auto-off timer neither runs nor expires; it starts
+    // fresh when the hold is released. The UI holds it while the WiFi page
+    // is on screen, which is where someone goes to connect.
+    void holdAutoOff(
+        bool hold
+    );
+
     // Hostname without suffix, e.g. "opendrift".
     const char* getHostname();
 
@@ -86,5 +106,27 @@ private:
     unsigned long timeout =
         40000;
 
+    // A station that connects, gets its address or drops off holds the
+    // auto-off timer for this long, so a slow handshake or a laptop that
+    // briefly reconnects cannot be cut off halfway.
+    static constexpr unsigned long STATION_GRACE_MS = 30000;
+    static constexpr unsigned long STATION_RESYNC_MS = 60000;
 
+    volatile unsigned long lastStationEventMs = 0;
+    unsigned long lastClientActivityMs = 0;
+
+    volatile int8_t eventStationCount = 0;
+
+    // The WiFi event task counts stations while the loop task resets the
+    // count, so both sides take this lock around it.
+    portMUX_TYPE stationMux = portMUX_INITIALIZER_UNLOCKED;
+
+    bool autoOffHold = false;
+
+    static WiFiManager* eventTarget;
+
+    static void onWifiEvent(
+        arduino_event_id_t event,
+        arduino_event_info_t info
+    );
 };

@@ -15,14 +15,14 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
 ## Current Features
 
 - ESP32-S3 firmware using PlatformIO and Arduino.
-- 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages.
+- 280 x 456 AMOLED touch UI with a static RGB565 background and swipeable pages, and a 180 degree screen flip for an upside-down board.
 - Dedicated 250 Hz or 333 Hz IMU/control/steering task isolated from UI, WiFi, and logging work.
 - Continuous yaw-acceleration prediction with throttle-informed look-ahead.
 - Quiet-drift reference feedback that yields to driver steering and throttle changes.
 - Receiver steering input.
 - Optional receiver throttle sensing with automatic Performance Mode behavior.
 - Receiver gyro gain input.
-- Selectable GPIO 18 gyro-gain input or throttle passthrough output.
+- Selectable GPIO 18 (GPIO 2 on AMOLED V2) gyro-gain input or throttle passthrough output.
 - Servo output with center, reverse, and travel settings.
 - Servo quiet band for direct-drive steering buzz.
 - Physical servo endpoint calibration for max left, center, and max right.
@@ -53,6 +53,8 @@ Visit [opendriftrc.com](https://opendriftrc.com) for the project overview, [wiri
   telemetry, neutral failsafes, and [EdgeTX tuning](https://github.com/doublej380-pixel/OpenDriftRC/releases/download/v1.0.8/OpenDrift.lua).
 - CRSF channel routing to accessory PWM outputs: GPIO 1–8 on AMOLED V1 and
   GPIO 3–8 on AMOLED V2.
+- Custom AMOLED backgrounds: upload any image from the web configurator, keep
+  up to 16 on the board, and pick one on the display or the web.
 
 ## Hardware Routing
 
@@ -90,7 +92,7 @@ CRSF targets repurpose the receiver pins:
 | Steering servo / servo port | 15 | Output | Selectable 250/333 Hz servo PWM |
 | ESC throttle / throttle port | 16 | Output | Standard 50 Hz ESC PWM with active-neutral failsafe |
 
-AMOLED V2 instead uses GPIO 1 for CRSF RX and GPIO 2 for CRSF TX while retaining GPIO 15 steering-servo output and GPIO 16 ESC output. All CRSF targets use the same full-duplex implementation and the
+AMOLED V2 instead takes the receiver TX on GPIO 1 and drives the receiver RX from GPIO 2, while retaining GPIO 15 steering-servo output and GPIO 16 ESC output. All CRSF targets use the same full-duplex implementation and the
 separate `OpenDriftCRSF` settings namespace and do not overwrite a PWM tune.
 
 CRSF builds can also mirror any receiver channel to accessory outputs from the
@@ -137,6 +139,10 @@ The frozen round-board environment remains available for local experimentation:
 pio run -e waveshare_128
 ```
 
+The round images are within a few kilobytes of the stock 1.3 MB app slot.
+Every environment uses the project's `partitions.csv` (6 MB app), so flash with
+PlatformIO or the same partition table; a default table cannot hold them.
+
 CRSF builds are intentionally separate:
 
 ```sh
@@ -170,13 +176,30 @@ Keep the car still during startup so gyro calibration can capture a clean yaw-ra
 
 ## Onboard UI Pages
 
-Swipe left/right to move between pages.
+Swipe left/right to move between pages. The order on screen is:
+
+1. `Drive`
+2. `Core`
+3. `Response`
+4. `Assistance`
+5. `Transition`
+6. `Profiles`
+7. `Radio`
+8. `Steering`
+9. `Endpoints`
+10. `WiFi`
+11. `System`
+12. `Display` (AMOLED only)
+13. `Backgrounds` (AMOLED only)
+
+One of the headings below does not match the on-screen title: **Main**
+documents the `Drive` page.
 
 ### Main
 
 Shows the current gyro gain and provides:
 
-- `- / +`: adjust stored gain when radio gain input is not overriding it.
+- `- / +`: adjust the saved gain. A gain channel still overrides the gain that is running; the page shows `SAVED x.xx` under the live value while it does.
 - `CAL`: recalibrate gyro offset. Use this when the car is sitting still and the gyro seems biased.
 
 ### Core
@@ -193,10 +216,11 @@ Use `GYRO REV` when normal steering direction is correct, but the gyro counter-s
 
 Fast controller behavior:
 
-- `SMOOTHING`: the software yaw low-pass; `0.00` bypasses it completely.
-- `GYRO LPF`: QMI8658 hardware filtering at `24 Hz`, lower-latency `120 Hz`, or `Off` for controlled testing.
-- `PREDICTION`: continuous yaw-acceleration look-ahead.
+- `SMOOTH`: the software yaw low-pass; `0.00` bypasses it completely.
+- `PREDICT`: continuous yaw-acceleration look-ahead.
 - `SERVO QUIET`: suppresses very small physical servo-command changes.
+
+The gyro sensor LPF (`24 Hz`, lower-latency `120 Hz`, or `Off` for controlled testing) is not on this page. Set it in the web configurator or the EdgeTX tool.
 
 ### Assistance
 
@@ -208,9 +232,9 @@ Slow quiet-drift behavior:
 
 The Drift Memory limit remains available in the web configurator as an advanced limit.
 
-### Tail Response
+### Transition
 
-`TAIL SPEED` is tuned separately from the core v1.0 controls:
+`TRANS SPEED` is tuned separately from the core v1.0 controls:
 
 - `50` is the Open Beta baseline response.
 - Below `50` adds damping during deliberate entries and transitions.
@@ -218,6 +242,14 @@ The Drift Memory limit remains available in the web configurator as an advanced 
 - The effect is reduced in a settled drift and cannot reverse gyro correction.
 
 Keep it at `50` unless deliberately collecting same-car experimental A/B data.
+
+`ANTI WOBBLE` on the same page sets the depth of the wheel-wobble notch, `0`
+to `100`; `0` bypasses it and `50` is the track-tested default.
+
+`PCA` (steering gain reduction) on the AMOLED Transition page removes that
+share of the gyro's direct correction at full stick lock, tapering to nothing at
+center. `0` is off. The round display has no free row for it; set it from the
+web page, or the EdgeTX tool on a CRSF build.
 
 `SMOOTH` is intentionally inverted from raw filter math: higher numbers mean more smoothing and slower gyro response.
 
@@ -272,8 +304,28 @@ channel 3 gain decoded from the digital link.
 Steering output setup:
 
 - `TRV`: scales driver steering input without reducing gyro correction authority.
+- `SPEED`: servo speed limit, `1` to `100`. `100` is no limit; lower values slow
+  how fast the steering output may move, driver input and gyro correction
+  together, like the servo speed setting on commercial drift gyros. The centre
+  on signal loss is never slowed. AMOLED only; the round build sets it from the
+  web page, or the EdgeTX tool on a CRSF build.
 - `REV`: reverses physical servo direction.
 - Swipe once more to open the dedicated **Physical Endpoints** page.
+
+Servo center and travel are locked while a physical endpoint calibration is
+active, because the saved endpoints already describe the servo. Servo reverse
+keeps working: it swaps the captured left and right stops, so the wheels turn
+the other way and the calibration stays.
+Center and travel are edited in the web configurator, which reports a refused
+change on the page. Reset the calibration first: tap a saved row on the
+**Physical Endpoints** page, or use `Reset calibration` in the web configurator
+or the EdgeTX tool.
+
+The web page's max left / center / max right fields are an alternative to
+capturing. A hand-typed set is applied as one set, becomes the steering
+calibration, and the page says so. An invalid set - left and right must sit on
+opposite sides of center and at least 10 us away from it - is refused and the
+stored endpoints are left unchanged.
 
 ### Physical Servo Endpoints
 
@@ -284,14 +336,20 @@ and turns green after it has captured the servo's actual physical PWM position:
 - `CENTER`: capture the transmitter at neutral.
 - `MAX RIGHT`: position the wheels at their safe physical right stop, then capture it.
 
+Leave Radio Steering Travel at 100 while capturing. The capture stores the
+servo pulse the wheels actually reached, so with a reduced travel the captured
+stop is only reached at 100 % afterwards.
+
 OpenDrift saves the calibration after all three physical positions are captured
 on opposite sides of center. The saved endpoints become the final asymmetric
 servo map and hard clamp, so neither the driver nor gyro can push through them.
 
-CRSF users can perform the same three captures from the EdgeTX `OpenDrift.lua`
-tool. Calibration state is persistent and shared: completing it on the radio
-turns the AMOLED buttons green, while completing it on the display updates the
-radio's `Endpoints` status to `YES`.
+The web configurator's Physical Servo Endpoints card has the same three capture
+buttons and a reset, next to the live servo pulse. CRSF users can perform the
+same three captures from the EdgeTX `OpenDrift.lua` tool. Calibration state is
+persistent and shared: completing it in any of the three places updates the
+other two, so the AMOLED buttons turn green and the radio's `Endpoints` status
+reads `YES` whichever one you used.
 
 Suggested calibration flow:
 
@@ -301,13 +359,15 @@ Suggested calibration flow:
 4. Confirm all three buttons are green and the page says `SAVED - TAP TO RESET`.
 5. Return to Steering and verify the wheels remain inside both saved physical stops.
 
-Changing `REV`, Servo Center, or Servo Travel after calibration deliberately
-clears the saved calibration because those changes alter the physical output map.
+Servo Center and Servo Travel are refused while a calibration is active, and
+`REV` swaps the captured stops, so none of them clears the saved calibration.
+Reset it from the **Physical Endpoints** page, the web configurator, or the
+EdgeTX tool when the servo geometry changes.
 
 Servo reverse and gyro reverse are separate on purpose:
 
 - Use `REV` on the Steering page when driver steering moves the wheels backward.
-- Use `GYRO REV` on the Gyro page when driver steering is correct but gyro correction is backward.
+- Use `GYRO REV` on the Core page when driver steering is correct but gyro correction is backward.
 
 Physical endpoint calibration and steering travel are separate on purpose:
 
@@ -317,9 +377,11 @@ Physical endpoint calibration and steering travel are separate on purpose:
 
 ### WiFi
 
-Shows WiFi state, the active network name, and connected client count.
+Shows WiFi state, the active network name, and connected client count. The count and state refresh live while the page is open, and auto-off never fires while this page is on screen.
 
 - `WIFI ON/OFF`: toggles the access point.
+
+The auto-off timeout counts only while nobody is connected. A connected device pauses it, and a device that is connecting, getting its address, or reconnecting after a brief drop holds it for another 30 seconds, so a slow laptop handshake cannot switch the network off halfway. Set the timeout to 0 in the web configurator to keep WiFi on permanently.
 
 When WiFi is enabled, connect to the board's network (`OpenDrift` by default; rename it in the web configurator) and open:
 
@@ -329,13 +391,33 @@ If your device cannot resolve the name, the address `http://192.168.4.1/` always
 
 ### System
 
-Basic firmware/system information. Tap the GPIO 18 mode button to switch between `GAIN INPUT` and `THROTTLE OUT`.
+Basic firmware/system information. On PWM builds, tap the GPIO 18 (GPIO 2 on AMOLED V2) mode button to switch between `GAIN INPUT` and `THROTTLE OUT`. CRSF builds have no such choice, so that row is a plain label showing the fixed CRSF UART pins.
+
+The `THEME` row has two buttons. The left one cycles the accent colour used for every page header and the adjustment buttons: Mixed (the original colour per page), Cyan, Blue, Magenta, Amber, Green or White. Amber stays reserved for warnings such as a pending restart or a pending WiFi rename. The right one switches between light and dark text; dark text suits a light photo background. Controls and value rows sit on translucent panels that darken the background under them, or lighten it with dark text, so the display stays readable over any image. Both settings are saved and shared with the web configurator.
+
+### Display
+
+Everything about the panel itself.
+
+`SCREEN` flips the whole UI 180 degrees, for a board mounted upside down in the chassis. The rendered image and the touch input rotate together, so the buttons stay where you see them and a swipe still moves the pages in the direction your finger travels. The setting is saved and applied from the first frame after a restart.
+
+The flip is cosmetic only. A physically inverted board also inverts the gyro, and that has its own `GYRO REV` setting on the Core page - do not change both for the same problem. The web configurator's Display card has the same flip checkbox.
+
+The `BRIGHTNESS` `- / +` buttons set the AMOLED brightness in steps of 10% between 10% and 100%. The value is saved and shared with the web configurator's Display card.
+
+`DIM AFTER` sets the idle dim timeout, stepping through `OFF`, 5, 10, 15, 30, 60, 120, 300 and 600 seconds. After that many seconds without a touch the AMOLED drops to a tenth of its brightness; the next touch only wakes it and does not press anything. It is off by default, and the web configurator's Display card can set any value from 0 to 600.
+
+### Backgrounds
+
+Lists the built-in background and every image uploaded from the web configurator, four rows at a time. Tap a row to use that background; swipe vertically to scroll a longer list. Uploading and deleting happen in the web configurator.
 
 ### Profiles
 
 The Profiles page lists the driving profiles created in the web configurator. Tap a profile to activate its complete driving tune. Swipe vertically when more than four profiles exist; the list supports up to 12 profiles.
 
-Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, and radio steering travel. Trackside adjustments automatically save back to the active profile.
+Profiles save gain, deadband, max correction, smoothing, Prediction, Countersteer Assist, Hold Assist, Drift Memory and its limit, Transition Speed, Anti Wobble, steering gain reduction, and radio steering travel. Trackside adjustments automatically save back to the active profile.
+
+The web configurator's Driving Profiles card can export every profile to one JSON file and import profiles from such a file, or from a full settings export. Your browser reads the file and sends the values to the board, which clamps them to the same ranges as the settings form. A profile whose name already exists is replaced. If that profile is the active one it is deactivated first, because the active profile continuously saves the live tune and would overwrite the import; tap it afterwards to load the imported values. The list holds 12 profiles.
 
 Hardware and installation settings remain global, including gyro/servo direction, physical steering endpoints, servo center and travel, WiFi, logging, and GPIO mode. Switching surfaces therefore cannot disturb the car's physical setup.
 
@@ -343,7 +425,7 @@ Hardware and installation settings remain global, including gyro/servo direction
 
 OpenDrift defaults to **250 Hz** for broad digital-servo compatibility. **333 Hz** reduces the output interval from 4 ms to about 3 ms and can sharpen a fast supported servo, but it must only be used when the servo manufacturer explicitly rates the servo for 333 Hz operation. An unsupported update rate can cause heat, buzzing, erratic steering, or servo damage.
 
-The setting is global and appears on the AMOLED System page, in the web configurator, and in the CRSF/EdgeTX parameter list. Restart OpenDrift after changing it so both the control task and steering PWM start at the selected rate.
+The setting is global and appears on the AMOLED System page, in the web configurator, and in the CRSF/EdgeTX parameter list. Restart OpenDrift after changing it so both the control task and steering PWM start at the selected rate. The web configurator has a Restart button for this.
 
 ## Web Configurator
 
@@ -353,37 +435,62 @@ When WiFi is enabled, OpenDrift starts a web configurator at:
 
 If your device cannot resolve the name, the address `http://192.168.4.1/` always works.
 
+The page is split into five tabs - Tune, Servo, Radio, Profiles and Board -
+with a sticky bar at the top that carries the Save button and an
+unsaved-changes indicator, so one value can be saved without scrolling the
+whole page.
+
 Current web settings:
 
 - Create named driving profiles from the current tune
 - Activate or delete existing profiles
+- Export all driving profiles to a JSON file, and import profiles from a profiles or settings export
 - Gyro gain
 - Channel 3 gain minimum / maximum (`0.00-6.00`)
 - Deadband
 - Reverse gyro correction
 - Max correction
 - Smoothing
+- Gyro sensor LPF (24 Hz / 120 Hz / Off)
 - Prediction strength
 - Transition Speed
 - Anti Wobble
+- Steering gain reduction (PCA)
 - Drift memory
 - Memory limit
 - Hold Assist
+- Countersteer assist
 - Servo reverse
 - Servo center
 - Servo travel
+- Servo speed limit
 - Servo quiet band
-- Steering max left / center / max right
+- Steering max left / center / max right; Save only writes a value you edited on that page
+- Capture left / center / right and reset for the physical servo endpoints, with the live servo pulse; capture refuses while a calibration is active, reset it first
 - Radio steering travel
 - Gain channel low / high
-- GPIO 18 gain-input or throttle-output mode
+- GPIO 18 (GPIO 2 on AMOLED V2) gain-input or throttle-output mode
 - WiFi enabled on boot
-- WiFi network name (SSID), applied the next time WiFi starts
+- WiFi network name (SSID), applied the next time WiFi starts: toggle `WIFI OFF` / `WIFI ON` on the display, or restart
 - WiFi auto-off timeout
+- Display brightness (AMOLED, 10-100%)
+- Screen flip for an upside-down board (AMOLED)
+- Idle dim timeout (AMOLED, seconds, 0 = never)
+- Text colour and accent colour theme (AMOLED)
+- Backgrounds (AMOLED): upload an image, pick the active one, delete stored ones
+- Export of every setting, the endpoint calibration and all profiles as one JSON backup file
 - Blackbox logging enabled
 - Raw pitch, roll, acceleration, and surface-disturbance telemetry for chassis analysis
 
-The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 mode.
+The web page also shows the active profile, live receiver pulse values for steering, throttle, and gain, plus the active GPIO 18 (GPIO 2 on AMOLED V2) mode.
+
+The **System** card at the bottom has a **Restart OpenDrift** button. Use it after changing the control rate, which only applies after a restart, or the WiFi network name, which also applies when WiFi is switched off and on again from the display. The same button appears next to those two settings, and the WiFi card shows a notice while a rename is still waiting for one. Steering is uncontrolled for a few seconds while the board boots, and the RAM blackbox log is lost.
+
+The **Backgrounds** card takes any JPG or PNG. Your browser scales and crops it to the panel's 456 x 280 pixels and converts it to the panel's pixel format before uploading, so the board never decodes an image and each background costs 250 KB of the otherwise unused 10 MB `ffat` flash partition. Give each image a name of letters, digits, `-` or `_`; the list holds 16, and uploading a name that already exists replaces that image. The firmware formats the partition once, on the first boot after this update, which adds a few seconds before the control task starts. Uploading and deleting write flash, so do it at the bench rather than while driving.
+
+**Export settings (JSON)**, linked under the Save button and in the System card, downloads every setting, the endpoint calibration and all profiles as one file named after the firmware version. Keep it as a backup or to share a tune. The Driving Profiles card imports the profiles out of such a file, as described under **Profiles** above; the remaining keys match the form field names, so those values can be typed back in.
+
+The same card has a **Factory reset** button behind a confirmation. It erases everything this firmware has stored on the board (tune, profiles, physical endpoint calibration, servo setup, GPIO and aux mappings, WiFi name and options, logging settings, and every uploaded background) and restarts with defaults and the WiFi name `OpenDrift`. PWM and CRSF firmware keep separate settings stores, so resetting one does not touch the other's tune. Note your tune before using it.
 
 Use the web configurator when you want to make several changes quickly. Use the onboard UI when tuning trackside without a phone or laptop.
 
@@ -508,6 +615,7 @@ Important folders:
 - `OpenDrift/lib/UI`: onboard touch UI.
 - `OpenDrift/lib/WebConfigurator`: web settings page.
 - `OpenDrift/lib/WIFIManager`: WiFi access point control.
+- `OpenDrift/lib/Backgrounds`: FFat storage for uploaded AMOLED backgrounds.
 - `OpenDrift/docs/Tuning.md`: complete tuning and blackbox interpretation guide.
 - `OpenDrift/docs/CRSF-Experimental.md`: CRSF wiring, failsafes, and validation
   workflow.

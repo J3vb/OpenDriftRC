@@ -7,8 +7,8 @@ namespace
 {
     const CrsfParameterDevice::FloatDefinition FLOAT_PARAMETERS[] =
     {
-        {"Active Gain",       0,  600, 150, 2,   5, "x"},
-        {"Deadband",          0,  200,  20, 1,   1, "dps"},
+        {"Saved Gain",        0,  600, 150, 2,   5, "x"},
+        {"Deadband",          0, 1000,  20, 1,   1, "dps"},
         {"Max Correction",    0,  100,  25, 0,   1, "%"},
         {"Smoothing",         0,  100,  10, 2,   1, ""},
         {"Drift Memory",      0, 2000,   0, 2,   1, ""},
@@ -19,7 +19,7 @@ namespace
         {"Prediction",        0,  100,   0, 0,   1, "%"},
         {"Servo Quiet",       0,   50,   0, 0,   1, "us"},
         {"Steering Travel",   0,  100, 100, 0,   1, "%"},
-        {"Servo Travel",     10,  150, 100, 0,   1, "%"},
+        {"Servo Travel",      1,  100, 100, 0,   1, "%"},
         {"Servo Center",   1000, 2000,1500, 0,   1, "us"}
     };
 
@@ -31,6 +31,15 @@ namespace
 
     const CrsfParameterDevice::FloatDefinition CHANNEL_3_GAIN_MAX_PARAMETER =
         {"CH3 Gain Max", 0, 600, 300, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition LIVE_GAIN_PARAMETER =
+        {"Live Gain", 0, 600, 150, 2, 5, "x"};
+
+    const CrsfParameterDevice::FloatDefinition STEERING_GAIN_REDUCTION_PARAMETER =
+        {"PCA", 0, 100, 0, 0, 1, "%"};
+
+    const CrsfParameterDevice::FloatDefinition SERVO_SPEED_PARAMETER =
+        {"Servo Speed", 1, 100, 100, 0, 1, "%"};
 }
 
 
@@ -184,6 +193,9 @@ void CrsfParameterDevice::sendParameter(
         appendByte(payload, length, 32);
         appendByte(payload, length, 33);
         appendByte(payload, length, 34);
+        appendByte(payload, length, 35);
+        appendByte(payload, length, 36);
+        appendByte(payload, length, 37);
 
         appendByte(payload, length, 0xFF);
     }
@@ -191,7 +203,10 @@ void CrsfParameterDevice::sendParameter(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 35 ||
+        parameter == 36 ||
+        parameter == 37
     )
     {
         const FloatDefinition* definition =
@@ -336,10 +351,13 @@ void CrsfParameterDevice::writeParameter(
 
     if(
         (
-            parameter >= 1 && parameter <= 14
+            (parameter >= 1 && parameter <= 14)
             || parameter == 26
             || parameter == 33
             || parameter == 34
+            || parameter == 35
+            || parameter == 36
+            || parameter == 37
         ) &&
         length >= 4
     )
@@ -369,8 +387,13 @@ void CrsfParameterDevice::writeParameter(
         return;
     }
 
-    setScaledValue(parameter, value);
-    settingsChanged = true;
+    // Parameter 35 is a read-only mirror of the running gain, and servo
+    // center/travel are refused while endpoints are calibrated. Neither
+    // changed anything, so neither marks the settings as changed.
+    if(setScaledValue(parameter, value) && parameter != 35)
+    {
+        settingsChanged = true;
+    }
 
     uint8_t response[5] = {parameter, 0, 0, 0, 0};
 
@@ -404,14 +427,9 @@ int32_t CrsfParameterDevice::getScaledValue(
 {
     switch(parameter)
     {
-        // Channel 3 is authoritative while it has a valid signal. Report the
-        // controller's live value so EdgeTX never shows the saved fallback
-        // while the car is actually running a different gain.
-        case 1:
-            return lroundf(
-                (gyro != nullptr ? gyro->getGain() : settings->getGain())
-                * 100.0f
-            );
+        // The saved fallback gain, which is what this parameter writes.
+        // Parameter 35 reports the gain the controller is actually running.
+        case 1: return lroundf(settings->getGain() * 100.0f);
         case 2: return lroundf(settings->getDeadband() * 10.0f);
         case 3: return settings->getGyroMaxCorrection();
         case 4: return lroundf(settings->getGyroSmoothing() * 100.0f);
@@ -456,12 +474,19 @@ int32_t CrsfParameterDevice::getScaledValue(
         case 32: return settings->getGyroLpfMode();
         case 33: return lroundf(settings->getChannel3GainMin() * 100.0f);
         case 34: return lroundf(settings->getChannel3GainMax() * 100.0f);
+        case 35:
+            return lroundf(
+                (gyro != nullptr ? gyro->getGain() : settings->getGain())
+                * 100.0f
+            );
+        case 36: return settings->getSteeringGainReduction();
+        case 37: return settings->getServoSpeed();
         default: return 0;
     }
 }
 
 
-void CrsfParameterDevice::setScaledValue(
+bool CrsfParameterDevice::setScaledValue(
     uint8_t parameter,
     int32_t value
 )
@@ -470,7 +495,9 @@ void CrsfParameterDevice::setScaledValue(
         (parameter >= 1 && parameter <= 14) ||
         parameter == 26 ||
         parameter == 33 ||
-        parameter == 34
+        parameter == 34 ||
+        parameter == 36 ||
+        parameter == 37
     )
     {
         const FloatDefinition* definition =
@@ -497,8 +524,8 @@ void CrsfParameterDevice::setScaledValue(
         case 10: settings->setPredictionStrength(value); break;
         case 11: settings->setServoQuiet(value); break;
         case 12: settings->setRadioSteeringTravel(value); break;
-        case 13: settings->setServoTravel(value); break;
-        case 14: settings->setServoCenter(value); break;
+        case 13: return settings->setServoTravel(value);
+        case 14: return settings->setServoCenter(value);
         case 15: settings->setServoReverse(value != 0); break;
         case 16: settings->setGyroReverse(value != 0); break;
         #if defined(OPENDRIFT_BOARD_AMOLED_164)
@@ -546,8 +573,11 @@ void CrsfParameterDevice::setScaledValue(
         case 28:
         case 29:
         case 30:
+            // Same gate as the web page: a capture while calibrated would
+            // only read the mapped stop back and drop the calibration.
             if(
                 value == 1 &&
+                !settings->isSteeringCalibrated() &&
                 steeringRadio != nullptr &&
                 steeringRadio->hasSignal() &&
                 steeringServo != nullptr
@@ -555,7 +585,7 @@ void CrsfParameterDevice::setScaledValue(
             {
                 settings->captureSteeringCalibrationPoint(
                     parameter - 28,
-                    steeringServo->getPosition(),
+                    steeringServo->getCommandPosition(),
                     steeringRadio->getPulseWidth()
                 );
             }
@@ -577,7 +607,25 @@ void CrsfParameterDevice::setScaledValue(
         case 34:
             settings->setChannel3GainMax(value / 100.0f);
             break;
+        case 35:
+            // Read-only. It mirrors the gain the controller is running,
+            // which channel 3 owns whenever it has a valid signal.
+            return false;
+        case 36:
+            settings->setSteeringGainReduction(value);
+            if(gyro != nullptr)
+            {
+                gyro->setSteeringGainReduction(
+                    settings->getSteeringGainReduction()
+                );
+            }
+            break;
+        case 37:
+            settings->setServoSpeed(value);
+            break;
     }
+
+    return true;
 }
 
 
@@ -599,6 +647,21 @@ CrsfParameterDevice::getFloatDefinition(
     if(parameter == 34)
     {
         return &CHANNEL_3_GAIN_MAX_PARAMETER;
+    }
+
+    if(parameter == 35)
+    {
+        return &LIVE_GAIN_PARAMETER;
+    }
+
+    if(parameter == 36)
+    {
+        return &STEERING_GAIN_REDUCTION_PARAMETER;
+    }
+
+    if(parameter == 37)
+    {
+        return &SERVO_SPEED_PARAMETER;
     }
 
     return &FLOAT_PARAMETERS[parameter - 1];

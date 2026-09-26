@@ -24,6 +24,10 @@ public:
         bool signalValid
     );
 
+    // Writes the 1500 us failsafe to every attached output. Safe to call
+    // from the control task: it only writes already-attached channels.
+    void writeFailsafe();
+
     static bool isPinAvailable(
         uint8_t gpio
     );

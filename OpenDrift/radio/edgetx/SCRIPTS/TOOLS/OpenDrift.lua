@@ -4,10 +4,11 @@ local DEVICE = 0xC8
 local RADIO = 0xEA
 
 local fields = {
-  { 1, "Active Gain",      0,  600,   5, 2 },
+  { 1, "Saved Gain",       0,  600,   5, 2 },
+  {35, "Live Gain",        0,  600,   5, 2, false, false, false, true},
   {33, "CH3 Gain Min",     0,  600,   5, 2 },
   {34, "CH3 Gain Max",     0,  600,   5, 2 },
-  { 2, "Deadband",         0,  200,   1, 1 },
+  { 2, "Deadband",         0, 1000,   1, 1 },
   { 3, "Max Corr %",       0,  100,   1, 0 },
   { 4, "Smoothing",        0,  100,   1, 2 },
   {32, "Gyro LPF",         0,    2,   1, 0, true, false, false, false, false, true},
@@ -18,14 +19,16 @@ local fields = {
   { 9, "Transition Speed", 0,  100,   1, 0 },
   {10, "Prediction",       0,  100,   1, 0 },
   {26, "Anti Wobble",      0,  100,   1, 0 },
+  {36, "PCA",              0,  100,   1, 0 },
   {11, "Servo Quiet",      0,   50,   1, 0 },
+  {37, "Servo Speed",      1,  100,   1, 0 },
   {12, "Steering Travel",  0,  100,   1, 0 },
   {27, "Endpoints",        0,    2,   1, 0, true, false, false, true, false},
   {28, "Capture Left",     0,    1,   1, 0, true, false, false, false, true},
   {29, "Capture Center",   0,    1,   1, 0, true, false, false, false, true},
   {30, "Capture Right",    0,    1,   1, 0, true, false, false, false, true},
   {31, "Reset Cal",        0,    1,   1, 0, true, false, false, false, true},
-  {13, "Servo Travel",    10,  150,   1, 0 },
+  {13, "Servo Travel",     1,  100,   1, 0 },
   {14, "Servo Center",  1000, 2000,   1, 0 },
   {15, "Servo Reverse",    0,    1,   1, 0, true},
   {16, "Gyro Reverse",     0,    1,   1, 0, true},
@@ -46,9 +49,22 @@ local editing = false
 local connected = false
 local lastRx = 0
 local nextRequest = 0
-local requestIndex = 2
+local requestIndex = 1
 local nextGainRequest = 0
 local nextCalibrationRequest = 0
+local pushFailed = 0
+-- EdgeTX sends one telemetry frame per mixer cycle, so a second push in
+-- the same run() call always fails. Polls that lose the slot wait for the
+-- next frame instead of lighting BUSY.
+local pushedThisFrame = false
+
+local function push(command, payload)
+  if not crossfireTelemetryPush or pushedThisFrame then return false end
+  pushedThisFrame = true
+  if crossfireTelemetryPush(command, payload) then return true end
+  pushFailed = getTime()
+  return false
+end
 
 local function readInt32(data, index)
   local value = data[index] * 16777216
@@ -69,18 +85,17 @@ local function int32Bytes(value)
 end
 
 local function requestField(field)
-  if crossfireTelemetryPush then
-    crossfireTelemetryPush(0x2C, {DEVICE, RADIO, field[1], 0})
-  end
+  if field == nil then return false end
+  return push(0x2C, {DEVICE, RADIO, field[1], 0})
 end
 
 local function writeField(field)
-  if not crossfireTelemetryPush or field.value == nil then return end
+  if field.value == nil then return end
   if field[7] then
-    crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], field.value})
+    push(0x2D, {DEVICE, RADIO, field[1], field.value})
   else
     local b1, b2, b3, b4 = int32Bytes(field.value)
-    crossfireTelemetryPush(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
+    push(0x2D, {DEVICE, RADIO, field[1], b1, b2, b3, b4})
   end
 end
 
@@ -100,17 +115,19 @@ local function consumeTelemetry()
     if command == 0x2B and #data >= 7 and data[1] == RADIO and data[2] == DEVICE then
       local field = findField(data[3])
       if field then
+        -- A reply that arrives mid-edit must not undo what is being dialled in.
+        local keepValue = editing and field == fields[selected]
         local dataType = data[6]
         local index = 7
         while index <= #data and data[index] ~= 0 do index = index + 1 end
         index = index + 1
 
         if dataType == 0x08 and index + 3 <= #data then
-          field.value = readInt32(data, index)
+          if not keepValue then field.value = readInt32(data, index) end
         elseif dataType == 0x09 then
           while index <= #data and data[index] ~= 0 do index = index + 1 end
           index = index + 1
-          if index <= #data then field.value = data[index] end
+          if index <= #data and not keepValue then field.value = data[index] end
           if index + 2 <= #data then
             field[3] = data[index + 1]
             field[4] = data[index + 2]
@@ -122,9 +139,10 @@ local function consumeTelemetry()
     elseif command == 0x2D and #data >= 4 and data[1] == RADIO and data[2] == DEVICE then
       local field = findField(data[3])
       if field then
+        local keepValue = editing and field == fields[selected]
         if field[7] then
-          field.value = data[4]
-        elseif #data >= 7 then
+          if not keepValue then field.value = data[4] end
+        elseif #data >= 7 and not keepValue then
           field.value = readInt32(data, 4)
         end
         connected = true
@@ -136,7 +154,7 @@ end
 
 local function valueText(field)
   if field.value == nil then return "---" end
-  if field[10] then
+  if field[10] and field[7] then
     if field.value == 2 then return "YES" end
     if field.value == 1 then return "PARTIAL" end
     return "NO"
@@ -176,50 +194,43 @@ end
 
 local function init()
   for i = 1, #fields do fields[i].value = nil end
-  requestIndex = 2
+  requestIndex = 1
   nextRequest = 0
   nextGainRequest = 0
   nextCalibrationRequest = 0
+  pushFailed = 0
 end
 
 local function run(event)
   consumeTelemetry()
+  pushedThisFrame = false
 
   local now = getTime()
   if now - lastRx > 200 then connected = false end
 
-  if now >= nextRequest then
-    requestField(fields[requestIndex])
-    requestIndex = requestIndex + 1
-    if requestIndex > #fields then requestIndex = 2 end
-    nextRequest = now + 15
-  end
-
-  -- Keep the displayed gain following channel 3 instead of waiting for a
-  -- complete parameter-list polling cycle.
-  if now >= nextGainRequest then
-    requestField(fields[1])
-    nextGainRequest = now + 25
-  end
-
-  -- Calibration can also be completed from the AMOLED page. Poll its shared
-  -- persisted status frequently so the radio follows screen-side captures.
-  if now >= nextCalibrationRequest then
-    requestField(findField(27))
-    nextCalibrationRequest = now + 25
-  end
-
+  -- Key handling comes first so a write or a re-read after an edit owns
+  -- this frame's telemetry slot; the periodic polls take the next one.
   local right = event == EVT_ROT_RIGHT or event == EVT_VIRTUAL_NEXT
   local left = event == EVT_ROT_LEFT or event == EVT_VIRTUAL_PREV
   local enter = event == EVT_ENTER_BREAK or event == EVT_VIRTUAL_ENTER
+  local back = (EVT_EXIT_BREAK ~= nil and event == EVT_EXIT_BREAK)
+            or (EVT_VIRTUAL_EXIT ~= nil and event == EVT_VIRTUAL_EXIT)
 
-  if enter then
+  if back then
+    if editing then
+      editing = false
+      requestField(fields[selected])
+    else
+      return 2
+    end
+  elseif enter then
     local field = fields[selected]
     if field[11] then
       field.value = 1
       writeField(field)
       field.value = 0
-      requestField(findField(27))
+      -- The status re-read goes out on the next frame.
+      nextCalibrationRequest = 0
     elseif not field[10] then
       editing = not editing
       if not editing then requestField(field) end
@@ -230,11 +241,33 @@ local function run(event)
     if editing then adjust(-1) else moveSelection(-1) end
   end
 
+  -- Calibration can also be completed from the AMOLED page. Poll its shared
+  -- persisted status frequently so the radio follows screen-side captures.
+  if now >= nextCalibrationRequest and requestField(findField(27)) then
+    nextCalibrationRequest = now + 25
+  end
+
+  -- Keep the displayed gain following channel 3 instead of waiting for a
+  -- complete parameter-list polling cycle.
+  if now >= nextGainRequest and requestField(findField(35)) then
+    nextGainRequest = now + 25
+  end
+
+  if now >= nextRequest and requestField(fields[requestIndex]) then
+    requestIndex = requestIndex + 1
+    if requestIndex > #fields then requestIndex = 1 end
+    nextRequest = now + 15
+  end
+
   lcd.clear()
   lcd.drawText(1, 0, "OpenDrift CRSF", INVERS)
-  lcd.drawText(127, 0, connected and "LINK" or "WAIT", RIGHT + INVERS)
+  local linkText = connected and "LINK" or "WAIT"
+  if pushFailed ~= 0 and now - pushFailed < 50 then linkText = "BUSY" end
+  lcd.drawText(127, 0, linkText, RIGHT + INVERS)
   if fields[selected][11] then
     lcd.drawText(1, 10, "HOLD POSITION + ENTER", 0)
+  elseif fields[selected][1] == 25 then
+    lcd.drawText(1, 10, "REBOOT TO APPLY", 0)
   else
     local calibration = findField(27)
     local calibrationText = "END: ---"

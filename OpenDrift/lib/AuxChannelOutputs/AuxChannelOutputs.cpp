@@ -8,23 +8,34 @@ namespace
     static constexpr uint32_t AUX_OUTPUT_HZ = 50;
     static constexpr uint16_t AUX_FAILSAFE_PULSE_US = 1500;
 
+    // ESP32Servo runs a fixed-frequency Servo on MCPWM when built for the
+    // S3 and takes unit 0, timer 0, operator A first, so that timer belongs
+    // to the steering servo.
+    // Unit 0 therefore starts at timer 1 and the last four slots move to
+    // unit 1: an auxiliary channel can never reprogram the steering timer to
+    // 50 Hz or drive its output low on detach.
     mcpwm_unit_t unitForSlot(uint8_t slot)
     {
-        return slot < 6
+        return slot < 4
             ? MCPWM_UNIT_0
             : MCPWM_UNIT_1;
     }
 
     uint8_t localSlot(uint8_t slot)
     {
-        return slot < 6
+        return slot < 4
             ? slot
-            : slot - 6;
+            : slot - 4;
     }
 
     mcpwm_timer_t timerForSlot(uint8_t slot)
     {
-        return (mcpwm_timer_t)(localSlot(slot) / 2);
+        uint8_t timer =
+            (localSlot(slot) / 2)
+            +
+            (slot < 4 ? 1 : 0);
+
+        return (mcpwm_timer_t)timer;
     }
 
     mcpwm_generator_t generatorForSlot(uint8_t slot)
@@ -36,7 +47,12 @@ namespace
 
     mcpwm_io_signals_t signalForSlot(uint8_t slot)
     {
-        return (mcpwm_io_signals_t)localSlot(slot);
+        uint8_t signal =
+            ((uint8_t)timerForSlot(slot) * 2)
+            +
+            (generatorForSlot(slot) == MCPWM_GEN_B ? 1 : 0);
+
+        return (mcpwm_io_signals_t)signal;
     }
 }
 
@@ -118,6 +134,20 @@ void AuxChannelOutputs::update(
                 (uint16_t)2012
             )
         );
+    }
+}
+
+
+void AuxChannelOutputs::writeFailsafe()
+{
+    // Called from the control task on link loss. The loop may be blocked
+    // in a long web transfer, so the failsafe cannot wait for it.
+    for(uint8_t slot = 0; slot < OUTPUT_COUNT; slot++)
+    {
+        if(attached[slot])
+        {
+            writeOutput(slot, AUX_FAILSAFE_PULSE_US);
+        }
     }
 }
 
