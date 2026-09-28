@@ -12,6 +12,9 @@ namespace
 
     static constexpr float TRANSITION_SECONDS = 0.18f;
     static constexpr float DIRECTION_MEMORY_SECONDS = 0.5f;
+    // Longer than the slowest 1/10-scale wheel-wobble half cycle (0.23 s),
+    // so a wobble around zero yaw is never mistaken for a drift reversal.
+    static constexpr float REVERSAL_MIN_HOLD_SECONDS = 0.25f;
     static constexpr float TRANSITION_SLEW_SLOW_SECONDS = 0.120f;
     static constexpr float TRANSITION_SLEW_FAST_SECONDS = 0.004f;
     static constexpr float TRANSITION_SLEW_RELEASE_SECONDS = 0.020f;
@@ -80,6 +83,7 @@ void GyroController::resetDynamicState()
     driftReferenceReady = false;
     driftDirection = 0;
     lastDefiniteDirection = 0;
+    definiteDirectionSeconds = 0.0f;
     quietSeconds = 0.0f;
     transitionTime = 0.0f;
 
@@ -661,10 +665,15 @@ float GyroController::update(
             0
         );
 
+    // The old direction must have been held for longer than a wobble half
+    // cycle. A wobble around zero flips direction every 0.1-0.2 s; counting
+    // each flip as a transition blocked Anti Wobble, cut prediction and
+    // engaged the transition slew while the car was wobbling.
     bool directionChanged =
         definiteDirection != 0 &&
         lastDefiniteDirection != 0 &&
-        definiteDirection != lastDefiniteDirection;
+        definiteDirection != lastDefiniteDirection &&
+        definiteDirectionSeconds >= REVERSAL_MIN_HOLD_SECONDS;
 
     if(directionChanged)
     {
@@ -675,6 +684,12 @@ float GyroController::update(
 
     if(definiteDirection != 0)
     {
+        if(definiteDirection != lastDefiniteDirection)
+        {
+            definiteDirectionSeconds = 0.0f;
+        }
+
+        definiteDirectionSeconds += dt;
         driftDirection = definiteDirection;
         lastDefiniteDirection = definiteDirection;
         quietSeconds = 0.0f;
