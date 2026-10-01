@@ -27,8 +27,14 @@ public:
     String getLocalName();
     void setTimeout(unsigned long timeoutMs);
 
+    // The broadcast network name. A unit still on the shared default name
+    // gets a per-board suffix so several cars at one track stay distinct.
+    const char* getSsid();
+    uint8_t getChannel();
+
 private:
     bool startAccessPoint();
+    uint8_t chooseChannel();
     bool restartDhcpServer();
     void restartAccessPoint();
     void updateClientCounts();
@@ -36,6 +42,8 @@ private:
     const char* wifiSSID = nullptr;
     const char* wifiPassword = nullptr;
     const char* wifiHostname = "opendrift";
+    char uniqueSsid[33] = {0};
+    uint8_t apChannel = 1;
 
     bool mdnsRunning = false;
     bool enabled = false;
@@ -48,8 +56,13 @@ private:
 
     unsigned long noClientSince = 0;
     bool clientWasPresent = false;
+    bool clientSeenSinceEnable = false;
     unsigned long timeout = 40000;
 
     static constexpr unsigned long HEALTH_CHECK_INTERVAL_MS = 250;
     static constexpr unsigned long DHCP_LEASE_TIMEOUT_MS = 6000;
+
+    // Until the first phone connects, auto-off waits at least this long so
+    // the network is still there when the driver picks up their phone.
+    static constexpr unsigned long FIRST_CONNECT_GRACE_MS = 180000;
 };

@@ -2070,12 +2070,14 @@ void setup()
         Serial.print("WiFi IP: ");
         Serial.println(IP);
 
-        char wifiMessage[48];
+        char wifiMessage[72];
 
         snprintf(
             wifiMessage,
             sizeof(wifiMessage),
-            "wlan0: AP OpenDrift ready at %s",
+            "wlan0: AP %s ch%u %s",
+            wifi.getSsid(),
+            wifi.getChannel(),
             IP.toString().c_str()
         );
 

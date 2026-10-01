@@ -343,13 +343,22 @@ Physical endpoint calibration and steering travel are separate on purpose:
 
 ### WiFi
 
-Shows WiFi state and connected client count.
+Shows the network name, WiFi state and connected client count.
 
 - `WIFI ON/OFF`: toggles the access point.
 
-When WiFi is enabled, connect to the `OpenDrift` network and open:
+When WiFi is enabled, connect to the network shown at the top of the page and
+open `http://192.168.4.1/`. The password is `opendrift`.
 
-`http://192.168.4.1/`
+- A unit on the default name broadcasts `OpenDrift-XXXX`. The last four
+  characters are unique to the board, so several cars at one track show up as
+  separate networks. A custom name from the web configurator is used as is.
+- At startup, OpenDrift picks the quietest of channels 1, 6 and 11. It uses a
+  narrow 20 MHz channel so 2.4 GHz RC links clash with it less often.
+- WiFi stays on for at least 3 minutes after power-on while waiting for the
+  first phone. After that, the auto-off timeout applies.
+- Phones may warn that the network has no internet. Choose to stay connected,
+  or turn off mobile data while configuring.
 
 ### System
 

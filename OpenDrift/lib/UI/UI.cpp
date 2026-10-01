@@ -3130,6 +3130,11 @@ void UI::drawWifiPage(
 
     lcd->setTextSize(1);
     lcd->setTextColor(0xBDF7);
+    lcd->drawString("NETWORK", 36, 84);
+    lcd->setTextColor(TFT_WHITE);
+    lcd->drawString(wifi.getSsid(), 112, 84);
+
+    lcd->setTextColor(0xBDF7);
     lcd->drawString("ADDRESS", 36, 104);
     lcd->setTextColor(TFT_WHITE);
     lcd->drawString(
@@ -3168,7 +3173,7 @@ void UI::drawWifiPage(
     #if defined(OPENDRIFT_BOARD_AMOLED_164)
     drawAmoledHeader(
         lcd,
-        "WiFi",
+        wifi.getSsid(),
         wifi.isEnabled() ? OD_GREEN : OD_RED
     );
 
