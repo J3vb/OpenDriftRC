@@ -1,4 +1,5 @@
 #include "WebConfigurator.h"
+#include <WiFi.h>
 
 #include <limits.h>
 #include <stdlib.h>
@@ -548,7 +549,9 @@ void WebConfigurator::handleRoot()
     html += checkbox("Enable WiFi on boot", "wifiEnabled", settings->getWifiEnabled());
     html += input("WiFi network name", "wifiSsid", String(settings->getWifiSsid()), "text", "1");
     html += input("Auto-off timeout ms", "wifiTimeout", String(settings->getWifiTimeout()));
-    html += F("<p class='sub'>Auto-off counts only while no device is connected. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
+    html += F("<p class='sub'>Leave the name as OpenDrift to broadcast a unique per-board name, currently <b>");
+    html += WiFi.softAPSSID();
+    html += F("</b>. Auto-off counts only while no device is connected. Until the first phone connects it waits at least 3 minutes. A connected phone pauses the timer; a disconnect starts a fresh timeout.</p>");
     html += F("</div>");
 
     html += F("<div class='card'><h2>Blackbox</h2>");

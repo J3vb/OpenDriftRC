@@ -1,5 +1,7 @@
 #include "WIFIManager.h"
 
+#include <limits.h>
+
 #include <esp_netif.h>
 #include <esp_netif_sta_list.h>
 #include <esp_wifi.h>
@@ -9,8 +11,13 @@ namespace
 const IPAddress AP_IP(192, 168, 4, 1);
 const IPAddress AP_GATEWAY(192, 168, 4, 1);
 const IPAddress AP_SUBNET(255, 255, 255, 0);
-constexpr uint8_t AP_CHANNEL = 1;
 constexpr uint8_t AP_MAX_CLIENTS = 4;
+constexpr const char* DEFAULT_SSID = "OpenDrift";
+
+// Non-overlapping 20 MHz channels. A short active scan of only these keeps
+// WiFi startup well under half a second.
+constexpr uint8_t CANDIDATE_CHANNELS[] = {1, 6, 11};
+constexpr uint32_t CHANNEL_SCAN_MS = 120;
 }
 
 void WiFiManager::begin(
@@ -24,6 +31,16 @@ void WiFiManager::begin(
     wifiPassword = password;
     wifiHostname = hostname;
 
+    const uint64_t mac = ESP.getEfuseMac();
+    snprintf(
+        uniqueSsid,
+        sizeof(uniqueSsid),
+        "%s-%02X%02X",
+        DEFAULT_SSID,
+        static_cast<unsigned>((mac >> 32) & 0xFF),
+        static_cast<unsigned>((mac >> 40) & 0xFF)
+    );
+
     // OpenDrift never uses saved station credentials. Keeping Wi-Fi state out
     // of flash also prevents stale SDK settings from affecting AP startup.
     WiFi.persistent(false);
@@ -32,6 +49,88 @@ void WiFiManager::begin(
     {
         enable();
     }
+}
+
+const char* WiFiManager::getSsid()
+{
+    if(wifiSSID == nullptr || strcmp(wifiSSID, DEFAULT_SSID) == 0)
+    {
+        return uniqueSsid;
+    }
+
+    return wifiSSID;
+}
+
+uint8_t WiFiManager::getChannel()
+{
+    return apChannel;
+}
+
+uint8_t WiFiManager::chooseChannel()
+{
+    const uint8_t fallback = CANDIDATE_CHANNELS[0];
+
+    if(!WiFi.mode(WIFI_STA))
+    {
+        return fallback;
+    }
+
+    uint8_t best = fallback;
+    long bestScore = LONG_MAX;
+    bool anyScan = false;
+
+    for(uint8_t candidate : CANDIDATE_CHANNELS)
+    {
+        int16_t found = WiFi.scanNetworks(
+            false,
+            true,
+            false,
+            CHANNEL_SCAN_MS,
+            candidate
+        );
+
+        if(found < 0)
+        {
+            continue;
+        }
+
+        anyScan = true;
+        long score = 0;
+
+        // Stronger and closer networks cost more. Anything within four
+        // channels shares spectrum with a 20 MHz network on the candidate.
+        for(int16_t i = 0; i < found; i++)
+        {
+            if(abs(static_cast<int>(WiFi.channel(i)) - candidate) > 4)
+            {
+                continue;
+            }
+
+            score += max(1, static_cast<int>(WiFi.RSSI(i)) + 100);
+        }
+
+        WiFi.scanDelete();
+
+        Serial.printf(
+            "WiFi channel %u: %d networks, score %ld\n",
+            candidate,
+            found,
+            score
+        );
+
+        if(score < bestScore)
+        {
+            bestScore = score;
+            best = candidate;
+        }
+    }
+
+    if(!anyScan)
+    {
+        Serial.println("WiFi channel scan failed; using channel 1");
+    }
+
+    return best;
 }
 
 bool WiFiManager::startAccessPoint()
@@ -54,15 +153,29 @@ bool WiFiManager::startAccessPoint()
     }
 
     if(!WiFi.softAP(
-        wifiSSID,
+        getSsid(),
         wifiPassword,
-        AP_CHANNEL,
+        apChannel,
         false,
         AP_MAX_CLIENTS
     ))
     {
         Serial.println("WiFi AP start failed");
         return false;
+    }
+
+    // 2.4 GHz RC links hop across the whole band. A 20 MHz channel is half
+    // the target of a 40 MHz one, so fewer hops land on the AP.
+    esp_err_t bandwidthResult = esp_wifi_set_bandwidth(
+        WIFI_IF_AP,
+        WIFI_BW_HT20
+    );
+    if(bandwidthResult != ESP_OK)
+    {
+        Serial.printf(
+            "WiFi 20 MHz bandwidth failed: %d\n",
+            static_cast<int>(bandwidthResult)
+        );
     }
 
     // softAP() normally starts DHCP. Verify it instead of assuming it did; a
@@ -91,8 +204,12 @@ bool WiFiManager::startAccessPoint()
         Serial.println("WiFi mDNS start failed; use 192.168.4.1");
     }
 
-    Serial.print("WiFi AP ready at ");
-    Serial.println(WiFi.softAPIP());
+    Serial.printf(
+        "WiFi AP \"%s\" ready at %s on channel %u\n",
+        getSsid(),
+        WiFi.softAPIP().toString().c_str(),
+        apChannel
+    );
     return true;
 }
 
@@ -114,6 +231,10 @@ void WiFiManager::enable()
     WiFi.mode(WIFI_OFF);
     delay(20);
 
+    // Picked once per enable. AP recovery keeps the same channel so a phone
+    // that is mid-connect finds the network where it left it.
+    apChannel = chooseChannel();
+
     if(!startAccessPoint())
     {
         WiFi.mode(WIFI_OFF);
@@ -128,6 +249,7 @@ void WiFiManager::enable()
     dhcpRecoveryAttempts = 0;
     noClientSince = millis();
     clientWasPresent = false;
+    clientSeenSinceEnable = false;
 
     Serial.println("WiFi Enabled");
 }
@@ -152,6 +274,7 @@ void WiFiManager::disable()
     dhcpRecoveryAttempts = 0;
     noClientSince = 0;
     clientWasPresent = false;
+    clientSeenSinceEnable = false;
 
     Serial.println("WiFi Disabled");
 }
@@ -291,6 +414,7 @@ void WiFiManager::update()
         }
 
         clientWasPresent = clientReady;
+        clientSeenSinceEnable = clientSeenSinceEnable || clientReady;
         noClientSince = 0;
         return;
     }
@@ -306,7 +430,12 @@ void WiFiManager::update()
         noClientSince = now;
     }
 
-    if(timeout > 0 && now - noClientSince > timeout)
+    const unsigned long offAfter =
+        clientSeenSinceEnable || timeout >= FIRST_CONNECT_GRACE_MS
+        ? timeout
+        : FIRST_CONNECT_GRACE_MS;
+
+    if(timeout > 0 && now - noClientSince > offAfter)
     {
         disable();
     }

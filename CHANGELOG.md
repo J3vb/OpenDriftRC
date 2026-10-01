@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### WiFi
+
+- Units on the default network name now broadcast `OpenDrift-XXXX`, with a
+  per-board suffix, so phones at a track with several cars no longer join the
+  wrong one or switch between them. Custom names are unchanged.
+- The access point scans channels 1, 6 and 11 when it starts and uses the
+  quietest one, instead of always using channel 1.
+- The access point is forced to a 20 MHz channel. That is half the spectrum
+  of 40 MHz, so 2.4 GHz RC links that hop across the band clash with it less
+  often.
+- WiFi now waits at least 3 minutes for the first phone after it starts.
+  Before, it turned off 40 s after power-on if nobody had connected yet.
+- The AMOLED WiFi page, round display, boot log and web configurator show the
+  network name actually being broadcast.
+
 ### Fixes
 
 - A wobble around zero yaw (straight line, drift entry or exit) no longer
